@@ -91,7 +91,7 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 #### 报告模板
 
 ```
-@所有人
+<at user_id="all">所有人</at>
 
 # code-tape 进展
 更新时间：{北京时间}
@@ -100,16 +100,12 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 近期里程碑：{最近检查点}（不显示日期，除非落后）
 {进度落后时在里程碑行后插入警告行，警告中需包含截止日期}
 
-## 全部任务
+## 每人当前任务
 
-### 已完成
-- ~~[#N](链接) {标题}~~ — {认领人}（{模块名称}）
+- {姓名}：[#N](链接) {标题}（{模块名称}）
+- {姓名}：暂无任务
 
-### 进行中
-- [#N](链接) {标题} — {认领人}（{模块名称}）
-
-### 可认领
-- [#N](链接) {标题}（{模块名称}）
+待认领：{未认领的任务列表，格式为 #N 标题，逗号分隔}
 
 ## 最近动态
 
@@ -120,7 +116,7 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 格式要求：
 - 不使用 emoji 图标
 - 各段落之间空一行分隔
-- 消息开头用 `@所有人` 全员提醒，与正文之间空一行
+- 消息开头用 `<at user_id="all">所有人</at>` 全员提醒（飞书 text 消息的 @mention 格式），与正文之间空一行
 - 时间转换为北京时间（+8），格式 `MM-DD HH:mm`
 - 分数只在非零时显示，总分为 0 时可省略该行或只显示姓名
 - 没有当前任务时显示"暂无"
@@ -128,9 +124,8 @@ gh issue list --limit 50 --state all --json number,title,state,assignees,labels
 - 未映射的 GitHub ID 原样保留
 - Issue/PR 编号使用 Markdown 超链接，格式为 `[#N](https://github.com/ceilf6/code-tape/issues/N)` 或 `[#N](https://github.com/ceilf6/code-tape/pull/N)`
 - 排除总控 Issue：没有 `score:*` label 的 Issue（如 #2 PRD 拆解总控、#3 竞品调研总控）属于元任务/跟踪 Issue，不出现在任务列表中
-- 当前任务：列出所有 Issue，按编号排序
-- 已完成 / 进行中 / 可认领 三个分组使用 h3 标题
-- 已完成的 Issue 标记为 ~~标题~~（删除线）
+- 当前任务：按人分组，每人一行，有任务显示任务链接，无任务显示“暂无任务”
+- 未认领的可认领任务单独列出，标题为“待认领”
 - 模块名称用括号标注在标题后
 - 积分总览部分默认省略，如用户需要再单独展示
 
