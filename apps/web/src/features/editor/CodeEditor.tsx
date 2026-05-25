@@ -5,6 +5,7 @@ import type { RecordingLanguage } from "@/shared/recording-schema";
 export type CodeEditorHandle = {
   /** Lazy accessor — null until the editor has mounted. */
   getEditor(): Monaco.editor.IStandaloneCodeEditor | null;
+  setModelLanguage(language: RecordingLanguage): void;
 };
 
 export type CodeEditorProps = {
@@ -138,7 +139,19 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   latestPropsRef.current = { language, fontSize, theme };
   onMountRef.current = onMount;
 
-  useImperativeHandle(ref, () => ({ getEditor: () => editorRef.current }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      getEditor: () => editorRef.current,
+      setModelLanguage: (nextLanguage) => {
+        const monaco = monacoRef.current;
+        const model = modelRef.current;
+        if (!monaco || !model) return;
+        monaco.editor.setModelLanguage(model, nextLanguage);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;

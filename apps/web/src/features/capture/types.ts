@@ -35,6 +35,11 @@ export type EditorProducerDeps = ProducerCommonDeps & {
   getEditor(): MonacoEditor.IStandaloneCodeEditor | null;
   /** Reports the *current* editor language so language-change events can be deduped. */
   getCurrentLanguage(): RecordingLanguage;
+  /** Applies a producer-driven language change to the current Monaco model. */
+  setModelLanguage?(
+    model: MonacoEditor.ITextModel,
+    language: RecordingLanguage,
+  ): void;
 };
 
 export type EditorProducerHandle = EventProducer & {

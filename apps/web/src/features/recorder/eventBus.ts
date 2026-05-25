@@ -29,6 +29,7 @@ export function createEventBus(options: EventBusOptions): EventBus {
   const wallTimeProvider = options.wallTimeProvider ?? (() => new Date().toISOString());
 
   let nextSeq = 1;
+  let lastSeq = 0;
   const buffer: RecordingEvent[] = [];
   const listeners = new Set<(event: RecordingEvent) => void>();
 
@@ -48,6 +49,7 @@ export function createEventBus(options: EventBusOptions): EventBus {
         type: input.type,
         payload: input.payload,
       } as Extract<RecordingEvent, { type: TType }>;
+      lastSeq = seq;
       buffer.push(event);
       listeners.forEach((listener) => listener(event));
       return event;
@@ -60,6 +62,9 @@ export function createEventBus(options: EventBusOptions): EventBus {
     peek() {
       return Object.freeze(buffer.slice());
     },
+    lastSeq() {
+      return lastSeq;
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -68,6 +73,7 @@ export function createEventBus(options: EventBusOptions): EventBus {
     },
     reset() {
       nextSeq = 1;
+      lastSeq = 0;
       buffer.length = 0;
     },
   };

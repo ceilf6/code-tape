@@ -22,7 +22,9 @@ import {
 import type {
   CameraPositionPayload,
   RecordingControllerState,
+  RecordingLanguage,
   RecordStartPayload,
+  RunStartPayload,
 } from "@/shared/recording-schema";
 
 const INITIAL_CONTROLLER_STATE: RecordingControllerState = {
@@ -62,11 +64,18 @@ export function RecorderPage() {
     const runtime = createIframeRuntime();
     const repository = createRecordingStore();
     const devices = createMediaDevicesController();
+    let currentEditorLanguage: RecordingLanguage = "javascript";
+    const getCurrentRuntimeLanguage = (): RunStartPayload["language"] =>
+      currentEditorLanguage === "typescript" ? "typescript" : "javascript";
     const editorProducer = createEditorProducer({
       bus,
       clock,
       getEditor: () => editorRef.current?.getEditor() ?? null,
-      getCurrentLanguage: () => "javascript",
+      getCurrentLanguage: () => currentEditorLanguage,
+      setModelLanguage: (_model, language) => {
+        currentEditorLanguage = language;
+        editorRef.current?.setModelLanguage(language);
+      },
     });
     const pointerProducer = createPointerProducer({
       bus,
@@ -104,6 +113,8 @@ export function RecorderPage() {
       editorProducer,
       mediaProducer,
       runtimeProducer,
+      getCurrentEditorLanguage: () => currentEditorLanguage,
+      getCurrentRuntimeLanguage,
     };
   }, []);
 
@@ -120,7 +131,7 @@ export function RecorderPage() {
 
   const handleStart = async () => {
     const payload: RecordStartPayload = {
-      initialLanguage: "javascript",
+      initialLanguage: stack.getCurrentEditorLanguage(),
       initialFontSize: 14,
       initialTheme: "dark",
       selectedAudioDeviceId: null,
@@ -141,8 +152,9 @@ export function RecorderPage() {
   const handleRun = async () => {
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
+    stack.editorProducer.flushPending();
     await stack.runtimeProducer.trigger({
-      language: "javascript",
+      language: stack.getCurrentRuntimeLanguage(),
       source: editor.getValue(),
     });
   };

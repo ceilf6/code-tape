@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RECORDING_SCHEMA_VERSION,
+  type EventBus,
   type RecordingEvent,
   type RecordingPackageV1,
 } from "../types";
@@ -155,6 +156,16 @@ describe("assertEventSeqInvariants", () => {
   it("rejects out-of-order seq", () => {
     const result = assertEventSeqInvariants([mockEvent(2), mockEvent(1)]);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("EventBus contract", () => {
+  it("exposes a global lastSeq accessor for snapshot alignment after drain", () => {
+    const busContract: Pick<EventBus, "lastSeq"> = {
+      lastSeq: () => 12,
+    };
+
+    expect(busContract.lastSeq()).toBe(12);
   });
 });
 

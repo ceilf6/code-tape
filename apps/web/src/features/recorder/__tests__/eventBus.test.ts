@@ -60,6 +60,24 @@ describe("createEventBus", () => {
     expect(bus.peek().length).toBe(0);
   });
 
+  it("keeps the last emitted seq after drain and resets it on reset", () => {
+    const { bus } = setup();
+    expect(bus.lastSeq()).toBe(0);
+
+    const event = bus.emit({
+      type: "language-change",
+      source: "editor",
+      track: "main",
+      payload: { from: "javascript", to: "typescript" },
+    });
+
+    expect(bus.lastSeq()).toBe(event.seq);
+    bus.drain();
+    expect(bus.lastSeq()).toBe(event.seq);
+    bus.reset();
+    expect(bus.lastSeq()).toBe(0);
+  });
+
   it("notifies subscribers in arrival order", () => {
     const { bus } = setup();
     const seen: number[] = [];

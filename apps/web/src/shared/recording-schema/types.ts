@@ -482,6 +482,7 @@ export type EventBus = {
   ): Extract<RecordingEvent, { type: TType }>;
   drain(): RecordingEvent[];
   peek(): readonly RecordingEvent[];
+  lastSeq(): number;
   subscribe(listener: (event: RecordingEvent) => void): () => void;
   reset(): void;
 };
