@@ -58,3 +58,4 @@
 - [ADR-023: 回放媒体通过 MediaClockAdapter 映射到事实时间轴](https://github.com/ceilf6/code-tape/discussions/50)
 - [ADR-024: iframe runtime 必须校验 source、runId、消息 schema 并设置超时](https://github.com/ceilf6/code-tape/discussions/51)
 - [ADR-025: P0 主演示环境锁定桌面 Chrome/Edge latest 并设量化预算](https://github.com/ceilf6/code-tape/discussions/52)
+- [ADR-026: 开发模式采用 Google Chunk 小粒度主干协作](https://github.com/ceilf6/code-tape/discussions/70)
