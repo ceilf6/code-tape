@@ -8,4 +8,4 @@
 3. 使用 karpathy-guidelines 技能确保代码改动的高质量、精确性
 4. 前端 UI 设计使用 frontend-design 技能
 5. 在改动后必须阅读 GitNexus 的建议
-6. 在提交 PR 后等待 GitHub Actions 运行、repo-guard 评论后进行审查
+6. 在提交 PR 后等待 GitHub Actions 运行（不用理会“需要CR通过”的错误，这是正常的）、repo-guard 和 Copilot 评论后进行审查
