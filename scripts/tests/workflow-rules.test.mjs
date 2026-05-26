@@ -706,12 +706,17 @@ test('root package exposes complete quality gate scripts', () => {
   assert.equal(pkg.scripts['quality:local'], 'npm run contract:local && npm run quality:ci');
 });
 
-test('agent prompt separates predev and local quality gate phases', () => {
+test('agent prompts separate commit and push quality gates', () => {
   const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
+  const claudePrompt = readFileSync('CLAUDE.md', 'utf8');
+  const bootstrapScript = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
 
-  assert.match(agentsPrompt, /开始任务前.*`npm run quality:predev`/u);
-  assert.match(agentsPrompt, /提交.*推送前.*`npm run quality:local`/u);
-  assert.doesNotMatch(agentsPrompt, /`npm run quality:predev`\s*\/\s*`npm run quality:local`/u);
+  for (const prompt of [agentsPrompt, claudePrompt]) {
+    assert.match(prompt, /开始任务前.*`npm run quality:predev`/u);
+  }
+
+  assert.match(bootstrapScript, /Before committing code: run npm run quality:precommit/u);
+  assert.match(bootstrapScript, /Before pushing or submitting code: run npm run quality:local/u);
 });
 
 test('pages workflow deploys the web app with the GitHub Pages contract', () => {

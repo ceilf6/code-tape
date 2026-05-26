@@ -8,5 +8,4 @@
 3. 使用 karpathy-guidelines 技能确保代码改动的高质量、精确性
 4. 前端 UI 设计使用 frontend-design 技能
 5. 在改动后必须阅读 GitNexus 的建议
-6. 每次提交、推送前必须运行 `npm run quality:local`
-7. 在提交 PR 后等待 GitHub Actions 运行、repo-guard 评论后进行审查
+6. 在提交 PR 后等待 GitHub Actions 运行、repo-guard 评论后进行审查
