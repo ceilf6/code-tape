@@ -39,23 +39,17 @@ export function findClaimedReviewer({ comments = [], prAuthor }) {
   return commentLogin(claimedComment) ?? null;
 }
 
-export function findValidReviewer({ comments = [], prAuthor, latestCommitAt }) {
-  const latestCommitTime = Date.parse(latestCommitAt || '1970-01-01T00:00:00.000Z');
+export function findValidReviewer({ comments = [], prAuthor }) {
   const claimedReviewer = findClaimedReviewer({ comments, prAuthor });
   if (!claimedReviewer) {
     return null;
   }
 
-  const hasFreshPass = comments.some((comment) => {
-    const createdAt = commentCreatedAt(comment);
-    return (
-      commentLogin(comment) === claimedReviewer &&
-      comment?.body?.trim() === 'CR通过' &&
-      Date.parse(createdAt) >= latestCommitTime
-    );
-  });
+  const hasPass = comments.some(
+    (comment) => commentLogin(comment) === claimedReviewer && comment?.body?.trim() === 'CR通过',
+  );
 
-  return hasFreshPass ? claimedReviewer : null;
+  return hasPass ? claimedReviewer : null;
 }
 
 export function isTimedOut(createdAt, now, hours = 24) {
