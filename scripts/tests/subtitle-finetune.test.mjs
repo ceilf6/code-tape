@@ -323,10 +323,14 @@ test('subtitle postprocessor evaluation baseline covers quality, failure modes, 
   const fixture = JSON.parse(
     readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
   );
-  const metrics = evaluatePostprocessorFixtures(fixture);
+  const metrics = await evaluatePostprocessorFixtures(fixture, {
+    runRepresentativeSample: async (sample) => sample.mockModelOutput,
+  });
 
   assert.equal(metrics.samples, 7);
   assert.equal(metrics.representativeSamples, 3);
+  assert.equal(metrics.negativeSamples, 4);
+  assert.equal(metrics.representativeOutputSource, 'postprocessor-runner');
   assert.equal(metrics.representativePassRate, 1);
   assert.equal(metrics.representativeJsonValidRate, 1);
   assert.equal(metrics.representativeSegmentReferenceValidRate, 1);
@@ -344,11 +348,65 @@ test('subtitle postprocessor evaluation baseline covers quality, failure modes, 
   for (const result of metrics.sampleResults) {
     assert.ok(result.fixtureValidationDurationMs >= 0);
     assert.equal(Object.hasOwn(result, 'durationMs'), false);
+    if (result.kind === 'representative') {
+      assert.equal(result.outputSource, 'postprocessor-runner');
+    }
   }
   assert.deepEqual(
     metrics.detectedNegativeIssues.sort(),
     ['duplicate-segment', 'invalid-chapter-timeline', 'invalid-json', 'unknown-segment'].sort(),
   );
+});
+
+test('subtitle postprocessor evaluation gets representative outputs from the runner', async () => {
+  const { evaluatePostprocessorFixtures } = await import('../subtitle-llm/evaluate-postprocessor.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+  const representativeOutputById = new Map(
+    fixture.samples
+      .filter((sample) => sample.kind === 'representative')
+      .map((sample) => [sample.id, sample.mockModelOutput]),
+  );
+  for (const sample of fixture.samples) {
+    if (sample.kind === 'representative') {
+      sample.output = 'this fixture output must be ignored';
+    }
+  }
+  const seenRepresentativeIds = [];
+
+  const metrics = await evaluatePostprocessorFixtures(fixture, {
+    runRepresentativeSample: async (sample) => {
+      seenRepresentativeIds.push(sample.id);
+      return representativeOutputById.get(sample.id);
+    },
+  });
+
+  assert.equal(metrics.representativePassRate, 1);
+  assert.deepEqual(seenRepresentativeIds.sort(), [
+    'playwright-regression',
+    'react-state-loop',
+    'vite-worker-cache',
+  ]);
+});
+
+test('subtitle postprocessor evaluation CLI uses the current postprocessor runner by default', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/subtitle-llm/evaluate-postprocessor.mjs',
+      'scripts/tests/fixtures/subtitle-postprocessor-eval.json',
+    ],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const jsonStart = result.stdout.indexOf('{');
+  assert.ok(jsonStart >= 0, result.stdout);
+  const metrics = JSON.parse(result.stdout.slice(jsonStart));
+  assert.equal(metrics.representativeOutputSource, 'postprocessor-runner');
+  assert.equal(metrics.representativePassRate, 1);
+  assert.equal(metrics.failures.length, 0);
 });
 
 test('PR self-check asks for one correction and chapter generation evaluation result', () => {
@@ -359,8 +417,9 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(template, /纠错并生成章节/u);
   assert.match(template, /npm run subtitle:postprocess:evaluate/u);
   assert.match(template, /npm run subtitle:postprocess:runtime-benchmark/u);
+  assert.match(template, /representativeOutputSource/u);
   assert.match(template, /overallEvaluationDurationMs/u);
-  assert.match(template, /fixture 校验耗时/u);
+  assert.match(template, /输出校验耗时/u);
   assert.match(template, /postprocessClickToResultReadyDurationMs/u);
   assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
   assert.equal(
@@ -374,6 +433,8 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(runtimeBenchmarkRunner, /SUBTITLE_RUNTIME_BENCHMARK/u);
   assert.match(runtimeBenchmarkRunner, /subtitlePostProcessorRuntimeBenchmark\.test\.tsx/u);
   assert.match(technicalPlan, /npm run subtitle:postprocess:runtime-benchmark/u);
+  assert.match(technicalPlan, /postprocessor-runner/u);
+  assert.match(technicalPlan, /representativeOutputSource/u);
   assert.match(technicalPlan, /postprocessClickToResultReadyDurationMs/u);
   assert.match(technicalPlan, /playbackProbeResponsiveDuringPostprocess/u);
 });

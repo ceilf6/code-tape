@@ -16,7 +16,7 @@
           { "id": "subtitle-3", "startMs": 3600, "endMs": 7200, "text": "如果依赖写错会一直重新渲染" }
         ]
       },
-      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这里用 useState 保存 count\"},{\"id\":\"subtitle-2\",\"text\":\"然后 setCount 会触发 render\"}],\"chapters\":[{\"title\":\"状态更新\",\"startMs\":0,\"endMs\":3600},{\"title\":\"问题定位\",\"startMs\":3600,\"endMs\":7200}]}",
+      "mockModelOutput": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这里用 useState 保存 count\"},{\"id\":\"subtitle-2\",\"text\":\"然后 setCount 会触发 render\"}],\"chapters\":[{\"title\":\"状态更新\",\"startMs\":0,\"endMs\":3600},{\"title\":\"问题定位\",\"startMs\":3600,\"endMs\":7200}]}",
       "expect": {
         "corrections": [
           { "id": "subtitle-1", "text": "这里用 useState 保存 count" },
@@ -42,7 +42,7 @@
           { "id": "subtitle-3", "startMs": 5200, "endMs": 9000, "text": "最后回到 transformers js 的资源下载" }
         ]
       },
-      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"先看 Vite 打包后的 Web Worker 加载\"},{\"id\":\"subtitle-3\",\"text\":\"最后回到 Transformers.js 的资源下载\"}],\"chapters\":[{\"title\":\"Worker 加载\",\"startMs\":0,\"endMs\":2400},{\"title\":\"缓存降级\",\"startMs\":2400,\"endMs\":5200},{\"title\":\"资源下载\",\"startMs\":5200,\"endMs\":9000}]}",
+      "mockModelOutput": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"先看 Vite 打包后的 Web Worker 加载\"},{\"id\":\"subtitle-3\",\"text\":\"最后回到 Transformers.js 的资源下载\"}],\"chapters\":[{\"title\":\"Worker 加载\",\"startMs\":0,\"endMs\":2400},{\"title\":\"缓存降级\",\"startMs\":2400,\"endMs\":5200},{\"title\":\"资源下载\",\"startMs\":5200,\"endMs\":9000}]}",
       "expect": {
         "corrections": [
           { "id": "subtitle-1", "text": "先看 Vite 打包后的 Web Worker 加载" },
@@ -63,12 +63,12 @@
           "runtimeOutput": "expect(locator).toBeVisible() timed out"
         },
         "segments": [
-          { "id": "subtitle-1", "startMs": 0, "endMs": 2200, "text": "这个回归用 play write 复现" },
+          { "id": "subtitle-1", "startMs": 0, "endMs": 2200, "text": "这个回归用 playwright 复现" },
           { "id": "subtitle-2", "startMs": 2200, "endMs": 5000, "text": "点击章节以后应该调用 seek" },
           { "id": "subtitle-3", "startMs": 5000, "endMs": 8400, "text": "repo guard 会检查验证结果" }
         ]
       },
-      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这个回归用 Playwright 复现\"},{\"id\":\"subtitle-3\",\"text\":\"repo-guard 会检查验证结果\"}],\"chapters\":[{\"title\":\"回归复现\",\"startMs\":0,\"endMs\":2200},{\"title\":\"章节跳转\",\"startMs\":2200,\"endMs\":5000},{\"title\":\"验证结果\",\"startMs\":5000,\"endMs\":8400}]}",
+      "mockModelOutput": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这个回归用 Playwright 复现\"},{\"id\":\"subtitle-3\",\"text\":\"repo-guard 会检查验证结果\"}],\"chapters\":[{\"title\":\"回归复现\",\"startMs\":0,\"endMs\":2200},{\"title\":\"章节跳转\",\"startMs\":2200,\"endMs\":5000},{\"title\":\"验证结果\",\"startMs\":5000,\"endMs\":8400}]}",
       "expect": {
         "corrections": [
           { "id": "subtitle-1", "text": "这个回归用 Playwright 复现" },

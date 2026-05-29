@@ -18,19 +18,29 @@ async function main() {
   if (!fixturePath) throw new Error('Usage: evaluate-postprocessor <fixture.json>');
 
   const fixture = parseJsonObject(await readFile(fixturePath, 'utf8'), fixturePath);
-  const metrics = evaluatePostprocessorFixtures(fixture);
-  console.log(JSON.stringify(metrics, null, 2));
-  assertPostprocessorEvaluationGate(metrics);
+  const runner = await createPostprocessorFixtureRunner();
+  try {
+    const metrics = await evaluatePostprocessorFixtures(fixture, {
+      runRepresentativeSample: runner.runRepresentativeSample,
+    });
+    console.log(JSON.stringify(metrics, null, 2));
+    assertPostprocessorEvaluationGate(metrics);
+  } finally {
+    await runner.dispose();
+  }
 }
 
-export function evaluatePostprocessorFixtures(fixture) {
+export async function evaluatePostprocessorFixtures(fixture, options = {}) {
   const start = performance.now();
   assertNoSecrets(fixture);
   if (!isPlainObject(fixture) || !Array.isArray(fixture.samples)) {
     throw new Error('postprocessor evaluation fixture must contain samples');
   }
 
-  const results = fixture.samples.map(evaluateSample);
+  const results = [];
+  for (const sample of fixture.samples) {
+    results.push(await evaluateSample(sample, options));
+  }
   const representativeResults = results.filter((result) => result.kind === 'representative');
   const negativeResults = results.filter((result) => result.kind === 'negative');
   const representativeFailures = representativeResults.filter((result) => !result.passed);
@@ -46,6 +56,7 @@ export function evaluatePostprocessorFixtures(fixture) {
     samples: results.length,
     representativeSamples: representativeResults.length,
     negativeSamples: negativeResults.length,
+    representativeOutputSource: readRepresentativeOutputSource(representativeResults),
     representativePassRate: ratio(
       representativeResults.length - representativeFailures.length,
       representativeResults.length,
@@ -96,6 +107,7 @@ export function evaluatePostprocessorFixtures(fixture) {
       id: result.id,
       kind: result.kind,
       passed: result.passed,
+      outputSource: result.outputSource,
       fixtureValidationDurationMs: result.fixtureValidationDurationMs,
       issues: result.issues,
       ...(result.expectedIssue ? { expectedIssue: result.expectedIssue } : {}),
@@ -110,6 +122,9 @@ export function assertPostprocessorEvaluationGate(metrics) {
   const failures = [];
   if (metrics.representativeSamples < 3) {
     failures.push(`representativeSamples ${metrics.representativeSamples} < 3`);
+  }
+  if (metrics.representativeOutputSource !== 'postprocessor-runner') {
+    failures.push(`representativeOutputSource ${metrics.representativeOutputSource} is not postprocessor-runner`);
   }
   if (metrics.representativePassRate < 1) {
     failures.push(`representativePassRate ${metrics.representativePassRate} < 1`);
@@ -127,10 +142,12 @@ export function assertPostprocessorEvaluationGate(metrics) {
   }
 }
 
-function evaluateSample(sample) {
+async function evaluateSample(sample, options) {
   const start = performance.now();
   const issues = [];
-  const parsedOutput = parseOutput(sample.output, issues);
+  const kind = sample.kind === 'negative' ? 'negative' : 'representative';
+  const { output, outputSource } = await readSampleOutput(sample, kind, options, issues);
+  const parsedOutput = parseOutput(output, issues);
   const inputSegments = readInputSegments(sample, issues);
   const segmentAnalysis = analyzeSegments(inputSegments, parsedOutput, issues);
   const chapterAnalysis = analyzeChapters(sample, parsedOutput, issues);
@@ -139,7 +156,6 @@ function evaluateSample(sample) {
   const correctionAnalysis = analyzeExpectedCorrections(expected, segmentAnalysis.correctionsById);
   const termAnalysis = analyzeExpectedTerms(expected, finalText);
   const chapterTitleAnalysis = analyzeExpectedChapterTitles(expected, chapterAnalysis.titles);
-  const kind = sample.kind === 'negative' ? 'negative' : 'representative';
   const expectedIssue = kind === 'negative' && typeof expected.issue === 'string' ? expected.issue : undefined;
   const expectedIssueDetected = expectedIssue ? issues.includes(expectedIssue) : undefined;
   const passed =
@@ -153,6 +169,7 @@ function evaluateSample(sample) {
   return {
     id: typeof sample.id === 'string' ? sample.id : '(missing id)',
     kind,
+    outputSource,
     passed,
     issues: [...new Set(issues)].sort(),
     expectedIssue,
@@ -170,7 +187,30 @@ function evaluateSample(sample) {
   };
 }
 
+async function readSampleOutput(sample, kind, options, issues) {
+  if (kind === 'representative' && typeof options.runRepresentativeSample === 'function') {
+    try {
+      return {
+        output: await options.runRepresentativeSample(sample),
+        outputSource: 'postprocessor-runner',
+      };
+    } catch (error) {
+      issues.push('postprocessor-runner-error');
+      return {
+        output: undefined,
+        outputSource: 'postprocessor-runner',
+        error,
+      };
+    }
+  }
+  return {
+    output: sample.output,
+    outputSource: 'fixture-output',
+  };
+}
+
 function parseOutput(output, issues) {
+  if (isPlainObject(output)) return output;
   if (typeof output !== 'string') {
     issues.push('invalid-json');
     return undefined;
@@ -183,6 +223,78 @@ function parseOutput(output, issues) {
     issues.push('invalid-json');
     return undefined;
   }
+}
+
+function readRepresentativeOutputSource(representativeResults) {
+  const outputSources = [...new Set(representativeResults.map((result) => result.outputSource))].sort();
+  if (outputSources.length === 0) return 'none';
+  if (outputSources.length === 1) return outputSources[0];
+  return outputSources.join('+');
+}
+
+async function createPostprocessorFixtureRunner() {
+  const { createServer } = await import('vite');
+  const webRoot = resolve(process.cwd(), 'apps/web');
+  const server = await createServer({
+    root: webRoot,
+    configFile: resolve(webRoot, 'vite.config.ts'),
+    server: { middlewareMode: true },
+    appType: 'custom',
+    logLevel: 'error',
+  });
+  const subtitlePostProcessorModule = await server.ssrLoadModule(
+    '/src/features/subtitles/subtitlePostProcessor.ts',
+  );
+
+  return {
+    async runRepresentativeSample(sample) {
+      if (typeof sample.mockModelOutput !== 'string') {
+        throw new Error(`representative sample ${sample.id ?? '(missing id)'} is missing mockModelOutput`);
+      }
+      const postProcessor = subtitlePostProcessorModule.createHuggingFaceSubtitlePostProcessor({
+        pipelineFactory: async () => async () => [{ generated_text: sample.mockModelOutput }],
+      });
+      try {
+        const result = await postProcessor.process({
+          track: buildTrackFromSample(sample),
+          context: buildContextFromSample(sample),
+        });
+        return JSON.stringify(result);
+      } finally {
+        postProcessor.dispose?.();
+      }
+    },
+    async dispose() {
+      await server.close();
+    },
+  };
+}
+
+function buildTrackFromSample(sample) {
+  return {
+    recordingId: typeof sample.id === 'string' ? sample.id : 'subtitle-postprocessor-fixture',
+    generatedAt: '2026-05-29T00:00:00.000Z',
+    model: 'fixture-asr',
+    source: 'huggingface-local',
+    language: 'zh',
+    segments: readInputSegments(sample, []).map((segment) => ({
+      id: segment.id,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text,
+    })),
+  };
+}
+
+function buildContextFromSample(sample) {
+  const context = sample.input?.context;
+  if (!isPlainObject(context)) return undefined;
+  return {
+    fileName: typeof context.fileName === 'string' ? context.fileName : undefined,
+    code: typeof context.code === 'string' ? context.code : undefined,
+    runtimeOutput: typeof context.runtimeOutput === 'string' ? context.runtimeOutput : undefined,
+    glossary: Array.isArray(context.glossary) ? context.glossary.filter((term) => typeof term === 'string') : [],
+  };
 }
 
 function readInputSegments(sample, issues) {
