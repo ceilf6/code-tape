@@ -314,6 +314,23 @@ describe("CandidateInterviewPage", () => {
     expect(signaling.client.close).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps routed candidate rooms in read-only recording mode without a join code", () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate/room-route",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+
+    expect(screen.getByText("room-route")).toBeInTheDocument();
+    expect(screen.getByText("缺少 joinCode，当前仅展示候选人录制工作区")).toBeInTheDocument();
+    expect(screen.getByTestId("recorder-workspace")).toBeInTheDocument();
+    expect(roomClient.createRoom).not.toHaveBeenCalled();
+    expect(signaling.create).not.toHaveBeenCalled();
+  });
+
   it("renders the candidate room status and recording workspace", () => {
     renderCandidateView({
       roomId: "room-42",
