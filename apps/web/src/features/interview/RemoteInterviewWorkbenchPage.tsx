@@ -36,6 +36,7 @@ const EMPTY_INTERVIEW_MEDIA_SESSION_STATE: InterviewMediaSessionState = {
   iceConnectionState: "new",
   signalingState: "stable",
   outgoingIceCandidates: [],
+  eventsDataChannelState: "not-created",
 };
 
 export function RemoteInterviewWorkbenchPage() {

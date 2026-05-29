@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { appRoutes } from "@/app/routes";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
 import { TooltipProvider } from "@/shared/ui/Tooltip";
-import type { InterviewMediaSession, InterviewMediaSessionState } from "../interviewMediaSession";
+import type {
+  InterviewEventsDataChannel,
+  InterviewMediaSession,
+  InterviewMediaSessionState,
+} from "../interviewMediaSession";
 import type { InterviewRoomClient } from "../interviewRoomClient";
 import type {
   InboundSignalingMessage,
@@ -107,9 +111,13 @@ describe("CandidateInterviewPage", () => {
 
     await waitFor(() => {
       expect(media.session.requestLocalMedia).toHaveBeenCalledTimes(1);
+      expect(media.session.ensureEventsDataChannel).toHaveBeenCalledTimes(1);
       expect(media.session.createOffer).toHaveBeenCalledTimes(1);
       expect(signaling.client.sendOffer).toHaveBeenCalledWith("candidate-offer-sdp");
     });
+    expect(
+      vi.mocked(media.session.ensureEventsDataChannel).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(media.session.createOffer).mock.invocationCallOrder[0]);
     expect(screen.getByRole("button", { name: "麦克风已开启" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "摄像头已开启" })).toBeDisabled();
 
@@ -123,6 +131,7 @@ describe("CandidateInterviewPage", () => {
     });
 
     expect(media.session.requestLocalMedia).toHaveBeenCalledTimes(1);
+    expect(media.session.ensureEventsDataChannel).toHaveBeenCalledTimes(1);
     expect(media.session.createOffer).toHaveBeenCalledTimes(1);
     expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
   });
@@ -288,6 +297,39 @@ describe("CandidateInterviewPage", () => {
     expect(await screen.findAllByText("连接失败")).toHaveLength(2);
     expect(screen.getByText("camera denied")).toBeInTheDocument();
     expect(screen.getByTestId("recorder-workspace")).toBeInTheDocument();
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the recorder workspace visible when candidate events data channel setup fails", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory({
+      ensureEventsDataChannel: vi.fn(() => {
+        throw new Error("events data channel failed");
+      }),
+    });
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+
+    expect(await screen.findAllByText("连接失败")).toHaveLength(2);
+    expect(screen.getByText("events data channel failed")).toBeInTheDocument();
+    expect(screen.getByTestId("recorder-workspace")).toBeInTheDocument();
+    expect(media.session.createOffer).not.toHaveBeenCalled();
     expect(media.session.close).toHaveBeenCalledTimes(1);
   });
 
@@ -550,6 +592,9 @@ describe("CandidateInterviewPage", () => {
         role: "interviewer",
         status: "live",
       });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
     });
     expect(screen.getByText("面试官在线")).toBeInTheDocument();
   });
@@ -862,6 +907,7 @@ function makeMediaState(
     iceConnectionState: "new",
     signalingState: "stable",
     outgoingIceCandidates: [],
+    eventsDataChannelState: "not-created",
     ...patch,
   };
 }
@@ -931,6 +977,13 @@ function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
   };
   const localStream = {} as MediaStream;
   const remoteStream = {} as MediaStream;
+  const eventsDataChannel: InterviewEventsDataChannel = {
+    readyState: "connecting",
+    onopen: null,
+    onclose: null,
+    send: vi.fn(),
+    close: vi.fn(),
+  };
   const session: InterviewMediaSession = {
     getState: vi.fn(() => state),
     requestLocalMedia: vi.fn(async () =>
@@ -952,6 +1005,10 @@ function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
     ),
     createOffer: vi.fn(async () => ({ type: "offer" as const, sdp: "candidate-offer-sdp" })),
     createAnswer: vi.fn(async () => ({ type: "answer" as const, sdp: "candidate-answer-sdp" })),
+    ensureEventsDataChannel: vi.fn(() => {
+      updateState({ eventsDataChannelState: eventsDataChannel.readyState });
+      return eventsDataChannel;
+    }),
     setRemoteDescription: vi.fn(async () => state),
     addRemoteIceCandidate: vi.fn(async () => state),
     drainOutgoingIceCandidates: vi.fn(() => {

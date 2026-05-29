@@ -234,6 +234,7 @@ function makeMediaState(
     iceConnectionState: "new",
     signalingState: "stable",
     outgoingIceCandidates: [],
+    eventsDataChannelState: "not-created",
     ...patch,
   };
 }

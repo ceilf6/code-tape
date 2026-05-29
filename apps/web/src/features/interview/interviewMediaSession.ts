@@ -9,6 +9,16 @@ export type InterviewTrackEvent = {
   streams: MediaStream[];
 };
 
+export type InterviewDataChannelState = "not-created" | RTCDataChannelState;
+
+export type InterviewEventsDataChannel = {
+  readonly readyState: RTCDataChannelState;
+  onopen: (() => void) | null;
+  onclose: (() => void) | null;
+  send(data: string): void;
+  close(): void;
+};
+
 export type InterviewPeerConnection = {
   readonly localDescription: RTCSessionDescriptionInit | null;
   readonly remoteDescription: RTCSessionDescriptionInit | null;
@@ -21,6 +31,7 @@ export type InterviewPeerConnection = {
   oniceconnectionstatechange: (() => void) | null;
   onsignalingstatechange: (() => void) | null;
   addTrack(track: MediaStreamTrack, stream: MediaStream): void;
+  createDataChannel(label: string, dataChannelDict?: RTCDataChannelInit): InterviewEventsDataChannel;
   createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit>;
   createAnswer(options?: RTCAnswerOptions): Promise<RTCSessionDescriptionInit>;
   setLocalDescription(description: RTCSessionDescriptionInit): Promise<void>;
@@ -50,6 +61,7 @@ export type InterviewMediaSessionState = {
   iceConnectionState: RTCIceConnectionState;
   signalingState: RTCSignalingState;
   outgoingIceCandidates: InterviewIceCandidateSignal[];
+  eventsDataChannelState: InterviewDataChannelState;
 };
 
 export type InterviewMediaSession = {
@@ -57,6 +69,7 @@ export type InterviewMediaSession = {
   requestLocalMedia(constraints?: MediaStreamConstraints): Promise<InterviewMediaSessionState>;
   setMicrophoneEnabled(enabled: boolean): InterviewMediaSessionState;
   setCameraEnabled(enabled: boolean): InterviewMediaSessionState;
+  ensureEventsDataChannel(): InterviewEventsDataChannel;
   createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit>;
   createAnswer(options?: RTCAnswerOptions): Promise<RTCSessionDescriptionInit>;
   setRemoteDescription(description: RTCSessionDescriptionInit): Promise<InterviewMediaSessionState>;
@@ -67,6 +80,8 @@ export type InterviewMediaSession = {
 };
 
 const DEFAULT_MEDIA_CONSTRAINTS: MediaStreamConstraints = { audio: true, video: true };
+const EVENTS_DATA_CHANNEL_LABEL = "events";
+const EVENTS_DATA_CHANNEL_OPTIONS: RTCDataChannelInit = { ordered: true };
 
 export function createInterviewMediaSession(
   options: InterviewMediaSessionOptions = {},
@@ -79,6 +94,7 @@ export function createInterviewMediaSession(
   let microphoneEnabled = false;
   let cameraEnabled = false;
   let outgoingIceCandidates: InterviewIceCandidateSignal[] = [];
+  let eventsDataChannel: InterviewEventsDataChannel | null = null;
   let closed = false;
 
   const snapshot = (): InterviewMediaSessionState => ({
@@ -90,6 +106,7 @@ export function createInterviewMediaSession(
     iceConnectionState: closed ? "closed" : peer.iceConnectionState,
     signalingState: closed ? "closed" : peer.signalingState,
     outgoingIceCandidates: cloneIceCandidates(outgoingIceCandidates),
+    eventsDataChannelState: closed ? "closed" : eventsDataChannel?.readyState ?? "not-created",
   });
 
   const notify = (): InterviewMediaSessionState => {
@@ -151,6 +168,22 @@ export function createInterviewMediaSession(
       cameraEnabled = hasEnabledTrack(localStream, "video");
       return notify();
     },
+    ensureEventsDataChannel() {
+      if (closed) {
+        throw new Error("Interview media session is closed");
+      }
+      if (eventsDataChannel) {
+        return eventsDataChannel;
+      }
+      eventsDataChannel = peer.createDataChannel(
+        EVENTS_DATA_CHANNEL_LABEL,
+        EVENTS_DATA_CHANNEL_OPTIONS,
+      );
+      eventsDataChannel.onopen = notify;
+      eventsDataChannel.onclose = notify;
+      notify();
+      return eventsDataChannel;
+    },
     async createOffer(offerOptions) {
       const offer = await peer.createOffer(offerOptions);
       await peer.setLocalDescription(offer);
@@ -197,10 +230,21 @@ export function createInterviewMediaSession(
       microphoneEnabled = false;
       cameraEnabled = false;
       outgoingIceCandidates = [];
+      closeEventsDataChannel(eventsDataChannel);
+      eventsDataChannel = null;
       peer.close();
       return notify();
     },
   };
+}
+
+function closeEventsDataChannel(channel: InterviewEventsDataChannel | null): void {
+  if (!channel) {
+    return;
+  }
+  channel.onopen = null;
+  channel.onclose = null;
+  channel.close();
 }
 
 function resolveDependencies(deps: InterviewMediaSessionDependencies = {}): Required<InterviewMediaSessionDependencies> {

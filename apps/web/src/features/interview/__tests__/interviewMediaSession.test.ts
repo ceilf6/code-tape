@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createInterviewMediaSession,
+  type InterviewEventsDataChannel,
   type InterviewMediaSessionDependencies,
   type InterviewPeerConnection,
 } from "../interviewMediaSession";
@@ -42,6 +43,26 @@ class FakeMediaStream {
   }
 }
 
+class FakeDataChannel implements InterviewEventsDataChannel {
+  readyState: RTCDataChannelState = "connecting";
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  closeCalls = 0;
+
+  send(): void {}
+
+  open(): void {
+    this.readyState = "open";
+    this.onopen?.();
+  }
+
+  close(): void {
+    this.closeCalls += 1;
+    this.readyState = "closed";
+    this.onclose?.();
+  }
+}
+
 class FakePeerConnection implements InterviewPeerConnection {
   localDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
@@ -56,10 +77,21 @@ class FakePeerConnection implements InterviewPeerConnection {
   onsignalingstatechange: (() => void) | null = null;
   readonly addedTracks: Array<{ track: MediaStreamTrack; stream: MediaStream }> = [];
   readonly remoteCandidates: Array<RTCIceCandidateInit | null> = [];
+  readonly createdDataChannels: Array<{
+    label: string;
+    options?: RTCDataChannelInit;
+    channel: FakeDataChannel;
+  }> = [];
   closed = false;
 
   addTrack(track: MediaStreamTrack, stream: MediaStream): void {
     this.addedTracks.push({ track, stream });
+  }
+
+  createDataChannel(label: string, options?: RTCDataChannelInit): InterviewEventsDataChannel {
+    const channel = new FakeDataChannel();
+    this.createdDataChannels.push({ label, options, channel });
+    return channel;
   }
 
   async createOffer(): Promise<RTCSessionDescriptionInit> {
@@ -183,6 +215,28 @@ describe("InterviewMediaSession", () => {
     ]);
   });
 
+  it("creates a reliable ordered events data channel once and exposes its lifecycle state", () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+
+    expect(session.getState().eventsDataChannelState).toBe("not-created");
+
+    const channel = session.ensureEventsDataChannel();
+    const reused = session.ensureEventsDataChannel();
+
+    expect(reused).toBe(channel);
+    expect(peer.createdDataChannels).toHaveLength(1);
+    expect(peer.createdDataChannels[0]).toMatchObject({
+      label: "events",
+      options: { ordered: true },
+    });
+    expect(session.getState().eventsDataChannelState).toBe("connecting");
+
+    peer.createdDataChannels[0].channel.open();
+
+    expect(session.getState().eventsDataChannelState).toBe("open");
+  });
+
   it("queues local ICE candidates for the signaling layer and clears them after drain", () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });
@@ -239,6 +293,18 @@ describe("InterviewMediaSession", () => {
       microphoneEnabled: false,
       cameraEnabled: false,
     });
+  });
+
+  it("closes the events data channel when closed", () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    session.ensureEventsDataChannel();
+
+    const closed = session.close();
+
+    expect(peer.createdDataChannels[0].channel.closeCalls).toBe(1);
+    expect(closed.eventsDataChannelState).toBe("closed");
+    expect(session.getState().eventsDataChannelState).toBe("closed");
   });
 
   it("stops local media if the session closes while getUserMedia is pending", async () => {

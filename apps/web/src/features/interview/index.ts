@@ -16,6 +16,8 @@ export {
 } from "./interviewSync";
 export {
   createInterviewMediaSession,
+  type InterviewDataChannelState,
+  type InterviewEventsDataChannel,
   type InterviewIceCandidateEvent,
   type InterviewIceCandidateSignal,
   type InterviewMediaSession,

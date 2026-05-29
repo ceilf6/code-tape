@@ -77,6 +77,7 @@ const EMPTY_CANDIDATE_MEDIA_STATE: InterviewMediaSessionState = {
   iceConnectionState: "new",
   signalingState: "stable",
   outgoingIceCandidates: [],
+  eventsDataChannelState: "not-created",
 };
 
 export function CandidateInterviewPage({ deps = {} }: CandidateInterviewPageProps = {}) {
@@ -287,6 +288,10 @@ function useCandidateInterviewRoomSession({
               throw new Error("candidate media session is not available");
             }
             await currentMediaSession.requestLocalMedia();
+            if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              return;
+            }
+            currentMediaSession.ensureEventsDataChannel();
             if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
               return;
             }
