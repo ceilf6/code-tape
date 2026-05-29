@@ -19,3 +19,8 @@ export {
   type TickListener,
 } from "./replayScheduler";
 export { createPackageLoader, type PackageLoaderOptions } from "./packageLoader";
+export {
+  createCloudPackageLoader,
+  type CloudPackageLoader,
+  type CloudPackageLoaderOptions,
+} from "./cloudPackageLoader";
