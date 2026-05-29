@@ -41,6 +41,7 @@ type PostProcessorWarmUpState = {
   recordingId: string;
   postProcessor: SubtitlePostProcessor;
   status: "pending" | "running" | "completed";
+  cancel(): void;
 };
 
 export function SubtitlePanel({
@@ -174,9 +175,10 @@ export function SubtitlePanel({
       recordingId,
       postProcessor,
       status: "pending",
+      cancel: () => undefined,
     };
     postProcessorWarmUpRef.current = warmUpState;
-    const cancelIdleWarmUp = scheduleIdleWarmUp(() => {
+    warmUpState.cancel = scheduleIdleWarmUp(() => {
       if (cancelled) return;
       warmUpState.status = "running";
       void postProcessor.warmUp?.()
@@ -189,10 +191,7 @@ export function SubtitlePanel({
     });
     return () => {
       cancelled = true;
-      cancelIdleWarmUp();
-      if (postProcessorWarmUpRef.current === warmUpState && warmUpState.status === "pending") {
-        postProcessorWarmUpRef.current = null;
-      }
+      cancelPostProcessorWarmUpState(postProcessorWarmUpRef, warmUpState);
     };
   }, [hasAudio, postProcessor, recordingId, status, track]);
 
@@ -218,6 +217,7 @@ export function SubtitlePanel({
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     generationAbortRef.current?.abort();
+    cancelActivePostProcessorWarmUp(postProcessorWarmUpRef, postProcessor);
     const abortController = new AbortController();
     generationAbortRef.current = abortController;
     setStatus("generating");
@@ -256,6 +256,7 @@ export function SubtitlePanel({
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     generationAbortRef.current?.abort();
+    cancelActivePostProcessorWarmUp(postProcessorWarmUpRef, postProcessor);
     const abortController = new AbortController();
     generationAbortRef.current = abortController;
     setStatus("post-processing");
@@ -481,6 +482,27 @@ function runWithPostProcessTimeout<T>(
 
 function isPostProcessTimeoutError(error: unknown): error is PostProcessTimeoutError {
   return error instanceof Error && error.name === "PostProcessTimeoutError";
+}
+
+function cancelActivePostProcessorWarmUp(
+  warmUpRef: MutableRefObject<PostProcessorWarmUpState | null>,
+  postProcessor: SubtitlePostProcessor | null,
+): void {
+  const warmUpState = warmUpRef.current;
+  if (!warmUpState || warmUpState.postProcessor !== postProcessor) return;
+  cancelPostProcessorWarmUpState(warmUpRef, warmUpState);
+}
+
+function cancelPostProcessorWarmUpState(
+  warmUpRef: MutableRefObject<PostProcessorWarmUpState | null>,
+  warmUpState: PostProcessorWarmUpState,
+): void {
+  warmUpState.cancel();
+  if (warmUpRef.current !== warmUpState || warmUpState.status === "completed") return;
+  warmUpRef.current = null;
+  if (warmUpState.status === "running") {
+    warmUpState.postProcessor.dispose?.();
+  }
 }
 
 function scheduleIdleWarmUp(callback: () => void): () => void {

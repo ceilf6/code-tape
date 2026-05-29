@@ -1263,6 +1263,76 @@ describe("SubtitlePanel", () => {
     expect(postProcessorWarmUp).toHaveBeenCalledTimes(1);
   });
 
+  it("disposes a running local LLM warm-up before generating subtitles", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Old subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestIdleCallback",
+      vi.fn((callback: IdleRequestCallback) => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      }),
+    );
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    const warmUpDeferred = createDeferred<void>();
+    const events: string[] = [];
+    const dispose = vi.fn(() => {
+      events.push("dispose");
+    });
+    const transcribe = vi.fn(async () => {
+      events.push("transcribe");
+      return {
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 2_000, text: "New subtitles." }],
+      };
+    });
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={2_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{ transcribe }}
+        postProcessor={{
+          warmUp: vi.fn(() => {
+            events.push("warmUp");
+            return warmUpDeferred.promise;
+          }),
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+          dispose,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Old subtitles.")).toBeInTheDocument());
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+
+    await waitFor(() => expect(transcribe).toHaveBeenCalledTimes(1));
+    expect(events).toEqual(["warmUp", "dispose", "transcribe"]);
+
+    await act(async () => {
+      warmUpDeferred.resolve();
+      await flushPromises();
+    });
+  });
+
   it("warms up a replacement local LLM post-processor instance for the same recording", async () => {
     const store = createMemorySubtitleStore();
     await store.save({
