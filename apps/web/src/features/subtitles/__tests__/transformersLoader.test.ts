@@ -88,6 +88,19 @@ describe("transformersLoader", () => {
     expect(dispatchEvent).not.toHaveBeenCalled();
   });
 
+  it("reports whether a stale chunk recovery request was handled", () => {
+    const error = new TypeError("Failed to fetch dynamically imported module");
+    expect(requestStaleTransformersImportRecovery(error)).toBe(false);
+
+    const handlePreloadError = (event: Event) => event.preventDefault();
+    globalThis.addEventListener("vite:preloadError", handlePreloadError);
+    try {
+      expect(requestStaleTransformersImportRecovery(error)).toBe(true);
+    } finally {
+      globalThis.removeEventListener("vite:preloadError", handlePreloadError);
+    }
+  });
+
   it("loads a pipeline after a recovered import and applies the quiet browser cache", async () => {
     const loadedPipeline = vi.fn();
     const pipelineFactory = vi.fn(async () => loadedPipeline);

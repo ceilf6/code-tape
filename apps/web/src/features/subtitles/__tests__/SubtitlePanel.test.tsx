@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { installStaleChunkRecovery } from "../../../app/staleChunkRecovery";
 import { SubtitlePanel } from "../SubtitlePanel";
 import type {
   SubtitleChapter,
@@ -110,6 +111,49 @@ describe("SubtitlePanel", () => {
         source: "huggingface-local",
       }),
     );
+  });
+
+  it("recovers from stale Transformers chunks during subtitle generation without showing the raw import error", async () => {
+    const store = createMemorySubtitleStore();
+    const reload = vi.fn();
+    const cleanupRecovery = installStaleChunkRecovery({
+      reload,
+      storage: {
+        getItem: () => null,
+        setItem: vi.fn(),
+      },
+      getRecoveryToken: () => "entry-index-B.js",
+    });
+    const staleChunkError = new TypeError(
+      "Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js",
+    );
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(async () => {
+        throw staleChunkError;
+      }),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={transcriber}
+      />,
+    );
+
+    const generateButton = screen.getByRole("button", { name: "生成字幕" });
+    await waitFor(() => expect(generateButton).not.toBeDisabled());
+
+    fireEvent.click(generateButton);
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    cleanupRecovery();
   });
 
   it("runs local LLM post-processing to correct subtitles and render seekable chapters", async () => {

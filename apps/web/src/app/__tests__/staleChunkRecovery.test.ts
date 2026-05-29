@@ -85,4 +85,31 @@ describe("installStaleChunkRecovery", () => {
 
     expect(reload).toHaveBeenCalledTimes(1);
   });
+
+  it("clears code-tape asset caches before reloading", async () => {
+    const reload = vi.fn();
+    const deletedCaches: string[] = [];
+    const target = new EventTarget();
+    installStaleChunkRecovery({
+      target,
+      storage: {
+        getItem: () => null,
+        setItem: vi.fn(),
+      },
+      reload,
+      getRecoveryToken: () => "entry-index-C.js",
+      cacheStorage: {
+        keys: async () => ["code-tape-assets-v1", "transformers-cache", "unrelated-cache"],
+        delete: async (name) => {
+          deletedCaches.push(name);
+          return true;
+        },
+      },
+    });
+
+    target.dispatchEvent(createPreloadError("Failed to fetch dynamically imported module"));
+
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(deletedCaches).toEqual(["code-tape-assets-v1"]);
+  });
 });

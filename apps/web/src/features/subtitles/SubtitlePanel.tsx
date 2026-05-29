@@ -6,6 +6,7 @@ import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig
 import { createWorkerBackedHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessorWorkerClient";
 import { createSubtitleStore } from "./subtitleStore";
 import { createHuggingFaceSubtitleTranscriber } from "./subtitleTranscriber";
+import { requestStaleTransformersImportRecovery } from "./transformersLoader";
 import type {
   SubtitleChapter,
   SubtitleCorrectionWarning,
@@ -242,6 +243,7 @@ export function SubtitlePanel({
       setStatus("ready");
     } catch (err) {
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
+      if (requestStaleTransformersImportRecovery(err)) return;
       setError(formatSubtitleError(err));
       setStatus("error");
     } finally {
@@ -296,6 +298,7 @@ export function SubtitlePanel({
         return;
       }
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
+      if (requestStaleTransformersImportRecovery(err)) return;
       setError(formatSubtitleError(err));
       setStatus("error");
     } finally {

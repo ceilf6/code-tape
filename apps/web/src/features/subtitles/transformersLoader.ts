@@ -89,8 +89,7 @@ export function configureQuietBrowserCache(env: TransformersEnvironment | undefi
 
 export function requestStaleTransformersImportRecovery(error: unknown): boolean {
   if (!isStaleTransformersChunkImportError(error)) return false;
-  dispatchStaleChunkRecoveryEvent(error);
-  return true;
+  return dispatchStaleChunkRecoveryEvent(error);
 }
 
 export function isRecoverableTransformersImportError(error: unknown): boolean {
@@ -107,11 +106,14 @@ export function isStaleTransformersChunkImportError(error: unknown): boolean {
   );
 }
 
-function dispatchStaleChunkRecoveryEvent(error: unknown): void {
-  if (typeof Event === "undefined" || typeof globalThis.dispatchEvent !== "function") return;
+function dispatchStaleChunkRecoveryEvent(error: unknown): boolean {
+  if (typeof Event === "undefined" || typeof globalThis.dispatchEvent !== "function") {
+    return false;
+  }
   const event = new Event(VITE_PRELOAD_ERROR_EVENT, { cancelable: true });
   Object.defineProperty(event, "payload", { value: error });
   globalThis.dispatchEvent(event);
+  return event.defaultPrevented;
 }
 
 async function defaultTransformersImporter(): Promise<TransformersModule> {

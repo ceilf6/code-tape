@@ -5,6 +5,11 @@ type StaleChunkRecoveryStorage = {
   setItem(key: string, value: string): void;
 };
 
+type StaleChunkRecoveryCacheStorage = {
+  keys(): Promise<string[]>;
+  delete(name: string): Promise<boolean>;
+};
+
 type VitePreloadErrorEvent = Event & {
   payload?: unknown;
 };
@@ -14,6 +19,7 @@ export type StaleChunkRecoveryOptions = {
   storage?: StaleChunkRecoveryStorage;
   reload?: () => void;
   getRecoveryToken?: () => string;
+  cacheStorage?: StaleChunkRecoveryCacheStorage;
 };
 
 const STALE_CHUNK_RECOVERY_KEY = "code-tape:stale-chunk-recovery";
@@ -36,7 +42,12 @@ export function installStaleChunkRecovery(options: StaleChunkRecoveryOptions = {
     if (readRecoveryToken(storage) === recoveryToken) return;
 
     writeRecoveryToken(storage, recoveryToken);
-    reload();
+    const cacheStorage = options.cacheStorage ?? readCacheStorage();
+    if (!cacheStorage) {
+      reload();
+      return;
+    }
+    void clearStaleChunkCaches(cacheStorage).finally(reload);
   };
 
   target.addEventListener("vite:preloadError", handlePreloadError);
@@ -63,6 +74,38 @@ function readSessionStorage(): StaleChunkRecoveryStorage | undefined {
   } catch {
     return undefined;
   }
+}
+
+function readCacheStorage(): StaleChunkRecoveryCacheStorage | undefined {
+  try {
+    return globalThis.caches;
+  } catch {
+    return undefined;
+  }
+}
+
+async function clearStaleChunkCaches(cacheStorage: StaleChunkRecoveryCacheStorage): Promise<void> {
+  let cacheNames: string[];
+  try {
+    cacheNames = await cacheStorage.keys();
+  } catch {
+    return;
+  }
+  await Promise.all(
+    cacheNames
+      .filter(isCodeTapeAssetCache)
+      .map(async (cacheName) => {
+        try {
+          await cacheStorage.delete(cacheName);
+        } catch {
+          // Cache cleanup is best-effort; reloading is still the recovery path.
+        }
+      }),
+  );
+}
+
+function isCodeTapeAssetCache(cacheName: string): boolean {
+  return /code-tape|vite|workbox|assets|precache/iu.test(cacheName);
 }
 
 function readRecoveryToken(storage: StaleChunkRecoveryStorage | undefined): string | null {
