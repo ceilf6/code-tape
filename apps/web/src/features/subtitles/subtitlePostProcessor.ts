@@ -11,6 +11,7 @@ const MAX_PROMPT_CODE_CHARS = 6_000;
 const MAX_PROMPT_RUNTIME_OUTPUT_CHARS = 2_000;
 const BASE_MAX_NEW_TOKENS = 128;
 const MAX_POSTPROCESSOR_SEGMENTS = 120;
+const POSTPROCESSOR_CHUNK_SEGMENTS = 60;
 const MAX_DYNAMIC_NEW_TOKENS = 768;
 const NEW_TOKENS_PER_SEGMENT = 5;
 const CHAPTER_OUTPUT_TOKEN_RESERVE = 96;
@@ -97,51 +98,111 @@ export function createHuggingFaceSubtitlePostProcessor(
     },
     async process(input) {
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const maxNewTokens = estimateMaxNewTokens(input.track);
       const pipeline = await getPipeline();
       if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const output = await pipeline(buildSubtitlePostProcessorMessages(input), {
-        max_new_tokens: maxNewTokens,
-        do_sample: false,
-        repetition_penalty: 1.05,
-        return_full_text: false,
-        ...buildChatTemplateOption(model),
-      });
-      if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const generatedText = readGeneratedText(output);
-      try {
-        return constrainCorrectionToTrack(
-          extractSubtitleCorrectionResult(generatedText),
-          input.track,
-        );
-      } catch (error) {
-        if (!isRecoverableJsonOutputError(error)) throw error;
-        const recovered = recoverSubtitleCorrectionResult(generatedText, input.track);
-        if (recovered) return recovered;
-      }
-      if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
-        max_new_tokens: maxNewTokens,
-        do_sample: false,
-        repetition_penalty: 1.05,
-        return_full_text: false,
-        ...buildChatTemplateOption(model),
-      });
-      if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
-      const retryGeneratedText = readGeneratedText(retryOutput);
-      try {
-        return constrainCorrectionToTrack(
-          extractSubtitleCorrectionResult(retryGeneratedText),
-          input.track,
-        );
-      } catch (error) {
-        if (!isRecoverableJsonOutputError(error)) throw error;
-        const recovered = recoverSubtitleCorrectionResult(retryGeneratedText, input.track);
-        if (recovered) return recovered;
-        throw error;
-      }
+      return processSubtitleTrack({ input, model, pipeline });
     },
   };
+}
+
+async function processSubtitleTrack({
+  input,
+  model,
+  pipeline,
+}: {
+  input: {
+    track: SubtitleTrack;
+    context?: SubtitlePostProcessorContext;
+    signal?: AbortSignal;
+  };
+  model: string;
+  pipeline: TextGenerationPipeline;
+}): Promise<SubtitleCorrectionResult> {
+  if (input.track.segments.length <= MAX_POSTPROCESSOR_SEGMENTS) {
+    return processSubtitleTrackChunk({ input, model, pipeline });
+  }
+
+  const chunks = chunkSubtitleTrack(input.track, POSTPROCESSOR_CHUNK_SEGMENTS);
+  const merged: SubtitleCorrectionResult = { segments: [], chapters: [] };
+  for (const chunk of chunks) {
+    if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+    const result = await processSubtitleTrackChunk({
+      input: { ...input, track: chunk },
+      model,
+      pipeline,
+    });
+    merged.segments.push(...result.segments);
+    merged.chapters?.push(...(result.chapters ?? []));
+  }
+  if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+  return constrainCorrectionToTrack(merged, input.track);
+}
+
+async function processSubtitleTrackChunk({
+  input,
+  model,
+  pipeline,
+}: {
+  input: {
+    track: SubtitleTrack;
+    context?: SubtitlePostProcessorContext;
+    signal?: AbortSignal;
+  };
+  model: string;
+  pipeline: TextGenerationPipeline;
+}): Promise<SubtitleCorrectionResult> {
+  const maxNewTokens = estimateMaxNewTokens(input.track);
+  const output = await pipeline(buildSubtitlePostProcessorMessages(input), {
+    max_new_tokens: maxNewTokens,
+    do_sample: false,
+    repetition_penalty: 1.05,
+    return_full_text: false,
+    ...buildChatTemplateOption(model),
+  });
+  if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+  const generatedText = readGeneratedText(output);
+  try {
+    return constrainCorrectionToTrack(
+      extractSubtitleCorrectionResult(generatedText),
+      input.track,
+    );
+  } catch (error) {
+    if (!isRecoverableJsonOutputError(error)) throw error;
+    const recovered = recoverSubtitleCorrectionResult(generatedText, input.track);
+    if (recovered) return recovered;
+  }
+  if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+  const retryOutput = await pipeline(buildSubtitlePostProcessorMessages(input, { previousOutput: generatedText }), {
+    max_new_tokens: maxNewTokens,
+    do_sample: false,
+    repetition_penalty: 1.05,
+    return_full_text: false,
+    ...buildChatTemplateOption(model),
+  });
+  if (input.signal?.aborted) throw new DOMException("字幕纠错已取消", "AbortError");
+  const retryGeneratedText = readGeneratedText(retryOutput);
+  try {
+    return constrainCorrectionToTrack(
+      extractSubtitleCorrectionResult(retryGeneratedText),
+      input.track,
+    );
+  } catch (error) {
+    if (!isRecoverableJsonOutputError(error)) throw error;
+    const recovered = recoverSubtitleCorrectionResult(retryGeneratedText, input.track);
+    if (recovered) return recovered;
+    throw error;
+  }
+}
+
+function chunkSubtitleTrack(track: SubtitleTrack, maxSegments: number): SubtitleTrack[] {
+  const chunks: SubtitleTrack[] = [];
+  for (let index = 0; index < track.segments.length; index += maxSegments) {
+    chunks.push({
+      ...track,
+      segments: track.segments.slice(index, index + maxSegments),
+    });
+  }
+  return chunks;
 }
 
 async function loadPipelineWithFallback({

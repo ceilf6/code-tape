@@ -618,6 +618,8 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /WASM `q8` ONNX 资产/u);
   assert.match(technicalPlan, /`q4f16` \/ `q4` 资产/u);
   assert.match(technicalPlan, /`segments` 是稀疏变更集/u);
+  assert.match(technicalPlan, /长字幕轨要按时间连续的 segment 窗口分块后处理/u);
+  assert.match(technicalPlan, /应用层再合并并做全局 segment\/章节校验/u);
   assert.match(technicalPlan, /前端领域术语、组件名、变量名、函数名/u);
   assert.match(technicalPlan, /章节跳转点/u);
   assert.match(technicalPlan, /点击章节调用现有播放器 `seek\(startMs\)`/u);

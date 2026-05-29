@@ -73,6 +73,27 @@ function readUserPayloadFromMessages(messages: unknown): {
   };
 }
 
+function readPostProcessorPayload(messages: unknown): {
+  inputSegments: Array<{ id: string; text: string }>;
+  timeline: Array<{ startMs: number; endMs: number }>;
+} {
+  if (!Array.isArray(messages)) throw new Error("messages must be an array");
+  const userMessage = messages.find(
+    (message): message is { role: string; content: string } =>
+      typeof message === "object" &&
+      message !== null &&
+      "role" in message &&
+      "content" in message &&
+      message.role === "user" &&
+      typeof message.content === "string",
+  );
+  if (!userMessage) throw new Error("missing user message");
+  return JSON.parse(userMessage.content) as {
+    inputSegments: Array<{ id: string; text: string }>;
+    timeline: Array<{ startMs: number; endMs: number }>;
+  };
+}
+
 describe("createHuggingFaceSubtitlePostProcessor", () => {
   beforeEach(() => {
     transformersMock.env.useBrowserCache = true;
@@ -734,14 +755,129 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(result.segments).toHaveLength(100);
   });
 
-  it("rejects oversized subtitle tracks before loading the local LLM", async () => {
-    const pipelineFactory = vi.fn();
+  it("chunks oversized subtitle tracks before calling the local LLM", async () => {
+    const track = makeTrackWithSegments(121);
+    const pipeline = vi.fn(async (messages: unknown) => {
+      const payload = readPostProcessorPayload(messages);
+      const firstSegment = payload.inputSegments[0];
+      const firstTimeline = payload.timeline[0];
+      const lastTimeline = payload.timeline.at(-1);
+      if (!firstSegment || !firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      return [
+        {
+          generated_text: JSON.stringify({
+            segments: [{ id: firstSegment.id, text: `${firstSegment.text} corrected` }],
+            chapters: [
+              {
+                title: `分块 ${pipeline.mock.calls.length}`,
+                startMs: firstTimeline.startMs,
+                endMs: lastTimeline.endMs,
+              },
+            ],
+          }),
+        },
+      ];
+    });
+    const pipelineFactory = vi.fn(async () => pipeline);
     const postProcessor = createHuggingFaceSubtitlePostProcessor({ pipelineFactory });
 
-    await expect(postProcessor.process({ track: makeTrackWithSegments(121) })).rejects.toThrow(
-      /字幕段过多/,
-    );
-    expect(pipelineFactory).not.toHaveBeenCalled();
+    await expect(postProcessor.process({ track })).resolves.toEqual({
+      segments: [
+        { id: "subtitle-1", text: "segment 1 corrected" },
+        { id: "subtitle-61", text: "segment 61 corrected" },
+        { id: "subtitle-121", text: "segment 121 corrected" },
+      ],
+      chapters: [
+        { title: "分块 1", startMs: 0, endMs: 60_000 },
+        { title: "分块 2", startMs: 60_000, endMs: 120_000 },
+        { title: "分块 3", startMs: 120_000, endMs: 121_000 },
+      ],
+    });
+    expect(pipelineFactory).toHaveBeenCalledTimes(1);
+    expect(pipeline).toHaveBeenCalledTimes(3);
+    for (const call of pipeline.mock.calls) {
+      const payload = readPostProcessorPayload(call[0]);
+      expect(payload.inputSegments.length).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it("drops out-of-window and repeated corrections while chunking oversized tracks", async () => {
+    const track = makeTrackWithSegments(121);
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const pipeline = vi.fn(async (messages: unknown) => {
+      const payload = readPostProcessorPayload(messages);
+      const firstSegment = payload.inputSegments[0];
+      const firstTimeline = payload.timeline[0];
+      const lastTimeline = payload.timeline.at(-1);
+      if (!firstSegment || !firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      return [
+        {
+          generated_text: JSON.stringify({
+            segments: [
+              { id: firstSegment.id, text: `${firstSegment.text} corrected` },
+              { id: firstSegment.id, text: `${firstSegment.text} duplicate` },
+              { id: "subtitle-999", text: "invented segment" },
+            ],
+            chapters: [
+              { title: "越界章节", startMs: lastTimeline.endMs + 10_000, endMs: lastTimeline.endMs + 12_000 },
+              { title: "有效章节", startMs: firstTimeline.startMs, endMs: lastTimeline.endMs },
+            ],
+          }),
+        },
+      ];
+    });
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    try {
+      await expect(postProcessor.process({ track })).resolves.toEqual({
+        segments: [
+          { id: "subtitle-1", text: "segment 1 corrected" },
+          { id: "subtitle-61", text: "segment 61 corrected" },
+          { id: "subtitle-121", text: "segment 121 corrected" },
+        ],
+        chapters: [
+          { title: "有效章节", startMs: 0, endMs: 60_000 },
+          { title: "有效章节", startMs: 60_000, endMs: 120_000 },
+          { title: "有效章节", startMs: 120_000, endMs: 121_000 },
+        ],
+      });
+      expect(debug).toHaveBeenCalledWith(
+        "[code-tape] dropped subtitle correction",
+        expect.objectContaining({ reason: "duplicate-segment" }),
+      );
+      expect(debug).toHaveBeenCalledWith(
+        "[code-tape] dropped subtitle correction",
+        expect.objectContaining({ reason: "unknown-segment", segmentId: "subtitle-999" }),
+      );
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  it("stops chunked local LLM processing after aborting between oversized track windows", async () => {
+    const abortController = new AbortController();
+    const pipeline = vi.fn(async () => {
+      abortController.abort();
+      return [
+        {
+          generated_text:
+            '{"segments":[{"id":"subtitle-1","text":"segment 1 corrected"}],"chapters":[{"title":"第一段","startMs":0,"endMs":60000}]}',
+        },
+      ];
+    });
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(
+      postProcessor.process({
+        track: makeTrackWithSegments(121),
+        signal: abortController.signal,
+      }),
+    ).rejects.toThrow(/字幕纠错已取消/);
+    expect(pipeline).toHaveBeenCalledTimes(1);
   });
 });
 
