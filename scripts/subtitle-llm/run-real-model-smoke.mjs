@@ -47,6 +47,7 @@ export async function runRealModelSmoke(options = {}) {
   let pipelineReadyDurationMs = 0;
   let generationDurationMs = 0;
   let postProcessor;
+  let metrics;
 
   try {
     const readyStartedAt = performance.now();
@@ -74,7 +75,7 @@ export async function runRealModelSmoke(options = {}) {
     );
     const errorType = classifyRealModelSmokeIssues(evaluation.failures);
     const ok = errorType === null;
-    return {
+    metrics = {
       ok,
       smokeName: SMOKE_NAME,
       outputSource: 'real-model-postprocessor',
@@ -96,7 +97,7 @@ export async function runRealModelSmoke(options = {}) {
       failures: evaluation.failures,
     };
   } catch (error) {
-    return {
+    metrics = {
       ok: false,
       smokeName: SMOKE_NAME,
       outputSource: 'real-model-postprocessor',
@@ -118,9 +119,10 @@ export async function runRealModelSmoke(options = {}) {
       errorMessage: error instanceof Error ? error.message : String(error),
       failures: [],
     };
-  } finally {
-    await postProcessor?.dispose?.();
   }
+
+  const cleanupError = await disposePostProcessorSafely(postProcessor);
+  return cleanupError ? appendCleanupError(metrics, cleanupError) : metrics;
 }
 
 export function selectRepresentativeSample(fixture, sampleId = DEFAULT_SAMPLE_ID) {
@@ -172,6 +174,25 @@ export function classifyRealModelSmokeError(error) {
   if (/segment|subtitle/i.test(message)) return 'invalid-segment-reference';
   if (/chapter|timeline/i.test(message)) return 'invalid-chapter-timeline';
   return 'generation-error';
+}
+
+async function disposePostProcessorSafely(postProcessor) {
+  try {
+    await postProcessor?.dispose?.();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function appendCleanupError(metrics, error) {
+  return {
+    ...metrics,
+    ok: false,
+    errorType: metrics.errorType ?? 'cleanup-error',
+    cleanupErrorType: 'cleanup-error',
+    cleanupErrorMessage: error instanceof Error ? error.message : String(error),
+  };
 }
 
 async function readFixture(path) {

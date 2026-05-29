@@ -551,6 +551,46 @@ test('subtitle real model smoke runner fails when quality expectations miss', as
   assert.deepEqual(metrics.failures[0].missingTerms, ['useState', 'setCount']);
 });
 
+test('subtitle real model smoke runner keeps metrics when cleanup fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        return {
+          segments: [
+            { id: 'subtitle-1', text: '这里用 useState 保存 count' },
+            { id: 'subtitle-2', text: '然后 setCount 会触发 render' },
+          ],
+          chapters: [
+            { title: '状态更新', startMs: 0, endMs: 3600 },
+            { title: '问题定位', startMs: 3600, endMs: 7200 },
+          ],
+        };
+      },
+      dispose() {
+        throw new Error('vite server close failed');
+      },
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'cleanup-error');
+  assert.equal(metrics.cleanupErrorType, 'cleanup-error');
+  assert.equal(metrics.cleanupErrorMessage, 'vite server close failed');
+  assert.equal(metrics.jsonValid, true);
+  assert.equal(metrics.segmentReferenceValid, true);
+  assert.equal(metrics.chapterTimelineValid, true);
+  assert.equal(metrics.representativePassRate, 1);
+  assert.deepEqual(metrics.failures, []);
+});
+
 test('subtitle real model smoke runner classifies common failure modes', async () => {
   const { classifyRealModelSmokeError, classifyRealModelSmokeIssues } = await import(
     '../subtitle-llm/run-real-model-smoke.mjs'
