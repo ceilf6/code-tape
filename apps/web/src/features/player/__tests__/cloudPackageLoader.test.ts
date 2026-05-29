@@ -9,7 +9,10 @@ import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
 import type { CloudPlaybackDescriptor, CloudRecordingRepository } from "@/features/cloud/types";
 import { createCloudPackageLoader } from "../cloudPackageLoader";
 
-type DescriptorRepository = Pick<CloudRecordingRepository, "getPlaybackDescriptor">;
+type DescriptorRepository = Pick<
+  CloudRecordingRepository,
+  "getPlaybackDescriptor" | "getSharedPlaybackDescriptor"
+>;
 
 describe("createCloudPackageLoader", () => {
   it("loads a ready cloud recording into a PackageLoadResult", async () => {
@@ -39,6 +42,30 @@ describe("createCloudPackageLoader", () => {
       expect(await readBlobText(result.mediaBlob!)).toBe("media");
       expect(result.warnings).toEqual([]);
     }
+  });
+
+  it("uses the shared playback descriptor lookup for share links", async () => {
+    const parts = await makePackageParts({ includeIndexes: false });
+    const repository = makeRepository({
+      ok: true,
+      value: makeDescriptor({ indexesUrl: null, mediaUrl: null }),
+    });
+    const loader = createCloudPackageLoader({
+      repository,
+      descriptorSource: "share",
+      fetch: makeAssetFetch({
+        "https://assets.example.com/manifest.json": jsonResponse(parts.manifest),
+        "https://assets.example.com/meta.json": jsonResponse(parts.meta),
+        "https://assets.example.com/events.json": jsonResponse(parts.events),
+        "https://assets.example.com/snapshots.json": jsonResponse(parts.snapshots),
+      }),
+    });
+
+    const result = await loader.load("share-token");
+
+    expect(repository.getSharedPlaybackDescriptor).toHaveBeenCalledWith("share-token");
+    expect(repository.getPlaybackDescriptor).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
   });
 
   it("returns a load error with cloud request context when descriptor lookup fails", async () => {
@@ -308,6 +335,7 @@ function makeRepository(
 ): DescriptorRepository {
   return {
     getPlaybackDescriptor: vi.fn().mockResolvedValue(result),
+    getSharedPlaybackDescriptor: vi.fn().mockResolvedValue(result),
   };
 }
 

@@ -1,12 +1,17 @@
 import type {
   CloudRecordingAssetRecord,
   CloudRecordingRecord,
+  CloudRecordingShareLinkRecord,
   UploadSessionRecord,
 } from "./types.js";
 
 export type CreateUploadWriteResult =
   | { status: "created" }
   | { status: "idempotency-key-exists"; existingSession: UploadSessionRecord };
+
+export type CreateShareLinkWriteResult =
+  | { status: "created" }
+  | { status: "token-hash-exists" };
 
 export type UpdateRecordingIfStatusResult =
   | { status: "updated"; recording: CloudRecordingRecord }
@@ -36,6 +41,14 @@ export type MetadataRepository = {
     assets: CloudRecordingAssetRecord[];
     session: UploadSessionRecord;
   }): Promise<CreateUploadWriteResult>;
+  createShareLink(
+    shareLink: CloudRecordingShareLinkRecord,
+  ): Promise<CreateShareLinkWriteResult>;
+  findShareLinkByTokenHash(tokenHash: string): Promise<CloudRecordingShareLinkRecord | null>;
+  revokeShareLinksByRecordingId(input: {
+    recordingId: string;
+    revokedAt: string;
+  }): Promise<void>;
   markUploadCompleted(input: {
     sessionId: string;
     completedAt: string;

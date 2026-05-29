@@ -88,6 +88,8 @@ const replayPageMock = vi.hoisted(() => {
   };
   const cloudRepository = {
     getPlaybackDescriptor: vi.fn(),
+    getSharedPlaybackDescriptor: vi.fn(),
+    createShareLink: vi.fn(),
   };
   const cloudLoader = {
     load: vi.fn<RecordingRepository["load"]>(async () => ({
@@ -110,6 +112,7 @@ const replayPageMock = vi.hoisted(() => {
     createCloudPackageLoader,
     packageData,
     routeId: "recording-1",
+    routeToken: "share-token",
     search: "",
     controlsProps: null as ReplayControlsProps | null,
     codeEditorProps: null as CodeEditorProps | null,
@@ -135,10 +138,17 @@ const replayPageMock = vi.hoisted(() => {
       schedulerState.driftMs = 0;
       repository.load.mockClear();
       cloudRepository.getPlaybackDescriptor.mockClear();
+      cloudRepository.getSharedPlaybackDescriptor.mockClear();
+      cloudRepository.createShareLink.mockClear();
+      cloudRepository.createShareLink.mockResolvedValue({
+        ok: true,
+        value: { url: "/s/share-token", expiresAt: null },
+      });
       cloudLoader.load.mockClear();
       createCloudRecordingRepository.mockClear();
       createCloudPackageLoader.mockClear();
       this.routeId = "recording-1";
+      this.routeToken = "share-token";
       this.search = "";
       this.controlsProps = null;
       this.codeEditorProps = null;
@@ -153,7 +163,7 @@ vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof ReactRouterDom>("react-router-dom");
   return {
     ...actual,
-    useParams: () => ({ id: replayPageMock.routeId }),
+    useParams: () => ({ id: replayPageMock.routeId, token: replayPageMock.routeToken }),
     useSearchParams: () => [new URLSearchParams(replayPageMock.search), vi.fn()],
   };
 });
@@ -224,9 +234,24 @@ describe("ReplayPage", () => {
     expect(replayPageMock.createCloudRecordingRepository).toHaveBeenCalledTimes(1);
     expect(replayPageMock.createCloudPackageLoader).toHaveBeenCalledWith({
       repository: replayPageMock.cloudRepository,
+      descriptorSource: "owner",
     });
     expect(replayPageMock.repository.load).not.toHaveBeenCalled();
     expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData);
+  });
+
+  it("loads shared replays through the share descriptor route token", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="share" />);
+
+    await waitFor(() => expect(replayPageMock.cloudLoader.load).toHaveBeenCalledWith("share-token"));
+    expect(replayPageMock.createCloudRecordingRepository).toHaveBeenCalledTimes(1);
+    expect(replayPageMock.createCloudPackageLoader).toHaveBeenCalledWith({
+      repository: replayPageMock.cloudRepository,
+      descriptorSource: "share",
+    });
+    expect(replayPageMock.repository.load).not.toHaveBeenCalled();
   });
 
   it("keeps local replays on IndexedDB by default", async () => {
@@ -262,6 +287,32 @@ describe("ReplayPage", () => {
 
     await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
     await waitFor(() => expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(42_000));
+  });
+
+  it("copies a cloud replay share link with the current timeline time", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    replayPageMock.schedulerState.timelineTimeMs = 37_500;
+    replayPageMock.cloudRepository.createShareLink.mockResolvedValueOnce({
+      ok: true,
+      value: { url: "/s/share-token?t=37500", expiresAt: null },
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="cloud" />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    fireEvent.click(screen.getByRole("button", { name: "复制当前时间分享链接" }));
+
+    await waitFor(() => {
+      expect(replayPageMock.cloudRepository.createShareLink).toHaveBeenCalledWith(
+        "recording-1",
+        { startTimeMs: 37_500 },
+      );
+    });
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("/s/share-token?t=37500"));
   });
 
   it("blocks cloud replay when the cloud loader fails", async () => {

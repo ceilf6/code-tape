@@ -1,5 +1,6 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Share2 } from "lucide-react";
 import { downloadBlob, safeFilenameStem } from "./recordingDownload";
 import { createRecordingStore } from "./recordingStore";
 import { createCloudRecordingRepository } from "@/features/cloud/cloudRecordingRepository";
@@ -180,6 +181,20 @@ export function RecordingLibraryPage() {
       openFeedbackDialog("success", `已导出「${item.title}」。`);
     } catch (err) {
       openFeedbackDialog("error", `导出失败：${(err as Error).message}`);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleShare = async (item: CloudRecordingListItem) => {
+    setBusyKey(`share-${item.id}`);
+    try {
+      const result = await cloudRepository.createShareLink(item.id, {});
+      if (!result.ok) throw new Error(formatCloudError(result.error));
+      await writeClipboard(buildAbsoluteShareUrl(result.value.url));
+      openFeedbackDialog("success", "分享链接已复制。");
+    } catch (err) {
+      openFeedbackDialog("error", `分享失败：${(err as Error).message}`);
     } finally {
       setBusyKey(null);
     }
@@ -410,6 +425,16 @@ export function RecordingLibraryPage() {
                         onClick={() => navigate(replayPath(view, item.id))}
                         disabled={busyKey !== null || importing}
                       />
+                      {view === "cloud" ? (
+                        <IconButton
+                          icon={<Share2 aria-hidden size={14} />}
+                          label="复制分享链接"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleShare(item as CloudRecordingListItem)}
+                          disabled={busyKey !== null || importing}
+                        />
+                      ) : null}
                       <Popover
                         open={pendingRenameId === item.id}
                         onOpenChange={(open) => {
@@ -710,6 +735,25 @@ function buildSaveResultError(result: Extract<SaveResult, { ok: false }>): strin
 
 function replayPath(view: "local" | "cloud", recordingId: string): string {
   return view === "cloud" ? `/replays/${recordingId}` : `/replay/${recordingId}`;
+}
+
+function buildAbsoluteShareUrl(url: string): string {
+  const basePath = normalizeBasePath(import.meta.env.BASE_URL ?? "/");
+  const path = url.startsWith("/") ? `${basePath}${url}` : url;
+  return new URL(path, window.location.origin).toString();
+}
+
+function normalizeBasePath(baseUrl: string): string {
+  const normalized = baseUrl.trim();
+  if (!normalized || normalized === "/") return "";
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+async function writeClipboard(value: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("浏览器不支持剪贴板写入");
+  }
+  await navigator.clipboard.writeText(value);
 }
 
 function tabClassName(active: boolean): string {

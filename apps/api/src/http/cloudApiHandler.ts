@@ -5,6 +5,7 @@ import type {
   CloudApiErrorCode,
   CloudResult,
   CompleteUploadSessionRequest,
+  CreateShareLinkRequest,
   CreateUploadSessionRequest,
   RecordingAssetKind,
   RenameRecordingRequest,
@@ -32,6 +33,7 @@ const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 // POST .../complete 请求体严格字段白名单：只允许这些 key
 const COMPLETE_TOP_KEYS = new Set(["uploadedAssets"]);
 const COMPLETE_ASSET_KEYS = new Set(["kind", "sha256", "sizeBytes"]);
+const SHARE_TOP_KEYS = new Set(["expiresAt", "startTimeMs"]);
 
 export function createCloudApiHandler(deps: {
   service: CloudRecordingService;
@@ -76,6 +78,43 @@ export function createCloudApiHandler(deps: {
       });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
       return jsonResponse(result.value, 200, requestId);
+    }
+
+    const sharedPlaybackMatch = url.pathname.match(/^\/api\/share\/([^/]+)\/playback$/);
+    if (request.method === "GET" && sharedPlaybackMatch) {
+      const token = safeDecodePathSegment(sharedPlaybackMatch[1]!, "share token");
+      if (!token.ok) {
+        return jsonError({ ...token.error, requestId }, requestId);
+      }
+      const result = await deps.service.getSharedPlaybackDescriptor({ token: token.value });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
+    const shareLinkMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/share-links$/);
+    if (request.method === "POST" && shareLinkMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const recordingId = safeDecodePathSegment(shareLinkMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
+      const parsed = await readJsonObject(request);
+      if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
+      const input = parseCreateShareLinkRequest(parsed.value);
+      if (!input.ok) return jsonError({ ...input.error, requestId }, requestId);
+      const result = await deps.service.createShareLink({
+        ownerId,
+        recordingId: recordingId.value,
+        input: input.value,
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 201, requestId);
     }
 
     const recordingDetailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
@@ -356,6 +395,40 @@ function parseRenameRecordingRequest(
   return { ok: true, value: { title: value.title } };
 }
 
+function parseCreateShareLinkRequest(
+  value: Record<string, unknown>,
+): CloudResult<CreateShareLinkRequest> {
+  for (const key of Object.keys(value)) {
+    if (!SHARE_TOP_KEYS.has(key)) {
+      return { ok: false, error: badRequestError(`unknown field: ${key}`) };
+    }
+  }
+
+  const input: CreateShareLinkRequest = {};
+  if ("expiresAt" in value) {
+    if (value.expiresAt === null) {
+      input.expiresAt = null;
+    } else if (isString(value.expiresAt) && Number.isFinite(Date.parse(value.expiresAt))) {
+      input.expiresAt = value.expiresAt;
+    } else {
+      return {
+        ok: false,
+        error: badRequestError("expiresAt must be an ISO date string or null"),
+      };
+    }
+  }
+  if ("startTimeMs" in value) {
+    if (!isPositiveOrZeroSafeInteger(value.startTimeMs)) {
+      return {
+        ok: false,
+        error: badRequestError("startTimeMs must be a non-negative safe integer"),
+      };
+    }
+    input.startTimeMs = value.startTimeMs;
+  }
+  return { ok: true, value: input };
+}
+
 function isRecordingAssetKind(value: string): value is RecordingAssetKind {
   return RECORDING_ASSET_KIND_SET.has(value);
 }
@@ -372,18 +445,22 @@ function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+function isPositiveOrZeroSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function readOwnerToken(request: Request): string | null {
   const token = request.headers.get("x-owner-token")?.trim();
   return token ? token : null;
 }
 
-function safeDecodePathSegment(segment: string): CloudResult<string> {
+function safeDecodePathSegment(segment: string, label = "recordingId"): CloudResult<string> {
   try {
     return { ok: true, value: decodeURIComponent(segment) };
   } catch {
     return {
       ok: false,
-      error: { code: "bad-request", message: "recordingId path segment is malformed" },
+      error: { code: "bad-request", message: `${label} path segment is malformed` },
     };
   }
 }

@@ -30,6 +30,8 @@ const cloudRepositoryMocks = {
   pollUntilReady: vi.fn(),
   list: vi.fn(),
   getPlaybackDescriptor: vi.fn(),
+  getSharedPlaybackDescriptor: vi.fn(),
+  createShareLink: vi.fn(),
   rename: vi.fn(),
   remove: vi.fn(),
   getOwnerToken: vi.fn(),
@@ -113,6 +115,10 @@ describe("RecordingLibraryPage", () => {
     cloudRepositoryMocks.list.mockResolvedValue({
       ok: true,
       value: { items: [], nextCursor: null },
+    });
+    cloudRepositoryMocks.createShareLink.mockResolvedValue({
+      ok: true,
+      value: { url: "/s/share-token?t=4200", expiresAt: null },
     });
     cloudRepositoryMocks.rename.mockResolvedValue({ ok: true, value: undefined });
     cloudRepositoryMocks.remove.mockResolvedValue({ ok: true, value: undefined });
@@ -458,6 +464,30 @@ describe("RecordingLibraryPage", () => {
     expect(screen.getByText(/JavaScript/)).toBeInTheDocument();
     expect(screen.getByText(/\u65e0\u97f3\u9891/)).toBeInTheDocument();
     expect(screen.getByText(/\u6444\u50cf\u5934/)).toBeInTheDocument();
+  });
+
+  it("copies a cloud recording share link", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    cloudRepositoryMocks.list.mockResolvedValue({
+      ok: true,
+      value: { items: [CLOUD_ITEM], nextCursor: null },
+    });
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    fireEvent.click(screen.getByRole("tab", { name: "云端录制" }));
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+    fireEvent.click(screen.getByRole("button", { name: "复制分享链接" }));
+
+    await waitFor(() => {
+      expect(cloudRepositoryMocks.createShareLink).toHaveBeenCalledWith("cloud-1", {});
+    });
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("/s/share-token?t=4200"));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("分享链接已复制");
   });
 
   it("renames and deletes cloud recordings through the cloud repository", async () => {

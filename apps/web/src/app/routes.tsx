@@ -19,6 +19,7 @@ export const appRoutes: RouteObject[] = [
       { path: "interview/candidate/:roomId?", element: <CandidateInterviewPage /> },
       { path: "replays/:id", element: <ReplayPage source="cloud" /> },
       { path: "cloud/replay/:id", element: <ReplayPage source="cloud" /> },
+      { path: "s/:token", element: <ReplayPage source="share" /> },
       { path: "interview/interviewer/:roomId", element: <RemoteInterviewWorkbenchPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

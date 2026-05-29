@@ -1,4 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { RECORDING_SCHEMA_VERSION, type RecordingLanguage } from "@code-tape/recording-schema";
+import { sha256Hex } from "@code-tape/recording-schema/hash";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
 import {
@@ -18,6 +20,8 @@ import type {
   CloudResult,
   CompleteUploadSessionRequest,
   CompleteUploadSessionResponse,
+  CreateShareLinkRequest,
+  CreateShareLinkResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
   DeleteRecordingResponse,
@@ -42,6 +46,8 @@ const RECORDING_LANGUAGE_SET = new Set<string>(RECORDING_LANGUAGES);
 const MAX_UPLOAD_SCALAR_LENGTH = 128;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const DEFAULT_LIST_LIMIT = 20;
+const SHARE_TOKEN_BYTES = 32;
+const MAX_SHARE_TOKEN_ATTEMPTS = 5;
 
 export type CloudRecordingService = {
   createUploadSession(input: {
@@ -71,9 +77,17 @@ export type CloudRecordingService = {
     ownerId: string;
     recordingId: string;
   }): Promise<CloudResult<DeleteRecordingResponse>>;
+  createShareLink(input: {
+    ownerId: string;
+    recordingId: string;
+    input: CreateShareLinkRequest;
+  }): Promise<CloudResult<CreateShareLinkResponse>>;
   getPlaybackDescriptor(input: {
     ownerId: string;
     recordingId: string;
+  }): Promise<CloudResult<CloudPlaybackDescriptor>>;
+  getSharedPlaybackDescriptor(input: {
+    token: string;
   }): Promise<CloudResult<CloudPlaybackDescriptor>>;
 };
 
@@ -82,9 +96,11 @@ export function createCloudRecordingService(deps: {
   objectStorage: ObjectStorage;
   now?: () => Date;
   createId?: (prefix: string) => string;
+  createShareToken?: () => string;
 }): CloudRecordingService {
   const now = deps.now ?? (() => new Date());
   const createId = deps.createId ?? createCounterIdFactory();
+  const createShareToken = deps.createShareToken ?? createSecureShareToken;
 
   return {
     async createUploadSession({ ownerId, input }) {
@@ -302,6 +318,10 @@ export function createCloudRecordingService(deps: {
         if (!deletedAt) {
           return { ok: false, error: { code: "not-found", message: "recording not found" } };
         }
+        await deps.metadata.revokeShareLinksByRecordingId({
+          recordingId: recording.id,
+          revokedAt: deletedAt,
+        });
         return {
           ok: true,
           value: {
@@ -330,6 +350,10 @@ export function createCloudRecordingService(deps: {
           },
         });
         if (write.status === "updated") {
+          await deps.metadata.revokeShareLinksByRecordingId({
+            recordingId: write.recording.id,
+            revokedAt: deletedAt,
+          });
           return {
             ok: true,
             value: { id: write.recording.id, status: "soft_deleted" as const, deletedAt },
@@ -350,6 +374,10 @@ export function createCloudRecordingService(deps: {
           if (!latestDeletedAt) {
             return { ok: false, error: { code: "not-found", message: "recording not found" } };
           }
+          await deps.metadata.revokeShareLinksByRecordingId({
+            recordingId: latest.id,
+            revokedAt: latestDeletedAt,
+          });
           return {
             ok: true,
             value: { id: latest.id, status: "soft_deleted" as const, deletedAt: latestDeletedAt },
@@ -361,44 +389,80 @@ export function createCloudRecordingService(deps: {
         current = latest;
       }
     },
+    async createShareLink({ ownerId, recordingId, input }) {
+      const recording = await deps.metadata.getRecording(recordingId);
+      if (!recording || recording.ownerId !== ownerId || recording.status !== "ready") {
+        return { ok: false, error: { code: "not-found", message: "recording not found" } };
+      }
+
+      const invalid = validateCreateShareLinkInput(input, recording, now());
+      if (invalid) return { ok: false, error: invalid };
+
+      const createdAt = now().toISOString();
+      const expiresAt = input.expiresAt ?? null;
+      for (let attempt = 0; attempt < MAX_SHARE_TOKEN_ATTEMPTS; attempt += 1) {
+        const token = createShareToken();
+        const tokenHash = await sha256Hex(token);
+        const write = await deps.metadata.createShareLink({
+          id: createId("share"),
+          recordingId: recording.id,
+          tokenHash,
+          createdBy: ownerId,
+          createdAt,
+          expiresAt,
+          revokedAt: null,
+        });
+        if (write.status === "created") {
+          return {
+            ok: true,
+            value: {
+              url: buildShareUrl(token, input.startTimeMs),
+              expiresAt,
+            },
+          };
+        }
+      }
+
+      return {
+        ok: false,
+        error: { code: "rate-limited", message: "share token collision retry budget exceeded" },
+      };
+    },
     async getPlaybackDescriptor({ ownerId, recordingId }) {
       const recording = await deps.metadata.getRecording(recordingId);
       if (!recording || recording.ownerId !== ownerId || recording.status !== "ready") {
         return { ok: false, error: { code: "not-found", message: "recording not found" } };
       }
 
-      const assets = await deps.metadata.listAssets(recordingId);
-      const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
-      const missingRequired = REQUIRED_ASSETS.filter((kind) => !assetsByKind.has(kind));
-      if (missingRequired.length > 0) {
-        return {
-          ok: false,
-          error: { code: "not-found", message: "playback descriptor not available" },
-        };
+      return buildPlaybackDescriptor({
+        metadata: deps.metadata,
+        objectStorage: deps.objectStorage,
+        recording,
+        now,
+      });
+    },
+    async getSharedPlaybackDescriptor({ token }) {
+      const tokenHash = await sha256Hex(token);
+      const shareLink = await deps.metadata.findShareLinkByTokenHash(tokenHash);
+      if (
+        !shareLink ||
+        shareLink.revokedAt !== null ||
+        (shareLink.expiresAt !== null && Date.parse(shareLink.expiresAt) <= now().getTime())
+      ) {
+        return { ok: false, error: { code: "not-found", message: "share link not found" } };
       }
 
-      const getUrl = (kind: RecordingAssetKind): string | null => {
-        const asset = assetsByKind.get(kind);
-        return asset ? deps.objectStorage.getAssetUrl(asset.objectKey) : null;
-      };
+      const recording = await deps.metadata.getRecording(shareLink.recordingId);
+      if (!recording || recording.status !== "ready") {
+        return { ok: false, error: { code: "not-found", message: "share link not found" } };
+      }
 
-      return {
-        ok: true,
-        value: {
-          id: recording.id,
-          title: recording.title,
-          durationMs: recording.durationMs,
-          schemaVersion: recording.schemaVersion,
-          manifestUrl: getUrl("manifest")!,
-          metaUrl: getUrl("meta")!,
-          eventsUrl: getUrl("events")!,
-          snapshotsUrl: getUrl("snapshots")!,
-          indexesUrl: getUrl("indexes"),
-          mediaUrl: getUrl("media"),
-          thumbnailUrl: getUrl("thumbnail"),
-          expiresAt: new Date(now().getTime() + PLAYBACK_DESCRIPTOR_TTL_MS).toISOString(),
-        },
-      };
+      return buildPlaybackDescriptor({
+        metadata: deps.metadata,
+        objectStorage: deps.objectStorage,
+        recording,
+        now,
+      });
     },
   };
 }
@@ -446,6 +510,46 @@ function toAssetSummary(asset: CloudRecordingAssetRecord) {
     sizeBytes: asset.sizeBytes,
     mimeType: asset.mimeType,
     validatedAt: asset.validatedAt,
+  };
+}
+
+async function buildPlaybackDescriptor(input: {
+  metadata: MetadataRepository;
+  objectStorage: ObjectStorage;
+  recording: CloudRecordingRecord;
+  now: () => Date;
+}): Promise<CloudResult<CloudPlaybackDescriptor>> {
+  const assets = await input.metadata.listAssets(input.recording.id);
+  const assetsByKind = new Map(assets.map((asset) => [asset.kind, asset]));
+  const missingRequired = REQUIRED_ASSETS.filter((kind) => !assetsByKind.has(kind));
+  if (missingRequired.length > 0) {
+    return {
+      ok: false,
+      error: { code: "not-found", message: "playback descriptor not available" },
+    };
+  }
+
+  const getUrl = (kind: RecordingAssetKind): string | null => {
+    const asset = assetsByKind.get(kind);
+    return asset ? input.objectStorage.getAssetUrl(asset.objectKey) : null;
+  };
+
+  return {
+    ok: true,
+    value: {
+      id: input.recording.id,
+      title: input.recording.title,
+      durationMs: input.recording.durationMs,
+      schemaVersion: input.recording.schemaVersion,
+      manifestUrl: getUrl("manifest")!,
+      metaUrl: getUrl("meta")!,
+      eventsUrl: getUrl("events")!,
+      snapshotsUrl: getUrl("snapshots")!,
+      indexesUrl: getUrl("indexes"),
+      mediaUrl: getUrl("media"),
+      thumbnailUrl: getUrl("thumbnail"),
+      expiresAt: new Date(input.now().getTime() + PLAYBACK_DESCRIPTOR_TTL_MS).toISOString(),
+    },
   };
 }
 
@@ -644,6 +748,44 @@ function validateRenameTitle(title: unknown): CloudApiError | null {
     };
   }
   return null;
+}
+
+function validateCreateShareLinkInput(
+  input: CreateShareLinkRequest,
+  recording: CloudRecordingRecord,
+  currentTime: Date,
+): CloudApiError | null {
+  if (input.expiresAt !== undefined && input.expiresAt !== null) {
+    const expiresAtMs = Date.parse(input.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      return { code: "bad-request", message: "expiresAt must be an ISO date string or null" };
+    }
+    if (expiresAtMs <= currentTime.getTime()) {
+      return { code: "bad-request", message: "expiresAt must be in the future" };
+    }
+  }
+  if (input.startTimeMs !== undefined) {
+    if (
+      !Number.isSafeInteger(input.startTimeMs) ||
+      input.startTimeMs < 0 ||
+      input.startTimeMs > recording.durationMs
+    ) {
+      return {
+        code: "bad-request",
+        message: "startTimeMs must be a non-negative safe integer within the recording duration",
+      };
+    }
+  }
+  return null;
+}
+
+function buildShareUrl(token: string, startTimeMs: number | undefined): string {
+  const path = `/s/${encodeURIComponent(token)}`;
+  return startTimeMs === undefined ? path : `${path}?t=${startTimeMs}`;
+}
+
+function createSecureShareToken(): string {
+  return randomBytes(SHARE_TOKEN_BYTES).toString("base64url");
 }
 
 function isRecordingAssetKind(value: string): value is RecordingAssetKind {

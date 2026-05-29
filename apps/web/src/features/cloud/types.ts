@@ -114,6 +114,16 @@ export type CompleteUploadSessionResponse = {
   status: "processing" | "ready" | "failed";
 };
 
+export type CreateShareLinkRequest = {
+  expiresAt?: string | null;
+  startTimeMs?: number;
+};
+
+export type CreateShareLinkResponse = {
+  url: string;
+  expiresAt: string | null;
+};
+
 // ─────────────────────────────────────────────────────────────
 // 录制详情与列表（与后端 CloudRecordingListItem / CloudRecordingDetail 契约一致）
 // ─────────────────────────────────────────────────────────────
@@ -252,6 +262,15 @@ export type CloudRecordingRepository = {
 
   /** 获取 ready 录制的云端播放描述 */
   getPlaybackDescriptor(recordingId: string): Promise<CloudResult<CloudPlaybackDescriptor>>;
+
+  /** 为当前 owner 的 ready 云端录制创建分享链接 */
+  createShareLink(
+    recordingId: string,
+    input: CreateShareLinkRequest,
+  ): Promise<CloudResult<CreateShareLinkResponse>>;
+
+  /** 通过分享 token 获取只读播放描述，无需 owner token */
+  getSharedPlaybackDescriptor(token: string): Promise<CloudResult<CloudPlaybackDescriptor>>;
 
   /** 重命名当前 owner 可访问的云端录制 */
   rename(recordingId: string, title: string): Promise<CloudResult<void>>;

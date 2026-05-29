@@ -7,5 +7,6 @@ describe("appRoutes", () => {
 
     expect(childPaths).toContain("replays/:id");
     expect(childPaths).toContain("cloud/replay/:id");
+    expect(childPaths).toContain("s/:token");
   });
 });

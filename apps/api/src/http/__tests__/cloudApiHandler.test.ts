@@ -534,6 +534,195 @@ test("GET /api/recordings/:recordingId/playback requires owner token", async () 
   });
 });
 
+test("POST /api/recordings/:recordingId/share-links creates a timestamped unlisted link for a ready owner recording", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-ready",
+    ownerId: "owner-1",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+      now: () => new Date("2026-05-29T00:00:00.000Z"),
+    }),
+    createRequestId: () => "req-share-create",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-share-ready/share-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({ expiresAt: null, startTimeMs: 4_200 }),
+    }),
+  );
+  const body = (await response.json()) as { url: string; expiresAt: string | null };
+
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get("x-request-id"), "req-share-create");
+  assert.match(body.url, /^\/s\/[A-Za-z0-9_-]+\?t=4200$/u);
+  assert.equal(body.expiresAt, null);
+});
+
+test("GET /api/share/:token/playback returns a shared playback descriptor without owner token", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-shared-playback",
+    ownerId: "owner-1",
+    status: "ready",
+    hasAudio: true,
+  }, ["manifest", "meta", "events", "snapshots", "media"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage,
+      now: () => new Date("2026-05-29T00:00:00.000Z"),
+    }),
+    createRequestId: () => "req-shared-playback",
+  });
+
+  const shareResponse = await handler(
+    new Request("http://localhost/api/recordings/rec-shared-playback/share-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({ startTimeMs: 12_000 }),
+    }),
+  );
+  const shareBody = (await shareResponse.json()) as { url: string };
+  const token = shareBody.url.split("/s/")[1]!.split("?")[0]!;
+
+  const response = await handler(
+    new Request(`http://localhost/api/share/${token}/playback`, { method: "GET" }),
+  );
+  const body = (await response.json()) as { id: string; mediaUrl: string | null };
+
+  assert.equal(shareResponse.status, 201);
+  assert.equal(response.status, 200);
+  assert.equal(body.id, "rec-shared-playback");
+  assert.equal(body.mediaUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-shared-playback/media/media.webm"));
+});
+
+test("POST /api/recordings/:recordingId/share-links returns 404 for owner mismatch and non-ready recordings", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-other-owner",
+    ownerId: "owner-2",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-processing",
+    ownerId: "owner-1",
+    status: "processing",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+      now: () => new Date("2026-05-29T00:00:00.000Z"),
+    }),
+    createRequestId: () => "req-share-not-found",
+  });
+
+  for (const id of ["rec-share-other-owner", "rec-share-processing", "rec-share-missing"]) {
+    const response = await handler(
+      new Request(`http://localhost/api/recordings/${id}/share-links`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-owner-token": "owner-1",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+    const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(body, {
+      error: {
+        code: "not-found",
+        message: "recording not found",
+        requestId: "req-share-not-found",
+      },
+    });
+  }
+});
+
+test("GET /api/share/:token/playback returns 404 after the share expires or the recording is deleted", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-expiring",
+    ownerId: "owner-1",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-deleted",
+    ownerId: "owner-1",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  let now = new Date("2026-05-29T00:00:00.000Z");
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+      now: () => now,
+    }),
+    createRequestId: () => "req-shared-expired",
+  });
+
+  const expiringShare = await handler(
+    new Request("http://localhost/api/recordings/rec-share-expiring/share-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({ expiresAt: "2026-05-30T00:00:00.000Z" }),
+    }),
+  );
+  const deletedShare = await handler(
+    new Request("http://localhost/api/recordings/rec-share-deleted/share-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({}),
+    }),
+  );
+  const expiringToken = ((await expiringShare.json()) as { url: string }).url.split("/s/")[1]!;
+  const deletedToken = ((await deletedShare.json()) as { url: string }).url.split("/s/")[1]!;
+
+  now = new Date("2026-05-31T00:00:00.000Z");
+  const expiredResponse = await handler(
+    new Request(`http://localhost/api/share/${expiringToken}/playback`, { method: "GET" }),
+  );
+
+  now = new Date("2026-05-29T00:01:00.000Z");
+  const deleteResponse = await handler(
+    new Request("http://localhost/api/recordings/rec-share-deleted", {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const deletedPlaybackResponse = await handler(
+    new Request(`http://localhost/api/share/${deletedToken}/playback`, { method: "GET" }),
+  );
+
+  assert.equal(expiringShare.status, 201);
+  assert.equal(deletedShare.status, 201);
+  assert.equal(deleteResponse.status, 200);
+  assert.equal(expiredResponse.status, 404);
+  assert.equal(deletedPlaybackResponse.status, 404);
+});
+
 test("GET /api/recordings/:recordingId requires owner token", async () => {
   const handler = createCloudApiHandler({
     service: createCloudRecordingService({

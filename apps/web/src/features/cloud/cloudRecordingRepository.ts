@@ -30,6 +30,8 @@ import type {
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  CreateShareLinkRequest,
+  CreateShareLinkResponse,
   CloudPlaybackDescriptor,
   ListRecordingsInput,
   ListRecordingsResponse,
@@ -201,6 +203,45 @@ export function createCloudRecordingRepository(
         return handleJsonResponse<CloudPlaybackDescriptor>(response);
       } catch (err) {
         return { ok: false, error: networkError("get playback descriptor failed", err) };
+      }
+    },
+
+    // ── 创建分享链接 ──────────────────────────────────────
+    async createShareLink(
+      recordingId: string,
+      input: CreateShareLinkRequest,
+    ): Promise<CloudResult<CreateShareLinkResponse>> {
+      const token = repo.getOwnerToken();
+      try {
+        const response = await fetch(
+          `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}/share-links`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-owner-token": token,
+            },
+            body: JSON.stringify(input),
+          },
+        );
+        return handleJsonResponse<CreateShareLinkResponse>(response);
+      } catch (err) {
+        return { ok: false, error: networkError("create share link failed", err) };
+      }
+    },
+
+    // ── 通过分享 token 获取播放描述 ───────────────────────
+    async getSharedPlaybackDescriptor(
+      token: string,
+    ): Promise<CloudResult<CloudPlaybackDescriptor>> {
+      try {
+        const response = await fetch(
+          `${apiBase}/api/share/${encodeURIComponent(token)}/playback`,
+          { method: "GET" },
+        );
+        return handleJsonResponse<CloudPlaybackDescriptor>(response);
+      } catch (err) {
+        return { ok: false, error: networkError("get shared playback descriptor failed", err) };
       }
     },
 

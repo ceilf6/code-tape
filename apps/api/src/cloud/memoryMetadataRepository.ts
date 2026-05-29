@@ -1,7 +1,12 @@
-import type { CreateUploadWriteResult, MetadataRepository } from "./metadataRepository.js";
+import type {
+  CreateShareLinkWriteResult,
+  CreateUploadWriteResult,
+  MetadataRepository,
+} from "./metadataRepository.js";
 import type {
   CloudRecordingAssetRecord,
   CloudRecordingRecord,
+  CloudRecordingShareLinkRecord,
   UploadSessionRecord,
 } from "./types.js";
 
@@ -10,6 +15,8 @@ export function createMemoryMetadataRepository(): MetadataRepository {
   const sessions = new Map<string, UploadSessionRecord>();
   const assetsByRecording = new Map<string, CloudRecordingAssetRecord[]>();
   const sessionIdByIdempotencyKey = new Map<string, string>();
+  const shareLinks = new Map<string, CloudRecordingShareLinkRecord>();
+  const shareLinkIdByTokenHash = new Map<string, string>();
 
   return {
     async findSessionByOwnerAndIdempotencyKey(
@@ -69,6 +76,35 @@ export function createMemoryMetadataRepository(): MetadataRepository {
         input.assets.map((asset) => ({ ...asset })),
       );
       return { status: "created" };
+    },
+    async createShareLink(
+      shareLink: CloudRecordingShareLinkRecord,
+    ): Promise<CreateShareLinkWriteResult> {
+      const existingShareLinkId = shareLinkIdByTokenHash.get(shareLink.tokenHash);
+      if (existingShareLinkId && shareLinks.has(existingShareLinkId)) {
+        return { status: "token-hash-exists" };
+      }
+      shareLinks.set(shareLink.id, { ...shareLink });
+      shareLinkIdByTokenHash.set(shareLink.tokenHash, shareLink.id);
+      return { status: "created" };
+    },
+    async findShareLinkByTokenHash(
+      tokenHash: string,
+    ): Promise<CloudRecordingShareLinkRecord | null> {
+      const shareLinkId = shareLinkIdByTokenHash.get(tokenHash);
+      if (!shareLinkId) return null;
+      const shareLink = shareLinks.get(shareLinkId);
+      return shareLink ? { ...shareLink } : null;
+    },
+    async revokeShareLinksByRecordingId(input: {
+      recordingId: string;
+      revokedAt: string;
+    }): Promise<void> {
+      for (const shareLink of shareLinks.values()) {
+        if (shareLink.recordingId === input.recordingId && shareLink.revokedAt === null) {
+          shareLinks.set(shareLink.id, { ...shareLink, revokedAt: input.revokedAt });
+        }
+      }
     },
     async markUploadCompleted(input: {
       sessionId: string;

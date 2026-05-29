@@ -17,7 +17,11 @@ import type {
 } from "@/features/cloud/types";
 
 export type CloudPackageLoaderOptions = {
-  repository: Pick<CloudRecordingRepository, "getPlaybackDescriptor">;
+  repository: Pick<
+    CloudRecordingRepository,
+    "getPlaybackDescriptor" | "getSharedPlaybackDescriptor"
+  >;
+  descriptorSource?: "owner" | "share";
   fetch?: typeof fetch;
 };
 
@@ -36,7 +40,10 @@ export function createCloudPackageLoader(
         return toInvalidManifest("cloud package fetch is unavailable");
       }
 
-      const descriptor = await options.repository.getPlaybackDescriptor(recordingId);
+      const descriptor =
+        options.descriptorSource === "share"
+          ? await options.repository.getSharedPlaybackDescriptor(recordingId)
+          : await options.repository.getPlaybackDescriptor(recordingId);
       if (!descriptor.ok) {
         return { ok: false, error: cloudErrorToLoadError(descriptor.error) };
       }

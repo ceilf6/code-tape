@@ -689,6 +689,69 @@ describe("CloudRecordingRepository", () => {
   });
 
   // ───────────────────────────────────────────────────────
+  // share links（云端分享）
+  // ───────────────────────────────────────────────────────
+
+  describe("share links", () => {
+    it("creates a share link with owner token and timestamp payload", async () => {
+      const repo = setupRepo();
+      mockFetch(201, { url: "/s/share-token?t=4200", expiresAt: null });
+
+      const result = await repo.createShareLink("rec_1", { startTimeMs: 4_200 });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.url).toBe("/s/share-token?t=4200");
+      expect(result.value.expiresAt).toBe(null);
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings/rec_1/share-links",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-owner-token": repo.getOwnerToken(),
+          },
+          body: JSON.stringify({ startTimeMs: 4_200 }),
+        }),
+      );
+    });
+
+    it("loads shared playback descriptor without owner token", async () => {
+      const repo = setupRepo();
+      mockFetch(200, makePlaybackDescriptor({ id: "rec_shared" }));
+
+      const result = await repo.getSharedPlaybackDescriptor("share token");
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.id).toBe("rec_shared");
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/share/share%20token/playback",
+        expect.objectContaining({
+          method: "GET",
+        }),
+      );
+      const [, init] = vi.mocked(fetch).mock.calls[0];
+      expect((init as RequestInit).headers).toBeUndefined();
+    });
+
+    it("returns structured errors when share link creation fails", async () => {
+      const repo = setupRepo();
+      mockFetch(404, {
+        error: { code: "not-found", message: "recording not found" },
+      }, { "x-request-id": "req-share-1" });
+
+      const result = await repo.createShareLink("rec_missing", {});
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("not-found");
+      expect(result.error.message).toBe("recording not found");
+      expect(result.error.requestId).toBe("req-share-1");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────
   // rename（云端重命名）
   // ───────────────────────────────────────────────────────
 

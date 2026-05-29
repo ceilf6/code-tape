@@ -9,7 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
+import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, Share2, TerminalSquare } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
 import { createTimelineClock } from "./timelineClock";
 import { ReplayControls } from "./ReplayControls";
@@ -88,7 +88,7 @@ const DEFAULT_DISPLAY_OPTIONS: ReplayDisplayOptions = {
   runtime: true,
   subtitles: true,
 };
-type ReplaySource = "local" | "cloud";
+type ReplaySource = "local" | "cloud" | "share";
 type ReplayPackageLoader = {
   load(recordingId: string): Promise<PackageLoadResult>;
 };
@@ -118,15 +118,23 @@ export type ReplayPageProps = {
 };
 
 export function ReplayPage({ source = "local" }: ReplayPageProps) {
-  const { id } = useParams();
+  const params = useParams();
+  const id = source === "share" ? params.token : params.id;
   const [searchParams] = useSearchParams();
   const initialSeekTimeMs = parseInitialSeekTimeMs(searchParams.get("t"));
+  const cloudRepository = useMemo(
+    () => (source === "cloud" || source === "share" ? createCloudRecordingRepository() : null),
+    [source],
+  );
   const packageLoader = useMemo<ReplayPackageLoader>(() => {
-    if (source === "cloud") {
-      return createCloudPackageLoader({ repository: createCloudRecordingRepository() });
+    if (source === "cloud" || source === "share") {
+      return createCloudPackageLoader({
+        repository: cloudRepository!,
+        descriptorSource: source === "share" ? "share" : "owner",
+      });
     }
     return createRecordingStore();
-  }, [source]);
+  }, [cloudRepository, source]);
   const runtime = useMemo(() => createIframeRuntime(), []);
   const [schedulerState, setSchedulerState] =
     useState<ReplaySchedulerState>(INITIAL_SCHEDULER_STATE);
@@ -136,6 +144,8 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
   const [mediaBlob, setMediaBlob] = useState<Blob | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [eventOnlyNotice, setEventOnlyNotice] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [volume, setVolume] = useState(100);
   const [muted, setMuted] = useState(false);
   const [displayOptions, setDisplayOptions] =
@@ -213,6 +223,25 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
     },
     [],
   );
+  const handleShareCurrentTime = useCallback(async () => {
+    if (source !== "cloud" || !id || !cloudRepository) return;
+    setShareBusy(true);
+    setShareFeedback(null);
+    try {
+      const result = await cloudRepository.createShareLink(id, {
+        startTimeMs: Math.floor(schedulerState.timelineTimeMs),
+      });
+      if (!result.ok) {
+        throw new Error(`${result.error.message} (${result.error.code})`);
+      }
+      await writeClipboard(buildAbsoluteShareUrl(result.value.url));
+      setShareFeedback({ tone: "success", message: "分享链接已复制。" });
+    } catch (err) {
+      setShareFeedback({ tone: "error", message: `分享失败：${formatError(err)}` });
+    } finally {
+      setShareBusy(false);
+    }
+  }, [cloudRepository, id, schedulerState.timelineTimeMs, source]);
 
   useEffect(() => scheduler.subscribe(setSchedulerState), [scheduler]);
   useEffect(() => () => scheduler.destroy(), [scheduler]);
@@ -292,7 +321,28 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
           </div>
         </div>
       ) : null}
-      <ReplayDisplayToolbar options={displayOptions} onChange={setDisplayOption} />
+      <ReplayDisplayToolbar
+        options={displayOptions}
+        onChange={setDisplayOption}
+        share={
+          source === "cloud"
+            ? { busy: shareBusy, onShare: handleShareCurrentTime }
+            : undefined
+        }
+      />
+      {shareFeedback ? (
+        <div
+          role="status"
+          className={[
+            "border-b px-4 py-2 text-sm",
+            shareFeedback.tone === "error"
+              ? "border-danger/40 bg-danger/10 text-danger"
+              : "border-border bg-surface text-foreground",
+          ].join(" ")}
+        >
+          {shareFeedback.message}
+        </div>
+      ) : null}
       <div
         aria-label="回放工作区"
         className={
@@ -504,9 +554,14 @@ function scheduleOverlayCleanup(
 function ReplayDisplayToolbar({
   options,
   onChange,
+  share,
 }: {
   options: ReplayDisplayOptions;
   onChange(key: keyof ReplayDisplayOptions, value: boolean): void;
+  share?: {
+    busy: boolean;
+    onShare(): void;
+  };
 }) {
   return (
     <div className="flex min-h-11 flex-wrap items-center gap-1 border-b border-border bg-background px-3 py-2">
@@ -540,6 +595,18 @@ function ReplayDisplayToolbar({
         label="显示字幕"
         icon={<Captions size={17} />}
       />
+      {share ? (
+        <button
+          type="button"
+          aria-label="复制当前时间分享链接"
+          title="复制当前时间分享链接"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-foreground/80 transition-[background-color,color] duration-150 ease-out-soft hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          onClick={share.onShare}
+          disabled={share.busy}
+        >
+          <Share2 aria-hidden size={17} />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -675,6 +742,31 @@ function RecordedMediaOverlay({
       />
     </div>
   );
+}
+
+function buildAbsoluteShareUrl(url: string): string {
+  const basePath = normalizeBasePath(import.meta.env.BASE_URL ?? "/");
+  const path = url.startsWith("/") ? `${basePath}${url}` : url;
+  return new URL(path, window.location.origin).toString();
+}
+
+function normalizeBasePath(baseUrl: string): string {
+  const normalized = baseUrl.trim();
+  if (!normalized || normalized === "/") return "";
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+async function writeClipboard(value: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("浏览器不支持剪贴板写入");
+  }
+  await navigator.clipboard.writeText(value);
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name;
+  if (typeof err === "string") return err;
+  return "unknown error";
 }
 
 function RuntimeOutputPanel({ runtime }: { runtime: ReplayStableState["runtime"] }) {

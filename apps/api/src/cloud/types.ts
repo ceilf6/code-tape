@@ -171,6 +171,16 @@ export type DeleteRecordingResponse = {
   deletedAt: string;
 };
 
+export type CreateShareLinkRequest = {
+  expiresAt?: string | null;
+  startTimeMs?: number;
+};
+
+export type CreateShareLinkResponse = {
+  url: string;
+  expiresAt: string | null;
+};
+
 export type ListRecordingsResponse = {
   items: CloudRecordingListItem[];
   nextCursor: string | null;
@@ -220,4 +230,14 @@ export type UploadSessionRecord = {
   idempotencyKey: string;
   createdAt: string;
   completedAt: string | null;
+};
+
+export type CloudRecordingShareLinkRecord = {
+  id: string;
+  recordingId: string;
+  tokenHash: string;
+  createdBy: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
 };
