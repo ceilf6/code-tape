@@ -1,4 +1,5 @@
 import type { CloudRecordingService } from "../cloud/cloudRecordingService.js";
+import { parseIsoUtcInstantMs } from "../cloud/isoDate.js";
 import { RECORDING_ASSET_KINDS } from "../cloud/types.js";
 import type {
   CloudApiError,
@@ -408,7 +409,7 @@ function parseCreateShareLinkRequest(
   if ("expiresAt" in value) {
     if (value.expiresAt === null) {
       input.expiresAt = null;
-    } else if (isString(value.expiresAt) && Number.isFinite(Date.parse(value.expiresAt))) {
+    } else if (isString(value.expiresAt) && parseIsoUtcInstantMs(value.expiresAt) !== null) {
       input.expiresAt = value.expiresAt;
     } else {
       return {

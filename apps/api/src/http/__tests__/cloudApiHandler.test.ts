@@ -568,6 +568,44 @@ test("POST /api/recordings/:recordingId/share-links creates a timestamped unlist
   assert.equal(body.expiresAt, null);
 });
 
+test("POST /api/recordings/:recordingId/share-links rejects parseable non-ISO expiresAt strings", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-share-non-iso-expiry",
+    ownerId: "owner-1",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage: createMemoryObjectStorage(),
+      now: () => new Date("2026-05-29T00:00:00.000Z"),
+    }),
+    createRequestId: () => "req-share-non-iso-expiry",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-share-non-iso-expiry/share-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-1",
+      },
+      body: JSON.stringify({ expiresAt: "May 30, 2026" }),
+    }),
+  );
+  const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, {
+    error: {
+      code: "bad-request",
+      message: "expiresAt must be an ISO date string or null",
+      requestId: "req-share-non-iso-expiry",
+    },
+  });
+});
+
 test("GET /api/share/:token/playback returns a shared playback descriptor without owner token", async () => {
   const metadata = createMemoryMetadataRepository();
   const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });

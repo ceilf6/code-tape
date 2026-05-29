@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { RECORDING_SCHEMA_VERSION, type RecordingLanguage } from "@code-tape/recording-schema";
 import { sha256Hex } from "@code-tape/recording-schema/hash";
+import { parseIsoUtcInstantMs } from "./isoDate.js";
 import type { MetadataRepository } from "./metadataRepository.js";
 import type { ObjectStorage } from "./objectStorage.js";
 import {
@@ -756,8 +757,8 @@ function validateCreateShareLinkInput(
   currentTime: Date,
 ): CloudApiError | null {
   if (input.expiresAt !== undefined && input.expiresAt !== null) {
-    const expiresAtMs = Date.parse(input.expiresAt);
-    if (!Number.isFinite(expiresAtMs)) {
+    const expiresAtMs = parseIsoUtcInstantMs(input.expiresAt);
+    if (expiresAtMs === null) {
       return { code: "bad-request", message: "expiresAt must be an ISO date string or null" };
     }
     if (expiresAtMs <= currentTime.getTime()) {
