@@ -438,6 +438,83 @@ test('subtitle postprocessor evaluation CLI uses the current postprocessor runne
   assert.equal(metrics.failures.length, 0);
 });
 
+test('subtitle real model smoke runner reports timing and contract metrics with an injected postprocessor', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+  const calls = [];
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    model: 'ceilf6/test-subtitle-postprocessor',
+    device: 'wasm',
+    dtype: 'q8',
+    createPostProcessor: async ({ model, device, dtype }) => {
+      calls.push({ model, device, dtype });
+      return {
+        async warmUp() {},
+        async process() {
+          return {
+            segments: [
+              { id: 'subtitle-1', text: '这里用 useState 保存 count' },
+              { id: 'subtitle-2', text: '然后 setCount 会触发 render' },
+            ],
+            chapters: [
+              { title: '状态更新', startMs: 0, endMs: 3600 },
+              { title: '问题定位', startMs: 3600, endMs: 7200 },
+            ],
+          };
+        },
+        dispose() {},
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { model: 'ceilf6/test-subtitle-postprocessor', device: 'wasm', dtype: 'q8' },
+  ]);
+  assert.equal(metrics.ok, true);
+  assert.equal(metrics.smokeName, 'subtitle-postprocessor-real-model-smoke');
+  assert.equal(metrics.outputSource, 'real-model-postprocessor');
+  assert.equal(metrics.model, 'ceilf6/test-subtitle-postprocessor');
+  assert.equal(metrics.device, 'wasm');
+  assert.equal(metrics.dtype, 'q8');
+  assert.equal(metrics.sampleId, 'react-state-loop');
+  assert.ok(metrics.pipelineReadyDurationMs >= 0);
+  assert.ok(metrics.generationDurationMs >= 0);
+  assert.ok(metrics.totalDurationMs >= metrics.generationDurationMs);
+  assert.equal(metrics.jsonValid, true);
+  assert.equal(metrics.segmentReferenceValid, true);
+  assert.equal(metrics.chapterTimelineValid, true);
+  assert.equal(metrics.representativePassRate, 1);
+  assert.deepEqual(metrics.failures, []);
+});
+
+test('subtitle real model smoke runner classifies common failure modes', async () => {
+  const { classifyRealModelSmokeError, classifyRealModelSmokeIssues } = await import(
+    '../subtitle-llm/run-real-model-smoke.mjs'
+  );
+
+  assert.equal(
+    classifyRealModelSmokeError(new Error('当前浏览器无法加载本地字幕 LLM 模型（wasm/q8）')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('LLM 输出中未找到 JSON 对象')),
+    'invalid-json',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: ['unknown-segment'] }]),
+    'invalid-segment-reference',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: ['invalid-chapter-timeline'] }]),
+    'invalid-chapter-timeline',
+  );
+});
+
 test('PR self-check asks for one correction and chapter generation evaluation result', () => {
   const template = readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
   const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
@@ -453,9 +530,17 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(template, /postProcessTimeoutBudgetMs/u);
   assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
   assert.equal(
+    packageJson.scripts['subtitle:postprocess:real-model-smoke'],
+    'node scripts/subtitle-llm/run-real-model-smoke.mjs',
+  );
+  assert.equal(
     packageJson.scripts['subtitle:postprocess:runtime-benchmark'],
     'node scripts/subtitle-llm/run-runtime-benchmark.mjs',
   );
+  assert.match(technicalPlan, /npm run subtitle:postprocess:real-model-smoke/u);
+  assert.match(technicalPlan, /pipelineReadyDurationMs/u);
+  assert.match(technicalPlan, /generationDurationMs/u);
+  assert.match(technicalPlan, /chapterTimelineValid/u);
   const runtimeBenchmarkRunner = readFileSync(
     'scripts/subtitle-llm/run-runtime-benchmark.mjs',
     'utf8',

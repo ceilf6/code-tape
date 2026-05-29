@@ -23,6 +23,7 @@
     "subtitle:evaluate": "node scripts/subtitle-llm/evaluate-corpus.mjs ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:postprocess:evaluate": "node scripts/subtitle-llm/evaluate-postprocessor.mjs scripts/tests/fixtures/subtitle-postprocessor-eval.json",
     "subtitle:postprocess:runtime-benchmark": "node scripts/subtitle-llm/run-runtime-benchmark.mjs",
+    "subtitle:postprocess:real-model-smoke": "node scripts/subtitle-llm/run-real-model-smoke.mjs",
     "subtitle:train": "python3 ml/subtitle-postprocessor/train_lora.py --train-jsonl ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:train:help": "python3 ml/subtitle-postprocessor/train_lora.py --help",
     "dev": "npm run dev -w apps/web -- --host 127.0.0.1",

@@ -270,7 +270,7 @@ async function createPostprocessorFixtureRunner() {
   };
 }
 
-function buildTrackFromSample(sample) {
+export function buildTrackFromSample(sample) {
   return {
     recordingId: typeof sample.id === 'string' ? sample.id : 'subtitle-postprocessor-fixture',
     generatedAt: '2026-05-29T00:00:00.000Z',
@@ -286,7 +286,7 @@ function buildTrackFromSample(sample) {
   };
 }
 
-function buildContextFromSample(sample) {
+export function buildContextFromSample(sample) {
   const context = sample.input?.context;
   if (!isPlainObject(context)) return undefined;
   return {
