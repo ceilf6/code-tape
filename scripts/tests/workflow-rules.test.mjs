@@ -1215,6 +1215,16 @@ test('pages workflow deploys the web app with the GitHub Pages contract', () => 
   assert.match(workflow, /actions\/deploy-pages@v4/);
 });
 
+test('contract guard workflow uses a GitNexus-compatible Node runtime', () => {
+  const workflow = readFileSync('.github/workflows/contract-guard.yml', 'utf8');
+
+  assert.match(workflow, /name:\s*Contract Guard/);
+  assert.match(workflow, /actions\/setup-node@v4/);
+  assert.match(workflow, /node-version:\s*22/);
+  assert.doesNotMatch(workflow, /node-version:\s*20/);
+  assert.match(workflow, /npm run contract:gitnexus/);
+});
+
 test('repo guard supports fork pull requests without checking out PR code', () => {
   const workflow = readFileSync('.github/workflows/repo-guard.yml', 'utf8');
 
