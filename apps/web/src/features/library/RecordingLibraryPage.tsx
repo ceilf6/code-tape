@@ -2,9 +2,13 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } f
 import { Link, useNavigate } from "react-router-dom";
 import { downloadBlob, safeFilenameStem } from "./recordingDownload";
 import { createRecordingStore } from "./recordingStore";
+import { createCloudRecordingRepository } from "@/features/cloud/cloudRecordingRepository";
+import type { CloudApiError, CloudRecordingListItem } from "@/features/cloud/types";
 import { formatDurationMs } from "@/shared/time/duration";
 import { IconButton, Popover, Tooltip } from "@/shared/ui";
-import type { RecordingListItem, SaveResult } from "@/shared/recording-schema";
+import type { PackageLoadError, RecordingListItem, SaveResult } from "@/shared/recording-schema";
+
+type LibraryItem = RecordingListItem | CloudRecordingListItem;
 
 /**
  * RecordingLibraryPage — wires the RecordingRepository and lists completed
@@ -17,8 +21,11 @@ import type { RecordingListItem, SaveResult } from "@/shared/recording-schema";
  */
 export function RecordingLibraryPage() {
   const navigate = useNavigate();
-  const repository = useMemo(() => createRecordingStore(), []);
-  const [items, setItems] = useState<RecordingListItem[]>([]);
+  const localRepository = useMemo(() => createRecordingStore(), []);
+  const cloudRepository = useMemo(() => createCloudRecordingRepository(), []);
+  const [view, setView] = useState<"local" | "cloud">("local");
+  const [localItems, setLocalItems] = useState<RecordingListItem[]>([]);
+  const [cloudItems, setCloudItems] = useState<CloudRecordingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [feedbackDialog, setFeedbackDialog] = useState<{ tone: "success" | "error"; message: string } | null>(null);
@@ -30,15 +37,16 @@ export function RecordingLibraryPage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [quota, setQuota] = useState<{ usageBytes: number; quotaBytes: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ recordingId: string; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refreshLocal = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     let loadError: string | null = null;
     try {
-      const list = await repository.list();
-      setItems(list);
+      const list = await localRepository.list();
+      setLocalItems(list);
       setLoadError(null);
     } catch (err) {
       loadError = `读取失败：${(err as Error).message}`;
@@ -51,33 +59,73 @@ export function RecordingLibraryPage() {
         setFeedbackDialog({ tone: "error", message: loadError as string });
       }, 0);
     }
-  }, [repository]);
+  }, [localRepository]);
+
+  const refreshCloud = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    let loadError: string | null = null;
+    try {
+      const result = await cloudRepository.list();
+      if (!result.ok) {
+        throw new Error(formatCloudError(result.error));
+      }
+      setCloudItems(result.value.items);
+      setLoadError(null);
+    } catch (err) {
+      loadError = `读取云端失败：${(err as Error).message}`;
+      setLoadError(loadError);
+    } finally {
+      setLoading(false);
+    }
+    if (loadError) {
+      setTimeout(() => {
+        setFeedbackDialog({ tone: "error", message: loadError as string });
+      }, 0);
+    }
+  }, [cloudRepository]);
+
+  const refresh = useCallback(async () => {
+    if (view === "cloud") {
+      await refreshCloud();
+      return;
+    }
+    await refreshLocal();
+  }, [refreshCloud, refreshLocal, view]);
 
   const refreshQuota = useCallback(async () => {
     try {
-      const estimate = await repository.estimateQuota();
+      const estimate = await localRepository.estimateQuota();
       setQuota(estimate.quotaBytes > 0 ? estimate : null);
     } catch {
       setQuota(null);
     }
-  }, [repository]);
+  }, [localRepository]);
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
     void refreshQuota();
-    void repository.sweep().catch(() => {
+    void localRepository.sweep().catch(() => {
       // Sweep failure should not block library rendering.
     });
-  }, [refresh, refreshQuota, repository]);
+  }, [refreshQuota, localRepository]);
 
-  const handleDelete = async (item: RecordingListItem) => {
+  const handleDelete = async (item: LibraryItem) => {
     setBusyKey(`delete-${item.id}`);
     setDeleteError(null);
     try {
-      await repository.remove(item.id);
+      if (view === "cloud") {
+        const result = await cloudRepository.remove(item.id);
+        if (!result.ok) throw new Error(formatCloudError(result.error));
+      } else {
+        await localRepository.remove(item.id);
+      }
       setPendingDeleteId(null);
       await refresh();
-      await refreshQuota();
+      if (view === "local") await refreshQuota();
     } catch (err) {
       setDeleteError(`删除失败：${(err as Error).message}`);
     } finally {
@@ -85,7 +133,7 @@ export function RecordingLibraryPage() {
     }
   };
 
-  const handleRenameStart = (item: RecordingListItem) => {
+  const handleRenameStart = (item: LibraryItem) => {
     setPendingRenameId(item.id);
     setPendingRenameValue(item.title);
     setRenameError(null);
@@ -97,7 +145,7 @@ export function RecordingLibraryPage() {
     setRenameError(null);
   };
 
-  const handleRenameSubmit = async (item: RecordingListItem) => {
+  const handleRenameSubmit = async (item: LibraryItem) => {
     const nextTitle = pendingRenameValue.trim();
     if (!nextTitle) {
       setRenameError("标题不能为空。");
@@ -109,7 +157,12 @@ export function RecordingLibraryPage() {
     }
     setBusyKey(`rename-${item.id}`);
     try {
-      await repository.rename(item.id, nextTitle);
+      if (view === "cloud") {
+        const result = await cloudRepository.rename(item.id, nextTitle);
+        if (!result.ok) throw new Error(formatCloudError(result.error));
+      } else {
+        await localRepository.rename(item.id, nextTitle);
+      }
       handleRenameCancel();
       await refresh();
     } catch (err) {
@@ -122,7 +175,7 @@ export function RecordingLibraryPage() {
   const handleExport = async (item: RecordingListItem) => {
     setBusyKey(`export-${item.id}`);
     try {
-      const zipBlob = await repository.exportZip(item.id);
+      const zipBlob = await localRepository.exportZip(item.id);
       downloadBlob(zipBlob, `${safeFilenameStem(item.title, item.id)}.zip`);
       openFeedbackDialog("success", `已导出「${item.title}」。`);
     } catch (err) {
@@ -138,7 +191,7 @@ export function RecordingLibraryPage() {
     if (!file) return;
     setImporting(true);
     try {
-      const imported = await repository.importZip(file);
+      const imported = await localRepository.importZip(file);
       if (!imported.ok) {
         openFeedbackDialog("error", buildImportErrorMessage(imported));
         return;
@@ -153,6 +206,54 @@ export function RecordingLibraryPage() {
     }
   };
 
+  const handleUpload = async (item: RecordingListItem) => {
+    setBusyKey(`upload-${item.id}`);
+    setUploadProgress({ recordingId: item.id, message: "准备上传…" });
+    try {
+      const loaded = await localRepository.load(item.id);
+      if (!loaded.ok) {
+        throw new Error(`本地录制包读取失败：${formatPackageLoadError(loaded.error)}`);
+      }
+      const blobs = loaded.mediaBlob ? { media: loaded.mediaBlob } : {};
+      const upload = await cloudRepository.uploadPackage(
+        loaded.package,
+        blobs,
+        {
+          timeoutMs: 60_000,
+          onProgress: (progress) => {
+            setUploadProgress({
+              recordingId: item.id,
+              message: formatUploadProgress(progress.bytesUploaded, progress.totalBytes),
+            });
+          },
+        },
+      );
+      if (!upload.ok) throw new Error(formatCloudError(upload.error));
+
+      setUploadProgress({ recordingId: item.id, message: "云端校验中…" });
+      const ready = await cloudRepository.pollUntilReady(upload.value.recordingId, {
+        intervalMs: 1_000,
+        timeoutMs: 60_000,
+      });
+      if (!ready.ok) throw new Error(formatCloudError(ready.error));
+      if (ready.value.recording.status === "failed") {
+        throw new Error(
+          ready.value.recording.failureMessage ??
+            ready.value.recording.failureCode ??
+            "云端校验失败",
+        );
+      }
+
+      openFeedbackDialog("success", `已上传「${item.title}」。`);
+      setView("cloud");
+    } catch (err) {
+      openFeedbackDialog("error", `上传失败：${(err as Error).message}`);
+    } finally {
+      setUploadProgress(null);
+      setBusyKey(null);
+    }
+  };
+
   const quotaLabel = useMemo(() => {
     if (!quota || quota.quotaBytes <= 0) return null;
     const usageMB = (quota.usageBytes / (1024 * 1024)).toFixed(1);
@@ -161,7 +262,8 @@ export function RecordingLibraryPage() {
     return `本地存储 ${usageMB} / ${quotaMB} MB (${ratio}%)`;
   }, [quota]);
 
-  const canImport = !loading && !importing && busyKey === null;
+  const items = view === "cloud" ? cloudItems : localItems;
+  const canImport = view === "local" && !loading && !importing && busyKey === null;
   const showEmpty = !loading && !loadError && items.length === 0;
 
   const openImportPicker = () => {
@@ -179,6 +281,30 @@ export function RecordingLibraryPage() {
           <p className="text-xs uppercase tracking-[0.3em] text-muted">code-tape</p>
           <h1 className="font-display text-3xl font-semibold">我的录制</h1>
           {quotaLabel ? <p className="mt-2 text-xs text-muted">{quotaLabel}</p> : null}
+          <div
+            role="tablist"
+            aria-label="录制来源"
+            className="mt-4 inline-flex rounded-md border border-border bg-surface p-1"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "local"}
+              className={tabClassName(view === "local")}
+              onClick={() => setView("local")}
+            >
+              本地录制
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "cloud"}
+              className={tabClassName(view === "cloud")}
+              onClick={() => setView("cloud")}
+            >
+              云端录制
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -189,14 +315,16 @@ export function RecordingLibraryPage() {
             aria-label="导入 zip 文件"
             onChange={(event) => void handleImportChange(event)}
           />
-          <button
-            type="button"
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={openImportPicker}
-            disabled={!canImport}
-          >
-            {importing ? "导入中…" : "导入 ZIP"}
-          </button>
+          {view === "local" ? (
+            <button
+              type="button"
+              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={openImportPicker}
+              disabled={!canImport}
+            >
+              {importing ? "导入中…" : "导入 ZIP"}
+            </button>
+          ) : null}
           <Link
             to="/record"
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
@@ -219,9 +347,11 @@ export function RecordingLibraryPage() {
         </div>
       ) : showEmpty ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-surface/60 p-12 text-center">
-          <p className="font-display text-lg">还没有录制</p>
+          <p className="font-display text-lg">{view === "cloud" ? "还没有云端录制" : "还没有录制"}</p>
           <p className="max-w-sm text-sm text-muted">
-            点击右上角「新建录制」开始第一段代码讲解。
+            {view === "cloud"
+              ? "从本地录制列表上传后，会在这里查看和播放云端录制。"
+              : "点击右上角「新建录制」开始第一段代码讲解。"}
           </p>
         </div>
       ) : (
@@ -250,7 +380,7 @@ export function RecordingLibraryPage() {
                 <tr key={item.id} className="align-top">
                   <td className="px-4 py-3 text-center">
                     <EllipsisLink
-                      to={`/replay/${item.id}`}
+                      to={replayPath(view, item.id)}
                       text={item.title}
                       className="font-medium text-foreground hover:underline"
                       align="center"
@@ -277,7 +407,7 @@ export function RecordingLibraryPage() {
                         label="回放"
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/replay/${item.id}`)}
+                        onClick={() => navigate(replayPath(view, item.id))}
                         disabled={busyKey !== null || importing}
                       />
                       <Popover
@@ -340,14 +470,26 @@ export function RecordingLibraryPage() {
                           </div>
                         </form>
                       </Popover>
-                      <IconButton
-                        icon={<span aria-hidden>⇩</span>}
-                        label="导出 ZIP"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleExport(item)}
-                        disabled={busyKey !== null || importing}
-                      />
+                      {view === "local" ? (
+                        <>
+                          <IconButton
+                            icon={<span aria-hidden>⇧</span>}
+                            label="上传到云端"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleUpload(item as RecordingListItem)}
+                            disabled={busyKey !== null || importing}
+                          />
+                          <IconButton
+                            icon={<span aria-hidden>⇩</span>}
+                            label="导出 ZIP"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleExport(item as RecordingListItem)}
+                            disabled={busyKey !== null || importing}
+                          />
+                        </>
+                      ) : null}
                       <Popover
                         open={pendingDeleteId === item.id}
                         onOpenChange={(open) => {
@@ -397,6 +539,9 @@ export function RecordingLibraryPage() {
                         </div>
                       </Popover>
                     </div>
+                    {uploadProgress?.recordingId === item.id ? (
+                      <p className="mt-1 text-right text-[11px] text-muted">{uploadProgress.message}</p>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -561,6 +706,38 @@ function buildSaveResultError(result: Extract<SaveResult, { ok: false }>): strin
     return `媒体写入失败（${result.message}）。`;
   }
   return result.message;
+}
+
+function replayPath(view: "local" | "cloud", recordingId: string): string {
+  return view === "cloud" ? `/replays/${recordingId}` : `/replay/${recordingId}`;
+}
+
+function tabClassName(active: boolean): string {
+  return [
+    "rounded px-3 py-1.5 text-xs font-medium transition-colors",
+    active ? "bg-background text-foreground shadow-sm" : "text-muted hover:text-foreground",
+  ].join(" ");
+}
+
+function formatCloudError(error: CloudApiError): string {
+  const request = error.requestId ? `，requestId: ${error.requestId}` : "";
+  return `${error.message}（${error.code}${request}）`;
+}
+
+function formatPackageLoadError(error: PackageLoadError): string {
+  if (error.code === "unsupported-schema") return `不支持的 schema：${error.schemaVersion}`;
+  if (error.code === "invalid-manifest") return error.message;
+  if (error.code === "invalid-event") {
+    return error.seq === undefined ? error.message : `事件 ${error.seq} 无效：${error.message}`;
+  }
+  if (error.code === "checksum-mismatch") return `${error.target} checksum mismatch`;
+  return `录制包不完整：${error.packageId}`;
+}
+
+function formatUploadProgress(bytesUploaded: number, totalBytes: number): string {
+  if (totalBytes <= 0) return "上传中…";
+  const percent = Math.min(100, Math.max(0, Math.round((bytesUploaded / totalBytes) * 100)));
+  return `上传中 ${percent}%`;
 }
 
 function formatCreatedAt(value: string): string {
