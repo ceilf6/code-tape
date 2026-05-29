@@ -89,6 +89,64 @@ describe("InterviewRealtimeReceiver", () => {
     expect(ignoredReasons).toEqual(["invalid-message", "invalid-message"]);
   });
 
+  it("applies state-snapshot messages and replays buffered later events", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+    const channel = createFakeEventsChannel();
+
+    createInterviewRealtimeReceiver({ roomId: "room-1", workbench }).attach(channel);
+    channel.emit(JSON.stringify(messageFor(contentEvent(3, "const replayed = true;"))));
+    channel.emit(
+      JSON.stringify(
+        snapshotMessage(2, {
+          ...initialState(),
+          editor: {
+            ...initialState().editor,
+            code: "const recovered = true;",
+          },
+        }),
+      ),
+    );
+
+    const state = workbench.getState();
+    expect(state.stableState.editor.code).toBe("const replayed = true;");
+    expect(state.lastAppliedSeq).toBe(3);
+    expect(state.expectedSeq).toBe(4);
+    expect(state.syncStatus).toBe("live");
+    expect(state.snapshotRequestNeeded).toBeNull();
+  });
+
+  it("ignores malformed state-snapshot messages", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+    const channel = createFakeEventsChannel();
+    const ignoredReasons: string[] = [];
+
+    createInterviewRealtimeReceiver({
+      roomId: "room-1",
+      workbench,
+      onMessageResult: (result) => {
+        if (!result.ok) {
+          ignoredReasons.push(result.reason);
+        }
+      },
+    }).attach(channel);
+    channel.emit(
+      JSON.stringify({
+        ...snapshotMessage(1, initialState()),
+        state: {
+          ...initialState(),
+          editor: {
+            ...initialState().editor,
+            code: 42,
+          },
+        },
+      }),
+    );
+
+    expect(workbench.getState().stableState.editor.code).toBe("");
+    expect(workbench.getState().lastAppliedSeq).toBe(0);
+    expect(ignoredReasons).toEqual(["invalid-message"]);
+  });
+
   it("detaches the message handler so closed or unmounted views stop applying events", () => {
     const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
     const channel = createFakeEventsChannel();
@@ -149,6 +207,20 @@ function messageFor(event: RecordingEvent) {
     sentAt: 1_000 + event.seq,
     stateVersion: event.seq,
     event,
+  };
+}
+
+function snapshotMessage(snapshotSeq: number, state: ReplayStableState) {
+  return {
+    kind: "state-snapshot" as const,
+    roomId: "room-1",
+    sessionId: "session-1",
+    messageId: `snapshot-${snapshotSeq}`,
+    sentAt: 2_000 + snapshotSeq,
+    snapshotSeq,
+    snapshotTimeMs: snapshotSeq * 100,
+    stateVersion: snapshotSeq,
+    state,
   };
 }
 

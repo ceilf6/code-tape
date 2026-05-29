@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EventBus, RecordingEvent } from "@/shared/recording-schema";
+import type { EventBus, RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
 import {
   createInterviewSyncPublisher,
   createRemoteTimelineBuffer,
@@ -208,6 +208,36 @@ describe("RemoteTimelineBuffer", () => {
       lastAppliedSeq: 1,
     });
   });
+
+  it("accepts snapshots to skip gaps and replay buffered later events", () => {
+    const buffer = createRemoteTimelineBuffer({ initialExpectedSeq: 2 });
+
+    buffer.pushRecordingEvent(messageFor(contentEvent(3)));
+    const result = buffer.pushSnapshot(snapshotMessage(2));
+
+    expect(result.snapshotAccepted).toBe(true);
+    expect(result.appliedEvents.map((event) => event.seq)).toEqual([3]);
+    expect(result.lastAppliedSeq).toBe(3);
+    expect(result.expectedSeq).toBe(4);
+    expect(result.snapshotRequestNeeded).toBeNull();
+  });
+
+  it("ignores stale snapshots without clearing the pending gap", () => {
+    const buffer = createRemoteTimelineBuffer();
+
+    buffer.pushRecordingEvent(messageFor(contentEvent(1)));
+    buffer.pushRecordingEvent(messageFor(contentEvent(3)));
+    const result = buffer.pushSnapshot(snapshotMessage(0));
+
+    expect(result.snapshotAccepted).toBe(false);
+    expect(result.appliedEvents).toEqual([]);
+    expect(result.lastAppliedSeq).toBe(1);
+    expect(result.snapshotRequestNeeded).toEqual({
+      reason: "gap-detected",
+      expectedSeq: 2,
+      lastAppliedSeq: 1,
+    });
+  });
 });
 
 function messageFor(event: RecordingEvent) {
@@ -219,5 +249,19 @@ function messageFor(event: RecordingEvent) {
     sentAt: event.timestampMs,
     stateVersion: 1,
     event,
+  };
+}
+
+function snapshotMessage(snapshotSeq: number) {
+  return {
+    kind: "state-snapshot" as const,
+    roomId: "room-1",
+    sessionId: "session-1",
+    messageId: `snapshot-${snapshotSeq}`,
+    sentAt: snapshotSeq * 100,
+    snapshotSeq,
+    snapshotTimeMs: snapshotSeq * 100,
+    stateVersion: snapshotSeq,
+    state: {} as ReplayStableState,
   };
 }

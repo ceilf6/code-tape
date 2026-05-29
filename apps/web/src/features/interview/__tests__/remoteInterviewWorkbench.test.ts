@@ -104,6 +104,26 @@ function messageFor(event: RecordingEvent) {
   };
 }
 
+function snapshotMessage(snapshotSeq: number, code: string) {
+  return {
+    kind: "state-snapshot" as const,
+    roomId: "room-1",
+    sessionId: "session-1",
+    messageId: `snapshot-${snapshotSeq}`,
+    sentAt: snapshotSeq * 100,
+    snapshotSeq,
+    snapshotTimeMs: snapshotSeq * 100,
+    stateVersion: snapshotSeq,
+    state: {
+      ...initialState(),
+      editor: {
+        ...initialState().editor,
+        code,
+      },
+    },
+  };
+}
+
 describe("RemoteInterviewWorkbench", () => {
   it("applies out-of-order remote events through the replay reducer in candidate seq order", () => {
     const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
@@ -140,6 +160,22 @@ describe("RemoteInterviewWorkbench", () => {
       expectedSeq: 2,
       lastAppliedSeq: 1,
     });
+  });
+
+  it("uses snapshots to recover gaps and replay buffered later events", () => {
+    const workbench = createRemoteInterviewWorkbench({
+      initialState: initialState(),
+      initialExpectedSeq: 2,
+    });
+
+    workbench.pushRecordingEvent(messageFor(contentEvent(3, "const afterSnapshot = true;")));
+    const state = workbench.pushSnapshot(snapshotMessage(2, "const fromSnapshot = true;"));
+
+    expect(state.stableState.editor.code).toBe("const afterSnapshot = true;");
+    expect(state.lastAppliedSeq).toBe(3);
+    expect(state.expectedSeq).toBe(4);
+    expect(state.syncStatus).toBe("live");
+    expect(state.snapshotRequestNeeded).toBeNull();
   });
 
   it("ignores duplicate and old events without rolling back stable state", () => {

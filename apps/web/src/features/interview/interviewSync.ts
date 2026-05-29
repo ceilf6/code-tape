@@ -142,12 +142,17 @@ export type RemoteTimelineBufferResult = {
   snapshotRequestNeeded: SnapshotRequestNeed | null;
 };
 
+export type RemoteTimelineBufferSnapshotResult = RemoteTimelineBufferResult & {
+  snapshotAccepted: boolean;
+};
+
 export type RemoteTimelineBufferOptions = {
   initialExpectedSeq?: number;
 };
 
 export type RemoteTimelineBuffer = {
   pushRecordingEvent(message: InterviewRecordingEventMessage): RemoteTimelineBufferResult;
+  pushSnapshot(message: InterviewSnapshotMessage): RemoteTimelineBufferSnapshotResult;
   state(): Omit<RemoteTimelineBufferResult, "appliedEvents">;
 };
 
@@ -169,6 +174,21 @@ export function createRemoteTimelineBuffer(
     snapshotRequestNeeded: currentSnapshotNeed(),
   });
 
+  const drainContiguousEvents = (): RecordingEvent[] => {
+    const appliedEvents: RecordingEvent[] = [];
+    while (bufferedEvents.has(expectedSeq)) {
+      const next = bufferedEvents.get(expectedSeq);
+      if (!next) {
+        break;
+      }
+      bufferedEvents.delete(expectedSeq);
+      appliedEvents.push(next);
+      lastAppliedSeq = next.seq;
+      expectedSeq = next.seq + 1;
+    }
+    return appliedEvents;
+  };
+
   return {
     pushRecordingEvent(message) {
       const { event } = message;
@@ -179,19 +199,25 @@ export function createRemoteTimelineBuffer(
         bufferedEvents.set(event.seq, event);
       }
 
-      const appliedEvents: RecordingEvent[] = [];
-      while (bufferedEvents.has(expectedSeq)) {
-        const next = bufferedEvents.get(expectedSeq);
-        if (!next) {
-          break;
-        }
-        bufferedEvents.delete(expectedSeq);
-        appliedEvents.push(next);
-        lastAppliedSeq = next.seq;
-        expectedSeq = next.seq + 1;
-      }
+      const appliedEvents = drainContiguousEvents();
 
       return { appliedEvents, ...currentState() };
+    },
+    pushSnapshot(message) {
+      if (message.snapshotSeq < lastAppliedSeq) {
+        return { snapshotAccepted: false, appliedEvents: [], ...currentState() };
+      }
+
+      for (const seq of bufferedEvents.keys()) {
+        if (seq <= message.snapshotSeq) {
+          bufferedEvents.delete(seq);
+        }
+      }
+      lastAppliedSeq = message.snapshotSeq;
+      expectedSeq = message.snapshotSeq + 1;
+
+      const appliedEvents = drainContiguousEvents();
+      return { snapshotAccepted: true, appliedEvents, ...currentState() };
     },
     state: currentState,
   };

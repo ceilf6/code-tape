@@ -12,6 +12,7 @@ export {
   type InterviewSyncPublisher,
   type RemoteTimelineBuffer,
   type RemoteTimelineBufferResult,
+  type RemoteTimelineBufferSnapshotResult,
   type SnapshotRequestNeed,
 } from "./interviewSync";
 export {

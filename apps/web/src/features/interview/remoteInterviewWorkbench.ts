@@ -6,6 +6,7 @@ import {
 import {
   createRemoteTimelineBuffer,
   type InterviewRecordingEventMessage,
+  type InterviewSnapshotMessage,
   type SnapshotRequestNeed,
 } from "./interviewSync";
 
@@ -27,6 +28,7 @@ export type RemoteInterviewWorkbenchOptions = {
 export type RemoteInterviewWorkbench = {
   getState(): RemoteInterviewWorkbenchState;
   pushRecordingEvent(message: InterviewRecordingEventMessage): RemoteInterviewWorkbenchState;
+  pushSnapshot(message: InterviewSnapshotMessage): RemoteInterviewWorkbenchState;
   subscribe(listener: (state: RemoteInterviewWorkbenchState) => void): () => void;
 };
 
@@ -58,6 +60,14 @@ export function createRemoteInterviewWorkbench(
     getState: snapshot,
     pushRecordingEvent(message) {
       const result = buffer.pushRecordingEvent(message);
+      stableState = result.appliedEvents.reduce(replayReducer, stableState);
+      return notify();
+    },
+    pushSnapshot(message) {
+      const result = buffer.pushSnapshot(message);
+      if (result.snapshotAccepted) {
+        stableState = cloneReplayStableState(message.state);
+      }
       stableState = result.appliedEvents.reduce(replayReducer, stableState);
       return notify();
     },
