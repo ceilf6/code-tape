@@ -25,6 +25,7 @@ async function flushPromises() {
 function createMockWorker() {
   const messageListeners = new Set<(event: MessageEvent) => void>();
   const errorListeners = new Set<(event: ErrorEvent) => void>();
+  const messageErrorListeners = new Set<(event: ErrorEvent) => void>();
   const worker = {
     postMessage: vi.fn(),
     terminate: vi.fn(),
@@ -34,8 +35,12 @@ function createMockWorker() {
         messageListeners.add(listener as (event: MessageEvent) => void);
         return;
       }
-      if (type === "error" || type === "messageerror") {
+      if (type === "error") {
         errorListeners.add(listener as (event: ErrorEvent) => void);
+        return;
+      }
+      if (type === "messageerror") {
+        messageErrorListeners.add(listener as (event: ErrorEvent) => void);
       }
     }),
     removeEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
@@ -44,8 +49,12 @@ function createMockWorker() {
         messageListeners.delete(listener as (event: MessageEvent) => void);
         return;
       }
-      if (type === "error" || type === "messageerror") {
+      if (type === "error") {
         errorListeners.delete(listener as (event: ErrorEvent) => void);
+        return;
+      }
+      if (type === "messageerror") {
+        messageErrorListeners.delete(listener as (event: ErrorEvent) => void);
       }
     }),
     dispatch(data: unknown) {
@@ -55,6 +64,11 @@ function createMockWorker() {
     },
     dispatchError(message: string) {
       for (const listener of errorListeners) {
+        listener({ message } as ErrorEvent);
+      }
+    },
+    dispatchMessageError(message: string) {
+      for (const listener of messageErrorListeners) {
         listener({ message } as ErrorEvent);
       }
     },
@@ -205,6 +219,28 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
       "Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js";
 
     worker.dispatchError(message);
+
+    await expect(promise).rejects.toThrow("Failed to fetch dynamically imported module");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]?.[0];
+    expect(event?.type).toBe("vite:preloadError");
+    expect(event?.cancelable).toBe(true);
+    expect((event as Event & { payload?: unknown }).payload).toMatchObject({ message });
+  });
+
+  it("forwards stale Transformers chunk errors from worker messageerror events to Vite preload recovery", async () => {
+    const worker = createMockWorker();
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory: () => worker as unknown as Worker,
+    });
+
+    const promise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const message =
+      "Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js";
+
+    worker.dispatchMessageError(message);
 
     await expect(promise).rejects.toThrow("Failed to fetch dynamically imported module");
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
