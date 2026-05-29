@@ -515,6 +515,85 @@ test('subtitle real model smoke runner classifies common failure modes', async (
   );
 });
 
+test('subtitle real model smoke default factory reports the web runtime config it actually loads', async () => {
+  const { createDefaultPostProcessor } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const created = [];
+  let disposed = 0;
+
+  const postProcessor = await createDefaultPostProcessor(
+    {
+      model: 'ceilf6/test-subtitle-postprocessor',
+      device: 'wasm',
+      dtype: 'q8',
+    },
+    {
+      loadWebModule: async () => ({
+        module: {
+          DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: { device: 'wasm', dtype: 'q8' },
+          createHuggingFaceSubtitlePostProcessor(options) {
+            created.push(options);
+            return {
+              async warmUp() {},
+              async process() {
+                return { segments: [], chapters: [] };
+              },
+              dispose() {},
+            };
+          },
+        },
+        async dispose() {
+          disposed += 1;
+        },
+      }),
+    },
+  );
+
+  assert.deepEqual(created, [{ model: 'ceilf6/test-subtitle-postprocessor' }]);
+  assert.deepEqual(postProcessor.runtimeConfig, { device: 'wasm', dtype: 'q8' });
+  await postProcessor.dispose();
+  assert.equal(disposed, 1);
+});
+
+test('subtitle real model smoke default factory rejects mismatched reported runtime config', async () => {
+  const { createDefaultPostProcessor } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  let disposed = 0;
+
+  await assert.rejects(
+    createDefaultPostProcessor(
+      {
+        model: 'ceilf6/test-subtitle-postprocessor',
+        device: 'wasm',
+        dtype: 'q8',
+      },
+      {
+        loadWebModule: async () => ({
+          module: {
+            DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: { device: 'webgpu', dtype: 'q4' },
+            createHuggingFaceSubtitlePostProcessor() {
+              throw new Error('should not create a model when config mismatches');
+            },
+          },
+          async dispose() {
+            disposed += 1;
+          },
+        }),
+      },
+    ),
+    /runtime config mismatch/u,
+  );
+  assert.equal(disposed, 1);
+});
+
+test('subtitle real model smoke Vite loader disables HMR so metric output stays JSON-only', async () => {
+  const { buildDefaultWebModuleServerConfig } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+
+  const config = buildDefaultWebModuleServerConfig('/repo/apps/web');
+
+  assert.equal(config.server.middlewareMode, true);
+  assert.equal(config.server.hmr, false);
+  assert.equal(config.logLevel, 'error');
+});
+
 test('PR self-check asks for one correction and chapter generation evaluation result', () => {
   const template = readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
   const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');

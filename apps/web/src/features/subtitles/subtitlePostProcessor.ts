@@ -52,6 +52,11 @@ type PipelineFactory = (
   options: TextGenerationPipelineOptions,
 ) => Promise<TextGenerationPipeline>;
 
+export const DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: TextGenerationPipelineOptions = {
+  device: "wasm",
+  dtype: "q8",
+};
+
 export type HuggingFaceSubtitlePostProcessorOptions = {
   model?: string;
   pipelineFactory?: PipelineFactory;
@@ -63,7 +68,7 @@ export function createHuggingFaceSubtitlePostProcessor(
   const model = options.model ?? DEFAULT_POSTPROCESSOR_MODEL;
   // Keep the cold-start path to the single validated browser target; final load errors are wrapped below.
   const pipelineOptions: TextGenerationPipelineOptions[] = [
-    { device: "wasm", dtype: "q8" },
+    DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG,
   ];
   let pipelinePromise: Promise<TextGenerationPipeline> | null = null;
   const getPipeline = () => {

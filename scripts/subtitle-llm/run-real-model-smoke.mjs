@@ -38,6 +38,7 @@ export async function runRealModelSmoke(options = {}) {
   const model = options.model ?? process.env.SUBTITLE_REAL_MODEL_SMOKE_MODEL ?? DEFAULT_MODEL;
   const device = options.device ?? DEFAULT_DEVICE;
   const dtype = options.dtype ?? DEFAULT_DTYPE;
+  let runtimeConfig = { device, dtype };
   const sampleId = options.sampleId ?? DEFAULT_SAMPLE_ID;
   const fixture = options.fixture ?? await readFixture(options.fixturePath ?? DEFAULT_FIXTURE_PATH);
   const sample = selectRepresentativeSample(fixture, sampleId);
@@ -50,6 +51,7 @@ export async function runRealModelSmoke(options = {}) {
   try {
     const readyStartedAt = performance.now();
     postProcessor = await createPostProcessor({ model, device, dtype });
+    runtimeConfig = readPostProcessorRuntimeConfig(postProcessor, runtimeConfig);
     await postProcessor.warmUp?.();
     pipelineReadyDurationMs = round(performance.now() - readyStartedAt);
 
@@ -73,8 +75,8 @@ export async function runRealModelSmoke(options = {}) {
       smokeName: SMOKE_NAME,
       outputSource: 'real-model-postprocessor',
       model,
-      device,
-      dtype,
+      device: runtimeConfig.device,
+      dtype: runtimeConfig.dtype,
       sampleId: sample.id,
       pipelineReadyDurationMs,
       generationDurationMs,
@@ -95,8 +97,8 @@ export async function runRealModelSmoke(options = {}) {
       smokeName: SMOKE_NAME,
       outputSource: 'real-model-postprocessor',
       model,
-      device,
-      dtype,
+      device: runtimeConfig.device,
+      dtype: runtimeConfig.dtype,
       sampleId,
       pipelineReadyDurationMs,
       generationDurationMs,
@@ -162,6 +164,7 @@ export function classifyRealModelSmokeError(error) {
     return 'model-load-error';
   }
   if (/LLM 输出|JSON/iu.test(message)) return 'invalid-json';
+  if (/runtime config mismatch|runtime config missing/iu.test(message)) return 'runtime-config-mismatch';
   if (/segment|subtitle/i.test(message)) return 'invalid-segment-reference';
   if (/chapter|timeline/i.test(message)) return 'invalid-chapter-timeline';
   return 'generation-error';
@@ -171,30 +174,96 @@ async function readFixture(path) {
   return parseJsonObject(await readFile(path, 'utf8'), path);
 }
 
-async function createDefaultPostProcessor({ model }) {
+export async function createDefaultPostProcessor(
+  { model, device = DEFAULT_DEVICE, dtype = DEFAULT_DTYPE },
+  options = {},
+) {
+  const { module, dispose } = await (options.loadWebModule ?? loadDefaultWebModule)();
+  let postProcessor;
+  try {
+    const runtimeConfig = readDefaultRuntimeConfig(module);
+    assertRuntimeConfigMatches(runtimeConfig, { device, dtype });
+    postProcessor = module.createHuggingFaceSubtitlePostProcessor({ model });
+    return {
+      runtimeConfig,
+      async warmUp() {
+        await postProcessor.warmUp?.();
+      },
+      async process(input) {
+        return postProcessor.process(input);
+      },
+      async dispose() {
+        try {
+          postProcessor.dispose?.();
+        } finally {
+          await dispose();
+        }
+      },
+    };
+  } catch (error) {
+    try {
+      postProcessor?.dispose?.();
+    } finally {
+      await dispose();
+    }
+    throw error;
+  }
+}
+
+async function loadDefaultWebModule() {
   const { createServer } = await import('vite');
   const webRoot = resolve(process.cwd(), 'apps/web');
-  const server = await createServer({
+  const server = await createServer(buildDefaultWebModuleServerConfig(webRoot));
+  try {
+    const module = await server.ssrLoadModule('/src/features/subtitles/subtitlePostProcessor.ts');
+    return {
+      module,
+      async dispose() {
+        await server.close();
+      },
+    };
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
+}
+
+export function buildDefaultWebModuleServerConfig(webRoot) {
+  return {
     root: webRoot,
     configFile: resolve(webRoot, 'vite.config.ts'),
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: false },
     appType: 'custom',
     logLevel: 'error',
-  });
-  const module = await server.ssrLoadModule('/src/features/subtitles/subtitlePostProcessor.ts');
-  const postProcessor = module.createHuggingFaceSubtitlePostProcessor({ model });
-  return {
-    async warmUp() {
-      await postProcessor.warmUp?.();
-    },
-    async process(input) {
-      return postProcessor.process(input);
-    },
-    async dispose() {
-      postProcessor.dispose?.();
-      await server.close();
-    },
   };
+}
+
+function readPostProcessorRuntimeConfig(postProcessor, fallback) {
+  return isRuntimeConfig(postProcessor?.runtimeConfig) ? postProcessor.runtimeConfig : fallback;
+}
+
+function readDefaultRuntimeConfig(module) {
+  const runtimeConfig = module?.DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG;
+  if (!isRuntimeConfig(runtimeConfig)) {
+    throw new Error('subtitle postprocessor runtime config missing');
+  }
+  return runtimeConfig;
+}
+
+function assertRuntimeConfigMatches(actual, expected) {
+  if (actual.device === expected.device && actual.dtype === expected.dtype) return;
+  throw new Error(
+    `subtitle postprocessor runtime config mismatch: expected ${expected.device}/${expected.dtype}, got ${actual.device}/${actual.dtype}`,
+  );
+}
+
+function isRuntimeConfig(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.device === 'string' &&
+    typeof value.dtype === 'string'
+  );
 }
 
 function parseArgs(args) {
