@@ -11,12 +11,15 @@ import type {
   SubtitleCorrectionWarning,
   SubtitlePostProcessor,
   SubtitlePostProcessorContext,
+  SubtitlePostProcessorMetric,
   SubtitleSegment,
   SubtitleStore,
   SubtitleTrack,
   SubtitleTranscriber,
 } from "./types";
 import { cn } from "@/shared/ui/utils/cn";
+
+export const DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS = 60_000;
 
 export type SubtitlePanelProps = {
   recordingId: string | null;
@@ -29,6 +32,7 @@ export type SubtitlePanelProps = {
   transcriber?: SubtitleTranscriber;
   postProcessor?: SubtitlePostProcessor | null;
   postProcessorContext?: SubtitlePostProcessorContext;
+  postProcessTimeoutMs?: number;
 };
 
 type GenerationStatus = "idle" | "loading" | "generating" | "post-processing" | "ready" | "error";
@@ -44,6 +48,7 @@ export function SubtitlePanel({
   transcriber: injectedTranscriber,
   postProcessor: injectedPostProcessor,
   postProcessorContext,
+  postProcessTimeoutMs = DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS,
 }: SubtitlePanelProps) {
   const store = useMemo(() => injectedStore ?? createSubtitleStore(), [injectedStore]);
   const transcriber = useMemo(
@@ -55,6 +60,7 @@ export function SubtitlePanel({
       injectedPostProcessor === undefined
         ? createWorkerBackedHuggingFaceSubtitlePostProcessor({
             model: resolveSubtitlePostProcessorModel(),
+            onMetric: logSubtitlePostProcessorMetric,
           })
         : injectedPostProcessor,
     [injectedPostProcessor],
@@ -212,11 +218,17 @@ export function SubtitlePanel({
     setError(null);
     setWarnings([]);
     try {
-      const correction = await postProcessor.process({
-        track,
-        context: postProcessorContext,
-        signal: abortController.signal,
-      });
+      const correction = await runWithPostProcessTimeout(
+        postProcessor.process({
+          track,
+          context: postProcessorContext,
+          signal: abortController.signal,
+        }),
+        {
+          abortController,
+          timeoutMs: postProcessTimeoutMs,
+        },
+      );
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       const result = applySubtitleCorrection(track, correction, { durationMs });
       const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
@@ -232,6 +244,11 @@ export function SubtitlePanel({
       setWarnings(result.warnings);
       setStatus("ready");
     } catch (err) {
+      if (isPostProcessTimeoutError(err)) {
+        setError(formatSubtitleError(err));
+        setStatus("error");
+        return;
+      }
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
       setError(formatSubtitleError(err));
       setStatus("error");
@@ -379,4 +396,64 @@ function formatSubtitleTime(ms: number): string {
 
 function formatSubtitleError(error: unknown): string {
   return error instanceof Error ? error.message : "字幕生成失败";
+}
+
+class PostProcessTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`字幕纠错超时（${formatTimeoutBudget(timeoutMs)}），已保留当前字幕和章节。`);
+    this.name = "PostProcessTimeoutError";
+  }
+}
+
+function runWithPostProcessTimeout<T>(
+  operation: Promise<T>,
+  {
+    abortController,
+    timeoutMs,
+  }: {
+    abortController: AbortController;
+    timeoutMs: number;
+  },
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return operation;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let didTimeout = false;
+  const guardedOperation = operation.catch((error) => {
+    if (didTimeout) throw new PostProcessTimeoutError(timeoutMs);
+    throw error;
+  });
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      abortController.abort();
+      reject(new PostProcessTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+  return Promise.race([guardedOperation, timeout]).finally(() => {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+  });
+}
+
+function isPostProcessTimeoutError(error: unknown): error is PostProcessTimeoutError {
+  return error instanceof Error && error.name === "PostProcessTimeoutError";
+}
+
+function formatTimeoutBudget(timeoutMs: number): string {
+  if (timeoutMs < 1_000) return `${Math.round(timeoutMs)}ms`;
+  return `${Math.round(timeoutMs / 1_000)} 秒`;
+}
+
+function logSubtitlePostProcessorMetric(metric: SubtitlePostProcessorMetric): void {
+  console.debug("[code-tape] subtitle postprocessor metric", {
+    phase: metric.phase,
+    status: metric.status,
+    model: metric.model,
+    workerLoadDurationMs: roundMetricDuration(metric.workerLoadDurationMs),
+    workerRequestDurationMs: roundMetricDuration(metric.workerRequestDurationMs),
+    totalDurationMs: roundMetricDuration(metric.totalDurationMs),
+  });
+}
+
+function roundMetricDuration(durationMs: number): number {
+  return Math.round(Math.max(0, durationMs) * 1_000) / 1_000;
 }

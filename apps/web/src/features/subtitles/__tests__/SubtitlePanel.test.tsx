@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubtitlePanel } from "../SubtitlePanel";
 import type {
   SubtitleChapter,
+  SubtitleCorrectionResult,
   SubtitlePostProcessor,
   SubtitleStore,
   SubtitleTrack,
@@ -54,6 +55,10 @@ async function flushPromises() {
 }
 
 describe("SubtitlePanel", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("generates subtitles from the media blob, highlights the active segment, and seeks on click", async () => {
     const store = createMemorySubtitleStore();
     const transcriber: SubtitleTranscriber = {
@@ -374,6 +379,91 @@ describe("SubtitlePanel", () => {
     expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
     await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
     await expect(store.loadChapters("recording-1")).resolves.toEqual(existingChapters);
+  });
+
+  it("times out stalled local LLM post-processing without clearing subtitles or chapters", async () => {
+    const originalTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [
+        { id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" },
+        { id: "subtitle-2", startMs: 1_000, endMs: 3_000, text: "render result" },
+      ],
+    };
+    const existingChapters: SubtitleChapter[] = [
+      { id: "chapter-1", title: "已有章节", startMs: 0, endMs: 3_000 },
+    ];
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(originalTrack, existingChapters);
+    const onSeek = vi.fn();
+    let processSignal: AbortSignal | undefined;
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(
+        ({ signal }) =>
+          new Promise<SubtitleCorrectionResult>((_, reject) => {
+            processSignal = signal;
+            signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("字幕纠错已取消", "AbortError")),
+              { once: true },
+            );
+          }),
+      ),
+    };
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={500}
+        onSeek={onSeek}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={postProcessor}
+        postProcessTimeoutMs={25}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument());
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+      await act(async () => {
+        await flushPromises();
+      });
+      expect(postProcessor.process).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "render result" }));
+      fireEvent.click(screen.getByRole("button", { name: /已有章节/ }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(25);
+        await flushPromises();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("字幕纠错超时"));
+    expect(processSignal?.aborted).toBe(true);
+    expect(screen.getByText("use state hook")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
+    expect(onSeek).toHaveBeenCalledWith(1_000);
+    expect(onSeek).toHaveBeenCalledWith(0);
+    await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
+    await expect(store.loadChapters("recording-1")).resolves.toEqual(existingChapters);
+    expect(screen.getByRole("button", { name: "纠错并生成章节" })).not.toBeDisabled();
   });
 
   it("surfaces generation failure without blocking replay controls", async () => {

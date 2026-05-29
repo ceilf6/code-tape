@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SubtitlePanel } from "../SubtitlePanel";
+import {
+  DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS,
+  SubtitlePanel,
+} from "../SubtitlePanel";
 import type {
   SubtitleChapter,
   SubtitlePostProcessor,
@@ -150,6 +153,7 @@ describe("subtitle postprocessor runtime benchmark", () => {
       mockWorkerInferenceDurationMs: roundDuration(processResolvedAt - processCalledAt),
       resultToUiCommitDurationMs: roundDuration(resultReadyAt - processResolvedAt),
       postprocessClickToResultReadyDurationMs: roundDuration(resultReadyAt - clickStartedAt),
+      postProcessTimeoutBudgetMs: DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS,
       playbackProbeResponsiveDuringPostprocess,
     };
 
@@ -162,6 +166,7 @@ describe("subtitle postprocessor runtime benchmark", () => {
     expect(metrics.clickToPostProcessorCallDurationMs).toBeGreaterThanOrEqual(0);
     expect(metrics.mockWorkerInferenceDurationMs).toBeGreaterThanOrEqual(0);
     expect(metrics.resultToUiCommitDurationMs).toBeGreaterThanOrEqual(0);
+    expect(metrics.postProcessTimeoutBudgetMs).toBe(60_000);
     expect(metrics.playbackProbeResponsiveDuringPostprocess).toBe(true);
     expect(screen.getByRole("button", { name: /代码实现/ })).toBeInTheDocument();
   });

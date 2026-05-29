@@ -421,6 +421,7 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(template, /overallEvaluationDurationMs/u);
   assert.match(template, /输出校验耗时/u);
   assert.match(template, /postprocessClickToResultReadyDurationMs/u);
+  assert.match(template, /postProcessTimeoutBudgetMs/u);
   assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
   assert.equal(
     packageJson.scripts['subtitle:postprocess:runtime-benchmark'],
@@ -436,6 +437,8 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(technicalPlan, /postprocessor-runner/u);
   assert.match(technicalPlan, /representativeOutputSource/u);
   assert.match(technicalPlan, /postprocessClickToResultReadyDurationMs/u);
+  assert.match(technicalPlan, /postProcessTimeoutBudgetMs/u);
+  assert.match(technicalPlan, /workerLoadDurationMs/u);
   assert.match(technicalPlan, /playbackProbeResponsiveDuringPostprocess/u);
 });
 

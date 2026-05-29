@@ -47,6 +47,15 @@ export type SubtitlePostProcessorInput = {
   signal?: AbortSignal;
 };
 
+export type SubtitlePostProcessorMetric = {
+  phase: "warmUp" | "process";
+  status: "success" | "error" | "aborted";
+  model: string;
+  workerLoadDurationMs: number;
+  workerRequestDurationMs: number;
+  totalDurationMs: number;
+};
+
 export type SubtitlePostProcessor = {
   warmUp?(): Promise<void>;
   process(input: SubtitlePostProcessorInput): Promise<SubtitleCorrectionResult>;

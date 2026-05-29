@@ -3,6 +3,7 @@ import type {
   SubtitleCorrectionResult,
   SubtitlePostProcessor,
   SubtitlePostProcessorContext,
+  SubtitlePostProcessorMetric,
   SubtitleTrack,
 } from "./types";
 
@@ -42,11 +43,13 @@ type WorkerResponse =
       id: string;
       type: "success";
       result?: SubtitleCorrectionResult;
+      metrics?: WorkerResponseMetrics;
     }
   | {
       id: string;
       type: "error";
       error: SerializedWorkerError;
+      metrics?: WorkerResponseMetrics;
     };
 
 type SerializedWorkerError = {
@@ -54,14 +57,19 @@ type SerializedWorkerError = {
   message: string;
 };
 
+type WorkerResponseMetrics = {
+  workerRequestDurationMs: number;
+};
+
 type PendingRequest = {
-  resolve(result: SubtitleCorrectionResult | undefined): void;
-  reject(error: unknown): void;
+  resolve(result: SubtitleCorrectionResult | undefined, metrics?: WorkerResponseMetrics): void;
+  reject(error: unknown, metrics?: WorkerResponseMetrics): void;
 };
 
 export type WorkerBackedSubtitlePostProcessorOptions = {
   model?: string;
   workerFactory?: () => Worker;
+  onMetric?: (metric: SubtitlePostProcessorMetric) => void;
 };
 
 export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
@@ -105,30 +113,49 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
     signal?: AbortSignal,
   ): Promise<SubtitleCorrectionResult | undefined> => {
     if (signal?.aborted) throw createAbortError();
+    const startedAt = performance.now();
     const activeWorker = await ensureWorker();
+    const workerLoadDurationMs = performance.now() - startedAt;
     if (activeWorker !== worker) throw createAbortError();
     if (signal?.aborted) throw createAbortError();
     const id = `subtitle-postprocess-${nextRequestId}`;
     nextRequestId += 1;
     const message = { ...request, id, model } as WorkerRequest;
+    const requestPostedAt = performance.now();
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         pendingRequests.delete(id);
         signal?.removeEventListener("abort", onAbort);
       };
+      const emitRequestMetric = (
+        status: SubtitlePostProcessorMetric["status"],
+        metrics?: WorkerResponseMetrics,
+      ) => {
+        emitMetric({
+          phase: request.type,
+          status,
+          model,
+          workerLoadDurationMs,
+          workerRequestDurationMs:
+            metrics?.workerRequestDurationMs ?? performance.now() - requestPostedAt,
+          totalDurationMs: performance.now() - startedAt,
+        });
+      };
       const onAbort = () => {
         const abortError = createAbortError();
-        cleanup();
-        reject(abortError);
+        const pending = pendingRequests.get(id);
+        pending?.reject(abortError);
         activeWorker.postMessage({ id, type: "abort" } satisfies WorkerRequest);
         terminateWorker(abortError);
       };
       pendingRequests.set(id, {
-        resolve(result) {
+        resolve(result, metrics) {
+          emitRequestMetric("success", metrics);
           cleanup();
           resolve(result);
         },
-        reject(error) {
+        reject(error, metrics) {
+          emitRequestMetric(isAbortError(error) ? "aborted" : "error", metrics);
           cleanup();
           reject(error);
         },
@@ -151,15 +178,23 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
     workerPromise = null;
   };
 
+  const emitMetric = (metric: SubtitlePostProcessorMetric) => {
+    try {
+      options.onMetric?.(metric);
+    } catch {
+      // Metrics are diagnostic only; they must never break subtitle recovery.
+    }
+  };
+
   function handleWorkerMessage(event: MessageEvent<WorkerResponse>) {
     const response = event.data;
     const pending = pendingRequests.get(response.id);
     if (!pending) return;
     if (response.type === "success") {
-      pending.resolve(response.result);
+      pending.resolve(response.result, response.metrics);
       return;
     }
-    pending.reject(deserializeWorkerError(response.error));
+    pending.reject(deserializeWorkerError(response.error), response.metrics);
   }
 
   function handleWorkerError(event: Event | ErrorEvent) {
@@ -208,4 +243,10 @@ function deserializeWorkerError(error: SerializedWorkerError): Error {
 
 function createAbortError(): DOMException {
   return new DOMException("字幕纠错已取消", "AbortError");
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
 }

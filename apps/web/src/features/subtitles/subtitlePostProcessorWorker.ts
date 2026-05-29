@@ -33,16 +33,22 @@ type WorkerResponse =
       id: string;
       type: "success";
       result?: SubtitleCorrectionResult;
+      metrics?: WorkerResponseMetrics;
     }
   | {
       id: string;
       type: "error";
       error: SerializedWorkerError;
+      metrics?: WorkerResponseMetrics;
     };
 
 type SerializedWorkerError = {
   name: string;
   message: string;
+};
+
+type WorkerResponseMetrics = {
+  workerRequestDurationMs: number;
 };
 
 const processorsByModel = new Map<string, SubtitlePostProcessor>();
@@ -61,11 +67,16 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
 
   const abortController = new AbortController();
   abortControllersByRequest.set(request.id, abortController);
+  const requestStartedAt = performance.now();
   try {
     const postProcessor = getPostProcessor(request.model);
     if (request.type === "warmUp") {
       await postProcessor.warmUp?.();
-      postWorkerResponse({ id: request.id, type: "success" });
+      postWorkerResponse({
+        id: request.id,
+        type: "success",
+        metrics: buildWorkerMetrics(requestStartedAt),
+      });
       return;
     }
 
@@ -73,12 +84,18 @@ async function handleRequest(request: WorkerRequest): Promise<void> {
       ...request.input,
       signal: abortController.signal,
     });
-    postWorkerResponse({ id: request.id, type: "success", result });
+    postWorkerResponse({
+      id: request.id,
+      type: "success",
+      result,
+      metrics: buildWorkerMetrics(requestStartedAt),
+    });
   } catch (error) {
     postWorkerResponse({
       id: request.id,
       type: "error",
       error: serializeWorkerError(error),
+      metrics: buildWorkerMetrics(requestStartedAt),
     });
   } finally {
     abortControllersByRequest.delete(request.id);
@@ -95,6 +112,12 @@ function getPostProcessor(model: string): SubtitlePostProcessor {
 
 function postWorkerResponse(response: WorkerResponse): void {
   globalThis.postMessage(response);
+}
+
+function buildWorkerMetrics(requestStartedAt: number): WorkerResponseMetrics {
+  return {
+    workerRequestDurationMs: performance.now() - requestStartedAt,
+  };
 }
 
 function serializeWorkerError(error: unknown): SerializedWorkerError {

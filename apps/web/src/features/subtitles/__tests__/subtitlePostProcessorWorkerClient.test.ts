@@ -47,10 +47,12 @@ function createMockWorker() {
 describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
   it("runs subtitle post-processing through a browser worker", async () => {
     const worker = createMockWorker();
+    const onMetric = vi.fn();
     const workerFactory = vi.fn(() => worker as unknown as Worker);
     const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
       model: "ceilf6/test-subtitle-model",
       workerFactory,
+      onMetric,
     });
     const context = { fileName: "Counter.tsx", glossary: ["useState"] };
     const result: SubtitleCorrectionResult = {
@@ -72,15 +74,33 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
       }),
     );
 
-    worker.dispatch({ id: request.id, type: "success", result });
+    worker.dispatch({
+      id: request.id,
+      type: "success",
+      result,
+      metrics: { workerRequestDurationMs: 12.345 },
+    });
 
     await expect(promise).resolves.toEqual(result);
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "ceilf6/test-subtitle-model",
+        phase: "process",
+        status: "success",
+        workerLoadDurationMs: expect.any(Number),
+        workerRequestDurationMs: 12.345,
+        totalDurationMs: expect.any(Number),
+      }),
+    );
+    expect(JSON.stringify(onMetric.mock.calls[0]?.[0])).not.toContain("use state hook");
   });
 
   it("terminates in-flight worker inference when the request is aborted", async () => {
     const worker = createMockWorker();
+    const onMetric = vi.fn();
     const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
       workerFactory: () => worker as unknown as Worker,
+      onMetric,
     });
     const abortController = new AbortController();
 
@@ -94,6 +114,15 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
 
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
     expect(worker.terminate).toHaveBeenCalledTimes(1);
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "process",
+        status: "aborted",
+        workerLoadDurationMs: expect.any(Number),
+        workerRequestDurationMs: expect.any(Number),
+        totalDurationMs: expect.any(Number),
+      }),
+    );
   });
 
   it("treats abort as an exclusive worker reset and succeeds on the next request", async () => {
