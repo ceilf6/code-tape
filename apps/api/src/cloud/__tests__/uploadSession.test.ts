@@ -834,6 +834,38 @@ test("delete returns the persisted deletedAt when a concurrent soft-delete wins 
   assert.equal(persisted?.deletedAt, persistedDeletedAt);
 });
 
+test("createShareLink marks the ready recording as unlisted", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const service = createCloudRecordingService({
+    metadata,
+    objectStorage: createMemoryObjectStorage(),
+    now: () => new Date("2026-05-29T00:00:00.000Z"),
+  });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const recording = await metadata.getRecording(created.value.recordingId);
+  assert.ok(recording);
+  await metadata.updateRecording({
+    ...recording,
+    status: "ready",
+    updatedAt: "2026-05-29T00:00:00.000Z",
+    completedAt: "2026-05-29T00:00:00.000Z",
+  });
+
+  const result = await service.createShareLink({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+    input: {},
+  });
+  const sharedRecording = await metadata.getRecording(created.value.recordingId);
+
+  assert.equal(result.ok, true);
+  assert.equal(sharedRecording?.visibility, "unlisted");
+});
+
 test("createShareLink rejects parseable non-ISO expiresAt strings", async () => {
   const metadata = createMemoryMetadataRepository();
   const service = createCloudRecordingService({

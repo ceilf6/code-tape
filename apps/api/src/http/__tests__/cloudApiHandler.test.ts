@@ -561,11 +561,22 @@ test("POST /api/recordings/:recordingId/share-links creates a timestamped unlist
     }),
   );
   const body = (await response.json()) as { url: string; expiresAt: string | null };
+  const detailResponse = await handler(
+    new Request("http://localhost/api/recordings/rec-share-ready", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const detailBody = (await detailResponse.json()) as {
+    recording: { visibility: string };
+  };
 
   assert.equal(response.status, 201);
   assert.equal(response.headers.get("x-request-id"), "req-share-create");
   assert.match(body.url, /^\/s\/[A-Za-z0-9_-]+\?t=4200$/u);
   assert.equal(body.expiresAt, null);
+  assert.equal(detailResponse.status, 200);
+  assert.equal(detailBody.recording.visibility, "unlisted");
 });
 
 test("POST /api/recordings/:recordingId/share-links rejects parseable non-ISO expiresAt strings", async () => {
@@ -646,6 +657,40 @@ test("GET /api/share/:token/playback returns a shared playback descriptor withou
   assert.equal(response.status, 200);
   assert.equal(body.id, "rec-shared-playback");
   assert.equal(body.mediaUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-shared-playback/media/media.webm"));
+});
+
+test("GET /api/share/:token/playback returns the same 404 for random and malformed tokens", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-shared-invalid",
+  });
+
+  const randomTokenResponse = await handler(
+    new Request("http://localhost/api/share/not-a-real-token/playback", { method: "GET" }),
+  );
+  const malformedTokenResponse = await handler(
+    new Request("http://localhost/api/share/%E0%A4%A/playback", { method: "GET" }),
+  );
+  const randomTokenBody = (await randomTokenResponse.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+  const malformedTokenBody = (await malformedTokenResponse.json()) as {
+    error: { code: string; message: string; requestId: string };
+  };
+
+  assert.equal(randomTokenResponse.status, 404);
+  assert.equal(malformedTokenResponse.status, 404);
+  assert.deepEqual(randomTokenBody, {
+    error: {
+      code: "not-found",
+      message: "share link not found",
+      requestId: "req-shared-invalid",
+    },
+  });
+  assert.deepEqual(malformedTokenBody, randomTokenBody);
 });
 
 test("POST /api/recordings/:recordingId/share-links returns 404 for owner mismatch and non-ready recordings", async () => {

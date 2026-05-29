@@ -414,6 +414,14 @@ export function createCloudRecordingService(deps: {
           revokedAt: null,
         });
         if (write.status === "created") {
+          await deps.metadata.updateRecordingIfStatus({
+            recordingId: recording.id,
+            expectedStatus: "ready",
+            patch: {
+              visibility: "unlisted",
+              updatedAt: createdAt,
+            },
+          });
           return {
             ok: true,
             value: {

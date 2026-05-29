@@ -85,7 +85,10 @@ export function createCloudApiHandler(deps: {
     if (request.method === "GET" && sharedPlaybackMatch) {
       const token = safeDecodePathSegment(sharedPlaybackMatch[1]!, "share token");
       if (!token.ok) {
-        return jsonError({ ...token.error, requestId }, requestId);
+        return jsonError(
+          { code: "not-found", message: "share link not found", requestId },
+          requestId,
+        );
       }
       const result = await deps.service.getSharedPlaybackDescriptor({ token: token.value });
       if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
