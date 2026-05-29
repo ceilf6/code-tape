@@ -26,6 +26,13 @@ export {
   type InterviewTrackEvent,
 } from "./interviewMediaSession";
 export {
+  CandidateInterviewPage,
+  CandidateInterviewView,
+  type CandidateInterviewRoomState,
+  type CandidateInterviewStatus,
+  type CandidateInterviewViewProps,
+} from "./CandidateInterviewPage";
+export {
   createInterviewRoomClient,
   type CreateInterviewRoomResponse,
   type EndInterviewRoomInput,
