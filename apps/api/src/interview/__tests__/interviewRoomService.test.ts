@@ -87,6 +87,33 @@ test("joinRoom validates join code, role uniqueness, expiration, and ended rooms
   assert.equal(afterEnd.ok ? "" : afterEnd.error.code, "room-ended");
 });
 
+test("expired rooms reject joins and persist expired status", () => {
+  let currentTime = new Date("2026-05-29T08:00:00.000Z");
+  const service = createInterviewRoomService({
+    rooms: createMemoryInterviewRoomRepository(),
+    createId: () => "room-1",
+    createJoinCode: () => "JOIN1234",
+    now: () => currentTime,
+    roomTtlMs: 1_000,
+  });
+  const { room } = service.createRoom();
+
+  currentTime = new Date("2026-05-29T08:00:01.000Z");
+
+  const expiredJoin = service.joinRoom({
+    roomId: room.id,
+    joinCode: "JOIN1234",
+    role: "candidate",
+    connectionId: "candidate-1",
+  });
+  const expiredGet = service.getRoom(room.id);
+
+  assert.equal(expiredJoin.ok, false);
+  assert.equal(expiredJoin.ok ? "" : expiredJoin.error.code, "room-expired");
+  assert.equal(expiredGet.ok, false);
+  assert.equal(expiredGet.ok ? "" : expiredGet.error.code, "room-expired");
+});
+
 test("leaveRoom clears the role connection so an explicit disconnect can rejoin", () => {
   const service = createInterviewRoomService({
     rooms: createMemoryInterviewRoomRepository(),

@@ -107,6 +107,69 @@ test("websocket upgrade handler connects the returned signaling URL to peer forw
   }
 });
 
+test("websocket upgrade handler rejects messages for a different room than the URL", async () => {
+  const rooms = createInterviewRoomService({
+    rooms: createMemoryInterviewRoomRepository(),
+    createId: createSequence(["room-a", "room-b"]),
+    createJoinCode: createSequence(["JOINAAAA", "JOINBBBB"]),
+    now: () => new Date("2026-05-29T08:00:00.000Z"),
+  });
+  const roomA = rooms.createRoom();
+  const roomB = rooms.createRoom();
+  const signaling = createInterviewSignalingServer({ rooms });
+  const upgrade = createInterviewWebSocketUpgradeHandler({
+    signaling,
+    createConnectionId: () => "candidate-1",
+  });
+  const server = createServer((_, response) => {
+    response.writeHead(404);
+    response.end();
+  });
+  server.on("upgrade", (request, socket, head) => {
+    if (upgrade.canHandle(request)) {
+      upgrade.handleUpgrade(request, socket, head);
+      return;
+    }
+    socket.destroy();
+  });
+
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${addressPort(server)}`;
+  try {
+    const candidate = await openConnectedSocket(
+      wsUrl(baseUrl, roomA.signalingUrl),
+    );
+    try {
+      candidate.socket.send(
+        signalingMessage({
+          kind: "join",
+          roomId: roomB.room.id,
+          joinCode: roomB.room.joinCode,
+          role: "candidate",
+          connectionId: candidate.connected.connectionId,
+        }),
+      );
+
+      const error = await nextJson(candidate.socket, "error");
+      assert.equal(error.code, "room-mismatch");
+      assert.equal(
+        rooms.joinRoom({
+          roomId: roomB.room.id,
+          joinCode: roomB.room.joinCode,
+          role: "candidate",
+          connectionId: "candidate-2",
+        }).ok,
+        true,
+      );
+    } finally {
+      candidate.socket.close();
+    }
+  } finally {
+    await closeServer(server);
+    upgrade.close();
+  }
+});
+
 async function handleRequest(
   handler: (request: Request) => Promise<Response>,
   incoming: IncomingMessage,

@@ -60,7 +60,19 @@ function bindConnection(input: {
   };
 
   input.webSocket.on("message", (data) => {
-    input.signaling.receive(connection, rawDataToString(data));
+    const raw = rawDataToString(data);
+    const messageRoomId = readMessageRoomId(raw);
+    if (messageRoomId !== null && messageRoomId !== input.roomId) {
+      connection.send(
+        JSON.stringify({
+          kind: "error",
+          code: "room-mismatch",
+          message: "message roomId does not match signaling URL",
+        }),
+      );
+      return;
+    }
+    input.signaling.receive(connection, raw);
   });
   input.webSocket.on("close", () => {
     input.signaling.disconnect(connection.id);
@@ -85,6 +97,23 @@ function readRoomIdFromRequest(request: IncomingMessage): string | null {
   } catch {
     return null;
   }
+}
+
+function readMessageRoomId(raw: string): string | null {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as { roomId?: unknown }).roomId === "string"
+    ) {
+      return (value as { roomId: string }).roomId;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function rawDataToString(data: RawData): string {
