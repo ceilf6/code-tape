@@ -128,7 +128,12 @@ export function createInterviewMediaSession(
       if (localStream) {
         throw new Error("Local media has already been requested for this interview session");
       }
-      localStream = await deps.getUserMedia(constraints);
+      const requestedStream = await deps.getUserMedia(constraints);
+      if (closed) {
+        stopStreamTracks(requestedStream);
+        throw new Error("Interview media session is closed");
+      }
+      localStream = requestedStream;
       localStream.getTracks().forEach((track) => {
         peer.addTrack(track, localStream as MediaStream);
       });

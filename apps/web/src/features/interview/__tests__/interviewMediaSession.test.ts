@@ -241,6 +241,26 @@ describe("InterviewMediaSession", () => {
     });
   });
 
+  it("stops local media if the session closes while getUserMedia is pending", async () => {
+    const { audioTrack, videoTrack, localStream, peer, deps } = createFixture();
+    let resolveMedia!: (stream: MediaStream) => void;
+    deps.getUserMedia = () =>
+      new Promise<MediaStream>((resolve) => {
+        resolveMedia = resolve;
+      });
+    const session = createInterviewMediaSession({ deps });
+
+    const request = session.requestLocalMedia();
+    session.close();
+    resolveMedia(localStream as unknown as MediaStream);
+
+    await expect(request).rejects.toThrow("Interview media session is closed");
+    expect(audioTrack.stopped).toBe(true);
+    expect(videoTrack.stopped).toBe(true);
+    expect(peer.addedTracks).toEqual([]);
+    expect(session.getState().localStream).toBeNull();
+  });
+
   it("ignores late peer events after close and clears pending ICE candidates", async () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });

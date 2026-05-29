@@ -13,7 +13,11 @@ import {
 } from "lucide-react";
 import { RecorderPage } from "@/features/recorder/RecorderPage";
 import { Toggle, Tooltip } from "@/shared/ui";
-import type { InterviewMediaSessionState } from "./interviewMediaSession";
+import {
+  createInterviewMediaSession,
+  type InterviewMediaSession,
+  type InterviewMediaSessionState,
+} from "./interviewMediaSession";
 import {
   createInterviewRoomClient,
   type InterviewRoomClient,
@@ -60,6 +64,7 @@ export type CandidateInterviewPageProps = {
     createSignalingClient?: (
       options: InterviewSignalingClientOptions,
     ) => InterviewSignalingClient;
+    createMediaSession?: () => InterviewMediaSession;
   };
 };
 
@@ -81,17 +86,19 @@ export function CandidateInterviewPage({ deps = {} }: CandidateInterviewPageProp
     [deps.roomClient],
   );
   const createSignalingClient = deps.createSignalingClient ?? createInterviewSignalingClient;
+  const createMediaSession = deps.createMediaSession ?? createInterviewMediaSession;
   const session = useCandidateInterviewRoomSession({
     routeRoomId: roomId,
     roomClient,
     createSignalingClient,
+    createMediaSession,
   });
 
   return (
     <CandidateInterviewView
       roomId={session.roomId}
       roomState={session.roomState}
-      mediaState={EMPTY_CANDIDATE_MEDIA_STATE}
+      mediaState={session.mediaState}
       recordingWorkspace={<RecorderPage />}
     />
   );
@@ -101,13 +108,19 @@ function useCandidateInterviewRoomSession({
   routeRoomId,
   roomClient,
   createSignalingClient,
+  createMediaSession,
 }: {
   routeRoomId: string | null;
   roomClient: InterviewRoomClient;
   createSignalingClient: (
     options: InterviewSignalingClientOptions,
   ) => InterviewSignalingClient;
-}): { roomId: string | null; roomState: CandidateInterviewRoomState } {
+  createMediaSession: () => InterviewMediaSession;
+}): {
+  roomId: string | null;
+  roomState: CandidateInterviewRoomState;
+  mediaState: InterviewMediaSessionState;
+} {
   const [session, setSession] = useState<{
     roomId: string | null;
     roomState: CandidateInterviewRoomState;
@@ -115,6 +128,9 @@ function useCandidateInterviewRoomSession({
     roomId: routeRoomId,
     roomState: initialCandidateRoomState(routeRoomId),
   }));
+  const [mediaState, setMediaState] = useState<InterviewMediaSessionState>(
+    EMPTY_CANDIDATE_MEDIA_STATE,
+  );
   const roomCreationRef = useRef<{
     roomClient: InterviewRoomClient;
     request: ReturnType<InterviewRoomClient["createRoom"]>;
@@ -123,9 +139,37 @@ function useCandidateInterviewRoomSession({
   useEffect(() => {
     let closed = false;
     let signalingClient: InterviewSignalingClient | null = null;
+    let mediaSession: InterviewMediaSession | null = null;
+    let unsubscribeMediaSession: (() => void) | null = null;
+    let mediaOfferStarted = false;
+    let mediaSessionVersion = 0;
+    let activeInterviewerConnectionId: string | null = null;
+    const staleInterviewerConnectionIds = new Set<string>();
+
+    const closeMediaSession = ({ publish }: { publish: boolean }) => {
+      const current = mediaSession;
+      if (!current) return;
+      mediaSessionVersion += 1;
+      unsubscribeMediaSession?.();
+      unsubscribeMediaSession = null;
+      mediaSession = null;
+      mediaOfferStarted = false;
+      const closedState = current.close();
+      if (publish && !closed) {
+        setMediaState(closedState);
+      }
+    };
+    const isCurrentMediaSession = (
+      currentMediaSession: InterviewMediaSession | null,
+      currentMediaSessionVersion: number,
+    ) =>
+      !closed &&
+      mediaSession === currentMediaSession &&
+      mediaSessionVersion === currentMediaSessionVersion;
 
     if (routeRoomId) {
       roomCreationRef.current = null;
+      setMediaState(EMPTY_CANDIDATE_MEDIA_STATE);
       setSession({
         roomId: routeRoomId,
         roomState: initialCandidateRoomState(routeRoomId),
@@ -141,6 +185,7 @@ function useCandidateInterviewRoomSession({
         interviewerOnline: false,
       },
     });
+    setMediaState(EMPTY_CANDIDATE_MEDIA_STATE);
 
     if (!roomCreationRef.current || roomCreationRef.current.roomClient !== roomClient) {
       roomCreationRef.current = { roomClient, request: roomClient.createRoom() };
@@ -164,12 +209,162 @@ function useCandidateInterviewRoomSession({
       }
 
       const room = result.value;
+      const failWithRoomContext = (errorMessage: string) => {
+        closeMediaSession({ publish: true });
+        setSession((current) => ({
+          roomId: current.roomId ?? room.roomId,
+          roomState: {
+            ...current.roomState,
+            status: "failed",
+            joinCode: current.roomState.joinCode ?? room.joinCode,
+            interviewerOnline: false,
+            expiresAt: current.roomState.expiresAt ?? room.expiresAt,
+            signalingUrl: current.roomState.signalingUrl ?? room.signalingUrl,
+            errorMessage,
+          },
+        }));
+      };
+      const sendPendingIceCandidates = () => {
+        if (!mediaSession || !signalingClient) return;
+        if (mediaSession.getState().outgoingIceCandidates.length === 0) return;
+        const candidates = mediaSession.drainOutgoingIceCandidates();
+        for (const candidate of candidates) {
+          if (!candidate?.candidate) continue;
+          const sendResult = signalingClient.sendIceCandidate({
+            candidate: candidate.candidate,
+            sdpMid: candidate.sdpMid ?? null,
+            sdpMLineIndex: candidate.sdpMLineIndex ?? null,
+          });
+          if (!sendResult.ok) {
+            failWithRoomContext(`ice candidate failed: ${sendResult.reason}`);
+            return;
+          }
+        }
+      };
+      const openMediaSession = () => {
+        if (mediaSession) return true;
+        try {
+          mediaSession = createMediaSession();
+          mediaSessionVersion += 1;
+          setMediaState(mediaSession.getState());
+          unsubscribeMediaSession = mediaSession.subscribe((next) => {
+            if (closed) return;
+            setMediaState(next);
+            if (next.outgoingIceCandidates.length > 0) {
+              sendPendingIceCandidates();
+            }
+          });
+          return true;
+        } catch (error) {
+          failWithRoomContext(candidateMediaErrorMessage(error));
+          return false;
+        }
+      };
+      const shouldApplyRemoteMediaMessage = (message: {
+        role: "candidate" | "interviewer";
+        connectionId: string;
+      }) => {
+        if (message.role !== "interviewer") return false;
+        if (staleInterviewerConnectionIds.has(message.connectionId)) return false;
+        if (
+          activeInterviewerConnectionId &&
+          activeInterviewerConnectionId !== message.connectionId
+        ) {
+          return false;
+        }
+        activeInterviewerConnectionId = message.connectionId;
+        return true;
+      };
+      const startCandidateMediaOffer = () => {
+        if (mediaOfferStarted) return;
+        if (!openMediaSession()) return;
+        const currentMediaSession = mediaSession;
+        const currentMediaSessionVersion = mediaSessionVersion;
+        mediaOfferStarted = true;
+        void (async () => {
+          try {
+            if (!currentMediaSession) {
+              throw new Error("candidate media session is not available");
+            }
+            await currentMediaSession.requestLocalMedia();
+            if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              return;
+            }
+            const offer = await currentMediaSession.createOffer();
+            if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              return;
+            }
+            if (!offer.sdp) {
+              throw new Error("candidate media offer missing sdp");
+            }
+            const sendResult = signalingClient?.sendOffer(offer.sdp);
+            if (!sendResult) {
+              throw new Error("candidate signaling client is not available");
+            }
+            if (!sendResult.ok) {
+              throw new Error(`offer failed: ${sendResult.reason}`);
+            }
+            sendPendingIceCandidates();
+          } catch (error) {
+            if (isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              failWithRoomContext(candidateMediaErrorMessage(error));
+            }
+          }
+        })();
+      };
+      const applyRemoteAnswer = (message: {
+        role: "candidate" | "interviewer";
+        connectionId: string;
+        sdp: string;
+      }) => {
+        if (!shouldApplyRemoteMediaMessage(message)) return;
+        const currentMediaSession = mediaSession;
+        if (!currentMediaSession) return;
+        const currentMediaSessionVersion = mediaSessionVersion;
+        void (async () => {
+          try {
+            await currentMediaSession.setRemoteDescription({ type: "answer", sdp: message.sdp });
+            if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              return;
+            }
+          } catch (error) {
+            if (isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              failWithRoomContext(candidateMediaErrorMessage(error));
+            }
+          }
+        })();
+      };
+      const applyRemoteIceCandidate = (
+        message: Extract<InboundSignalingMessage, { kind: "ice-candidate" }>,
+      ) => {
+        if (!shouldApplyRemoteMediaMessage(message)) return;
+        const currentMediaSession = mediaSession;
+        if (!currentMediaSession) return;
+        const currentMediaSessionVersion = mediaSessionVersion;
+        void (async () => {
+          try {
+            await currentMediaSession.addRemoteIceCandidate({
+              candidate: message.candidate,
+              sdpMid: message.sdpMid ?? null,
+              sdpMLineIndex: message.sdpMLineIndex ?? null,
+            });
+            if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              return;
+            }
+          } catch (error) {
+            if (isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
+              failWithRoomContext(candidateMediaErrorMessage(error));
+            }
+          }
+        })();
+      };
       const updateFromMessage = (message: InboundSignalingMessage) => {
         if ("roomId" in message && message.roomId !== room.roomId) return;
 
         if (message.kind === "connected") {
           const sendResult = signalingClient?.sendJoin();
           if (sendResult && !sendResult.ok) {
+            closeMediaSession({ publish: true });
             setSession((current) => ({
               ...current,
               roomState: {
@@ -194,10 +389,14 @@ function useCandidateInterviewRoomSession({
               signalingUrl: room.signalingUrl,
             },
           });
+          if (message.role === "interviewer" && message.status === "live") {
+            startCandidateMediaOffer();
+          }
           return;
         }
 
         if (message.kind === "ended") {
+          closeMediaSession({ publish: true });
           setSession((current) => ({
             ...current,
             roomState: {
@@ -210,6 +409,7 @@ function useCandidateInterviewRoomSession({
         }
 
         if (message.kind === "error") {
+          closeMediaSession({ publish: true });
           setSession((current) => ({
             ...current,
             roomState: {
@@ -223,6 +423,11 @@ function useCandidateInterviewRoomSession({
         }
 
         if (message.kind === "leave" && message.role === "interviewer") {
+          staleInterviewerConnectionIds.add(message.connectionId);
+          if (activeInterviewerConnectionId === message.connectionId) {
+            activeInterviewerConnectionId = null;
+          }
+          closeMediaSession({ publish: true });
           setSession((current) => ({
             ...current,
             roomState: {
@@ -231,8 +436,20 @@ function useCandidateInterviewRoomSession({
               interviewerOnline: false,
             },
           }));
+          return;
+        }
+
+        if (message.kind === "answer") {
+          applyRemoteAnswer(message);
+          return;
+        }
+
+        if (message.kind === "ice-candidate") {
+          applyRemoteIceCandidate(message);
         }
       };
+
+      if (!openMediaSession()) return;
 
       setSession({
         roomId: room.roomId,
@@ -253,6 +470,7 @@ function useCandidateInterviewRoomSession({
         onMessage: updateFromMessage,
         onError: (error) => {
           if (closed) return;
+          closeMediaSession({ publish: true });
           setSession((current) => ({
             ...current,
             roomState: {
@@ -283,11 +501,12 @@ function useCandidateInterviewRoomSession({
 
     return () => {
       closed = true;
+      closeMediaSession({ publish: false });
       signalingClient?.close();
     };
-  }, [createSignalingClient, roomClient, routeRoomId]);
+  }, [createMediaSession, createSignalingClient, roomClient, routeRoomId]);
 
-  return session;
+  return { ...session, mediaState };
 }
 
 function initialCandidateRoomState(routeRoomId: string | null): CandidateInterviewRoomState {
@@ -307,6 +526,10 @@ function initialCandidateRoomState(routeRoomId: string | null): CandidateIntervi
 
 function candidateRoomCreationErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "interview room request failed";
+}
+
+function candidateMediaErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "candidate media setup failed";
 }
 
 function candidateStatusFromRoomStatus(status: InterviewRoomStatus): CandidateInterviewStatus {
