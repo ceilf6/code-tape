@@ -9,10 +9,12 @@
     "test": "npm run build && node scripts/run-dist-tests.mjs"
   },
   "dependencies": {
-    "@code-tape/recording-schema": "0.0.0"
+    "@code-tape/recording-schema": "0.0.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.9.3"
   }
 }

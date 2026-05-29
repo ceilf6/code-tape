@@ -109,6 +109,15 @@ function handleJoin(input: {
   raw: string;
   message: SignalingMessage & { kind: "join" };
 }): void {
+  if (input.activeConnections.has(input.connection.id)) {
+    sendError(
+      input.connection,
+      "already-joined",
+      "connection has already joined an interview room",
+    );
+    return;
+  }
+
   const joinCode = readJoinCode(input.raw);
   if (!joinCode) {
     sendError(
