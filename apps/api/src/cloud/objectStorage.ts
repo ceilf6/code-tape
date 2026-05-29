@@ -23,4 +23,5 @@ export type ObjectStorage = {
   putObject(input: PutObjectInput): Promise<void>;
   getObject(key: string): Promise<StoredObject | null>;
   deleteObject(key: string): Promise<void>;
+  getAssetUrl(objectKey: string): string;
 };

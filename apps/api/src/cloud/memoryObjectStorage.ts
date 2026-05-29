@@ -53,6 +53,9 @@ export function createMemoryObjectStorage(): MemoryObjectStorage {
     async deleteObject(key: string): Promise<void> {
       objects.delete(key);
     },
+    getAssetUrl(key: string): string {
+      return `memory:${encodeURIComponent(key)}`;
+    },
   };
 
   return storage;

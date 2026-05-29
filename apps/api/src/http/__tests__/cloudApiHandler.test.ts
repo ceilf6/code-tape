@@ -4,17 +4,22 @@ import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash"
 import { RECORDING_SCHEMA_VERSION, type RecordingPackageV1 } from "@code-tape/recording-schema";
 import { createCloudRecordingService } from "../../cloud/cloudRecordingService.js";
 import { createMemoryMetadataRepository } from "../../cloud/memoryMetadataRepository.js";
-import { createLocalDevObjectStorage } from "../../cloud/localDevObjectStorage.js";
+import { buildLocalDevObjectUrl, createLocalDevObjectStorage } from "../../cloud/localDevObjectStorage.js";
 import { createMemoryObjectStorage } from "../../cloud/memoryObjectStorage.js";
 import { createApiHandler } from "../createApiHandler.js";
 import { createCloudApiHandler } from "../cloudApiHandler.js";
 import { createLocalDevObjectStorageHandler } from "../localDevObjectStorageHandler.js";
 import type { MetadataRepository } from "../../cloud/metadataRepository.js";
-import type {
-  CloudRecordingAssetRecord,
-  CloudRecordingRecord,
-  RecordingStatus,
-} from "../../cloud/types.js";
+import type { CloudRecordingAssetRecord, CloudRecordingRecord, RecordingAssetKind, RecordingStatus } from "../../cloud/types.js";
+
+const NON_PLAYABLE_RECORDING_STATUSES = [
+  "uploading",
+  "processing",
+  "failed",
+  "soft_deleted",
+  "purging",
+  "deleted",
+] as const satisfies readonly Exclude<RecordingStatus, "ready">[];
 
 function createTestApiHandler(
   objectStorage: ReturnType<typeof createMemoryObjectStorage> | ReturnType<typeof createLocalDevObjectStorage>,
@@ -347,6 +352,186 @@ test("GET /api/recordings/:recordingId returns 404 for other owners and hidden s
       requestId: "req-detail-not-found",
     });
   }
+});
+
+test("GET /api/recordings/:recordingId/playback returns playback descriptor for ready recordings", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-ready-playback",
+    ownerId: "owner-1",
+    status: "ready",
+    hasAudio: true,
+    hasCamera: true,
+  }, ["manifest", "meta", "events", "snapshots", "indexes", "media", "thumbnail"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage }),
+    createRequestId: () => "req-playback-ready",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-ready-playback/playback", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as {
+    id: string;
+    title: string;
+    durationMs: number;
+    schemaVersion: string;
+    manifestUrl: string;
+    metaUrl: string;
+    eventsUrl: string;
+    snapshotsUrl: string;
+    indexesUrl: string | null;
+    mediaUrl: string | null;
+    thumbnailUrl: string | null;
+    expiresAt: string;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.id, "rec-ready-playback");
+  assert.equal(body.title, "Recording rec-ready-playback");
+  assert.equal(body.durationMs, 12345);
+  assert.equal(body.schemaVersion, RECORDING_SCHEMA_VERSION);
+  assert.equal(body.manifestUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/package/manifest.json"));
+  assert.equal(body.metaUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/package/meta.json"));
+  assert.equal(body.eventsUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/package/events.json"));
+  assert.equal(body.snapshotsUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/package/snapshots.json"));
+  assert.equal(body.indexesUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/package/indexes.json"));
+  assert.equal(body.mediaUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/media/media.webm"));
+  assert.equal(body.thumbnailUrl, buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-playback/thumbnails/poster.webp"));
+  assert.match(body.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
+});
+
+test("GET /api/recordings/:recordingId/playback returns 404 for ready recordings missing required JSON assets", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-missing-snapshots",
+    ownerId: "owner-1",
+    status: "ready",
+    hasAudio: false,
+    hasCamera: false,
+  }, ["manifest", "meta", "events"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage }),
+    createRequestId: () => "req-playback-missing-json",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-missing-snapshots/playback", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as { error: { code: string; message: string } };
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(body.error, {
+    code: "not-found",
+    message: "playback descriptor not available",
+    requestId: "req-playback-missing-json",
+  });
+});
+
+test("GET /api/recordings/:recordingId/playback returns 404 for non-ready or owner-mismatched recordings", async () => {
+  const metadata = createMemoryMetadataRepository();
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-owner-2-playback",
+    ownerId: "owner-2",
+    status: "ready",
+    hasAudio: false,
+    hasCamera: false,
+  }, ["manifest", "meta", "events", "snapshots"]);
+  for (const status of NON_PLAYABLE_RECORDING_STATUSES) {
+    await seedRecordingWithAssets(metadata, {
+      id: `rec-${status}-playback`,
+      ownerId: "owner-1",
+      status,
+      hasAudio: false,
+      hasCamera: false,
+    }, ["manifest", "meta", "events", "snapshots"]);
+  }
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage: createMemoryObjectStorage() }),
+    createRequestId: () => "req-playback-not-found",
+  });
+
+  const notFoundPlaybackPaths = [
+    "http://localhost/api/recordings/rec-owner-2-playback/playback",
+    ...NON_PLAYABLE_RECORDING_STATUSES.map(
+      (status) => `http://localhost/api/recordings/rec-${status}-playback/playback`,
+    ),
+  ];
+
+  for (const path of notFoundPlaybackPaths) {
+    const response = await handler(
+      new Request(path, {
+        method: "GET",
+        headers: { "x-owner-token": "owner-1" },
+      }),
+    );
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    assert.equal(response.status, 404);
+    assert.deepEqual(body.error, {
+      code: "not-found",
+      message: "recording not found",
+      requestId: "req-playback-not-found",
+    });
+  }
+});
+
+test("GET /api/recordings/:recordingId/playback returns null for optional media/indexes when missing", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-no-media-no-indexes",
+    ownerId: "owner-1",
+    status: "ready",
+    hasAudio: false,
+    hasCamera: false,
+  }, ["manifest", "meta", "events", "snapshots"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({ metadata, objectStorage }),
+    createRequestId: () => "req-playback-optional-null",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings/rec-no-media-no-indexes/playback", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+
+  assert.equal(response.status, 200);
+  assert.equal(body.indexesUrl, null);
+  assert.equal(body.mediaUrl, null);
+  assert.equal(body.thumbnailUrl, null);
+});
+
+test("GET /api/recordings/:recordingId/playback requires owner token", async () => {
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-playback-owner-token",
+  });
+
+  const response = await handler(new Request("http://localhost/api/recordings/rec-1/playback", { method: "GET" }));
+  const body = (await response.json()) as { error: { code: string; message: string; requestId: string } };
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(body, {
+    error: {
+      code: "unauthorized",
+      message: "missing owner token",
+      requestId: "req-playback-owner-token",
+    },
+  });
 });
 
 test("GET /api/recordings/:recordingId requires owner token", async () => {
@@ -1239,6 +1424,80 @@ async function seedRecording(
       failureMessage: input.failureMessage ?? null,
     },
     assets: input.assets ?? [],
+    session: {
+      id: `session-${input.id}`,
+      recordingId: input.id,
+      ownerId: input.ownerId,
+      status: "completed",
+      expiresAt: "2026-05-28T00:00:00.000Z",
+      idempotencyKey: `idem-${input.id}`,
+      createdAt,
+      completedAt: createdAt,
+    },
+  });
+}
+
+async function seedRecordingWithAssets(
+  metadata: MetadataRepository,
+  input: {
+    id: string;
+    ownerId: string;
+    status: RecordingStatus;
+    createdAt?: string;
+    hasAudio?: boolean;
+    hasCamera?: boolean;
+    failureCode?: CloudRecordingRecord["failureCode"];
+    failureMessage?: string | null;
+  },
+  kinds: Array<RecordingAssetKind>,
+): Promise<void> {
+  const createdAt = input.createdAt ?? "2026-05-27T00:00:00.000Z";
+  const assets: CloudRecordingAssetRecord[] = kinds.map((kind) => {
+    const nameByKind: Record<RecordingAssetKind, string> = {
+      manifest: "package/manifest.json",
+      meta: "package/meta.json",
+      events: "package/events.json",
+      snapshots: "package/snapshots.json",
+      indexes: "package/indexes.json",
+      media: "media/media.webm",
+      thumbnail: "thumbnails/poster.webp",
+    };
+    return {
+      id: `asset-${input.id}-${kind}`,
+      recordingId: input.id,
+      kind,
+      objectKey: `recordings/${input.id}/${nameByKind[kind]}`,
+      sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+      sizeBytes: 123,
+      mimeType: kind === "media" ? "video/webm" : kind === "thumbnail" ? "image/webp" : "application/json",
+      uploadedAt: createdAt,
+      validatedAt: createdAt,
+    };
+  });
+
+  await metadata.createUpload({
+    recording: {
+      id: input.id,
+      ownerId: input.ownerId,
+      localPackageId: `local-${input.id}`,
+      title: `Recording ${input.id}`,
+      schemaVersion: RECORDING_SCHEMA_VERSION,
+      status: input.status,
+      visibility: "private",
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: input.status === "ready" ? createdAt : null,
+      durationMs: 12_345,
+      initialLanguage: "javascript",
+      hasAudio: input.hasAudio ?? false,
+      hasCamera: input.hasCamera ?? false,
+      totalSizeBytes: 1024,
+      eventCount: 7,
+      snapshotCount: 2,
+      failureCode: input.failureCode ?? null,
+      failureMessage: input.failureMessage ?? null,
+    },
+    assets,
     session: {
       id: `session-${input.id}`,
       recordingId: input.id,

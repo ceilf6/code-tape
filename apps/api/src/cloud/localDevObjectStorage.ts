@@ -125,6 +125,9 @@ export function createLocalDevObjectStorage(
     async deleteObject(key: string): Promise<void> {
       objects.delete(key);
     },
+    getAssetUrl(key: string): string {
+      return buildLocalDevObjectUrl(publicBaseUrl, key);
+    },
   };
 
   return storage;

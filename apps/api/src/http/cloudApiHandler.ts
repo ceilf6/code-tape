@@ -56,6 +56,27 @@ export function createCloudApiHandler(deps: {
       return jsonResponse(result.value, 200, requestId);
     }
 
+    const playbackMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/playback$/);
+    if (request.method === "GET" && playbackMatch) {
+      const ownerId = readOwnerToken(request);
+      if (!ownerId) {
+        return jsonError(
+          { code: "unauthorized", message: "missing owner token", requestId },
+          requestId,
+        );
+      }
+      const recordingId = safeDecodePathSegment(playbackMatch[1]!);
+      if (!recordingId.ok) {
+        return jsonError({ ...recordingId.error, requestId }, requestId);
+      }
+      const result = await deps.service.getPlaybackDescriptor({
+        ownerId,
+        recordingId: recordingId.value,
+      });
+      if (!result.ok) return jsonError({ ...result.error, requestId }, requestId);
+      return jsonResponse(result.value, 200, requestId);
+    }
+
     const recordingDetailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
     if (request.method === "GET" && recordingDetailMatch) {
       const ownerId = readOwnerToken(request);

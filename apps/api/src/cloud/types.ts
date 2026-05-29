@@ -130,6 +130,21 @@ export type CloudRecordingDetail = {
   failureMessage: string | null;
 };
 
+export type CloudPlaybackDescriptor = {
+  id: string;
+  title: string;
+  durationMs: number;
+  schemaVersion: RecordingSchemaVersion;
+  manifestUrl: string;
+  metaUrl: string;
+  eventsUrl: string;
+  snapshotsUrl: string;
+  indexesUrl: string | null;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  expiresAt: string;
+};
+
 export type CloudRecordingAssetSummary = Pick<
   CloudRecordingAssetRecord,
   "kind" | "sizeBytes" | "mimeType" | "validatedAt"
