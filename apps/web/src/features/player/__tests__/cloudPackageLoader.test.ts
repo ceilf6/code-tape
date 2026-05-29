@@ -144,6 +144,32 @@ describe("createCloudPackageLoader", () => {
     }
   });
 
+  it("keeps JSON playback available when a declared media asset cannot be downloaded", async () => {
+    const expectedMedia = new Blob(["media"], { type: "video/webm" });
+    const parts = await makePackageParts({ mediaBlob: expectedMedia });
+    const loader = createCloudPackageLoader({
+      repository: makeRepository({ ok: true, value: makeDescriptor({ indexesUrl: null }) }),
+      fetch: makeAssetFetch({
+        "https://assets.example.com/manifest.json": jsonResponse(parts.manifest),
+        "https://assets.example.com/meta.json": jsonResponse(parts.meta),
+        "https://assets.example.com/events.json": jsonResponse(parts.events),
+        "https://assets.example.com/snapshots.json": jsonResponse(parts.snapshots),
+        "https://assets.example.com/media.webm": new Response("missing media", {
+          status: 404,
+          statusText: "Not Found",
+        }),
+      }),
+    });
+
+    const result = await loader.load("rec-1");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.mediaBlob).toBeNull();
+      expect(result.warnings).toContainEqual({ code: "media-missing", blobId: "cloud-media" });
+    }
+  });
+
   it("preserves checksum mismatch failures from the shared package verifier", async () => {
     const parts = await makePackageParts();
     const changedEvent = { ...parts.events[0], timestampMs: 999 };
