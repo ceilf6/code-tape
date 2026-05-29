@@ -1,0 +1,133 @@
+{
+  "samples": [
+    {
+      "id": "react-state-loop",
+      "kind": "representative",
+      "input": {
+        "durationMs": 7200,
+        "context": {
+          "fileName": "Counter.tsx",
+          "glossary": ["React", "useState", "setCount", "render"],
+          "runtimeOutput": "Maximum update depth exceeded"
+        },
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 1800, "text": "这里用 use state 保存 count" },
+          { "id": "subtitle-2", "startMs": 1800, "endMs": 3600, "text": "然后 set count 会触发 render" },
+          { "id": "subtitle-3", "startMs": 3600, "endMs": 7200, "text": "如果依赖写错会一直重新渲染" }
+        ]
+      },
+      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这里用 useState 保存 count\"},{\"id\":\"subtitle-2\",\"text\":\"然后 setCount 会触发 render\"}],\"chapters\":[{\"title\":\"状态更新\",\"startMs\":0,\"endMs\":3600},{\"title\":\"问题定位\",\"startMs\":3600,\"endMs\":7200}]}",
+      "expect": {
+        "corrections": [
+          { "id": "subtitle-1", "text": "这里用 useState 保存 count" },
+          { "id": "subtitle-2", "text": "然后 setCount 会触发 render" }
+        ],
+        "terms": ["useState", "setCount", "render"],
+        "chapterTitles": ["状态更新", "问题定位"]
+      }
+    },
+    {
+      "id": "vite-worker-cache",
+      "kind": "representative",
+      "input": {
+        "durationMs": 9000,
+        "context": {
+          "fileName": "subtitlePostProcessorWorker.ts",
+          "glossary": ["Vite", "Web Worker", "CacheStorage", "Transformers.js"],
+          "runtimeOutput": "Unable to add response to browser cache"
+        },
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 2400, "text": "先看 vite 打包后的 worker 加载" },
+          { "id": "subtitle-2", "startMs": 2400, "endMs": 5200, "text": "缓存失败时不要阻塞播放器" },
+          { "id": "subtitle-3", "startMs": 5200, "endMs": 9000, "text": "最后回到 transformers js 的资源下载" }
+        ]
+      },
+      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"先看 Vite 打包后的 Web Worker 加载\"},{\"id\":\"subtitle-3\",\"text\":\"最后回到 Transformers.js 的资源下载\"}],\"chapters\":[{\"title\":\"Worker 加载\",\"startMs\":0,\"endMs\":2400},{\"title\":\"缓存降级\",\"startMs\":2400,\"endMs\":5200},{\"title\":\"资源下载\",\"startMs\":5200,\"endMs\":9000}]}",
+      "expect": {
+        "corrections": [
+          { "id": "subtitle-1", "text": "先看 Vite 打包后的 Web Worker 加载" },
+          { "id": "subtitle-3", "text": "最后回到 Transformers.js 的资源下载" }
+        ],
+        "terms": ["Vite", "Web Worker", "Transformers.js"],
+        "chapterTitles": ["Worker 加载", "缓存降级", "资源下载"]
+      }
+    },
+    {
+      "id": "playwright-regression",
+      "kind": "representative",
+      "input": {
+        "durationMs": 8400,
+        "context": {
+          "fileName": "player.spec.ts",
+          "glossary": ["Playwright", "seek", "SubtitlePanel", "repo-guard"],
+          "runtimeOutput": "expect(locator).toBeVisible() timed out"
+        },
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 2200, "text": "这个回归用 play write 复现" },
+          { "id": "subtitle-2", "startMs": 2200, "endMs": 5000, "text": "点击章节以后应该调用 seek" },
+          { "id": "subtitle-3", "startMs": 5000, "endMs": 8400, "text": "repo guard 会检查验证结果" }
+        ]
+      },
+      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"这个回归用 Playwright 复现\"},{\"id\":\"subtitle-3\",\"text\":\"repo-guard 会检查验证结果\"}],\"chapters\":[{\"title\":\"回归复现\",\"startMs\":0,\"endMs\":2200},{\"title\":\"章节跳转\",\"startMs\":2200,\"endMs\":5000},{\"title\":\"验证结果\",\"startMs\":5000,\"endMs\":8400}]}",
+      "expect": {
+        "corrections": [
+          { "id": "subtitle-1", "text": "这个回归用 Playwright 复现" },
+          { "id": "subtitle-3", "text": "repo-guard 会检查验证结果" }
+        ],
+        "terms": ["Playwright", "seek", "repo-guard"],
+        "chapterTitles": ["回归复现", "章节跳转", "验证结果"]
+      }
+    },
+    {
+      "id": "invalid-json-output",
+      "kind": "negative",
+      "input": {
+        "durationMs": 2000,
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 2000, "text": "这里检查 JSON 输出" }
+        ]
+      },
+      "output": "segments: []",
+      "expect": { "issue": "invalid-json" }
+    },
+    {
+      "id": "unknown-segment-output",
+      "kind": "negative",
+      "input": {
+        "durationMs": 3000,
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 1500, "text": "这里检查字幕段引用" },
+          { "id": "subtitle-2", "startMs": 1500, "endMs": 3000, "text": "不能引用不存在的段" }
+        ]
+      },
+      "output": "{\"segments\":[{\"id\":\"subtitle-404\",\"text\":\"不存在的字幕段\"}],\"chapters\":[{\"title\":\"引用检查\",\"startMs\":0,\"endMs\":3000}]}",
+      "expect": { "issue": "unknown-segment" }
+    },
+    {
+      "id": "duplicate-segment-output",
+      "kind": "negative",
+      "input": {
+        "durationMs": 3000,
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 1500, "text": "这里检查重复字幕段" },
+          { "id": "subtitle-2", "startMs": 1500, "endMs": 3000, "text": "重复输出应该暴露" }
+        ]
+      },
+      "output": "{\"segments\":[{\"id\":\"subtitle-1\",\"text\":\"第一次修正\"},{\"id\":\"subtitle-1\",\"text\":\"第二次修正\"}],\"chapters\":[{\"title\":\"重复检查\",\"startMs\":0,\"endMs\":3000}]}",
+      "expect": { "issue": "duplicate-segment" }
+    },
+    {
+      "id": "invalid-chapter-timeline-output",
+      "kind": "negative",
+      "input": {
+        "durationMs": 5000,
+        "segments": [
+          { "id": "subtitle-1", "startMs": 0, "endMs": 2500, "text": "先讲问题分析" },
+          { "id": "subtitle-2", "startMs": 2500, "endMs": 5000, "text": "再讲代码实现" }
+        ]
+      },
+      "output": "{\"segments\":[],\"chapters\":[{\"title\":\"代码实现\",\"startMs\":2600,\"endMs\":5000},{\"title\":\"问题分析\",\"startMs\":1200,\"endMs\":3000}]}",
+      "expect": { "issue": "invalid-chapter-timeline" }
+    }
+  ]
+}

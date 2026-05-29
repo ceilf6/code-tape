@@ -318,6 +318,60 @@ test('subtitle fine-tuning corpus teaches sparse long-track outputs instead of f
   assert.equal(metrics.chapterSignalRate, 1);
 });
 
+test('subtitle postprocessor evaluation baseline covers quality, failure modes, and fixture timing', async () => {
+  const { evaluatePostprocessorFixtures } = await import('../subtitle-llm/evaluate-postprocessor.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+  const metrics = evaluatePostprocessorFixtures(fixture);
+
+  assert.equal(metrics.samples, 7);
+  assert.equal(metrics.representativeSamples, 3);
+  assert.equal(metrics.representativePassRate, 1);
+  assert.equal(metrics.representativeJsonValidRate, 1);
+  assert.equal(metrics.representativeSegmentReferenceValidRate, 1);
+  assert.equal(metrics.representativeCorrectionHitRate, 1);
+  assert.equal(metrics.representativeTermHitRate, 1);
+  assert.equal(metrics.representativeChapterTimelineValidRate, 1);
+  assert.equal(metrics.representativeChapterTitleHitRate, 1);
+  assert.ok(metrics.overallEvaluationDurationMs >= 0);
+  assert.ok(metrics.averageFixtureValidationDurationMs >= 0);
+  assert.ok(
+    metrics.maxFixtureValidationDurationMs >= metrics.averageFixtureValidationDurationMs,
+  );
+  assert.equal(Object.hasOwn(metrics, 'averageDurationMs'), false);
+  assert.equal(Object.hasOwn(metrics, 'maxDurationMs'), false);
+  for (const result of metrics.sampleResults) {
+    assert.ok(result.fixtureValidationDurationMs >= 0);
+    assert.equal(Object.hasOwn(result, 'durationMs'), false);
+  }
+  assert.deepEqual(
+    metrics.detectedNegativeIssues.sort(),
+    ['duplicate-segment', 'invalid-chapter-timeline', 'invalid-json', 'unknown-segment'].sort(),
+  );
+});
+
+test('PR self-check asks for one correction and chapter generation evaluation result', () => {
+  const template = readFileSync('.github/PULL_REQUEST_TEMPLATE.md', 'utf8');
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+  const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+
+  assert.match(template, /纠错并生成章节/u);
+  assert.match(template, /npm run subtitle:postprocess:evaluate/u);
+  assert.match(template, /npm run subtitle:postprocess:runtime-benchmark/u);
+  assert.match(template, /overallEvaluationDurationMs/u);
+  assert.match(template, /fixture 校验耗时/u);
+  assert.match(template, /postprocessClickToResultReadyDurationMs/u);
+  assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
+  assert.equal(
+    packageJson.scripts['subtitle:postprocess:runtime-benchmark'],
+    'SUBTITLE_RUNTIME_BENCHMARK=1 npm run test -w apps/web -- src/features/subtitles/__tests__/subtitlePostProcessorRuntimeBenchmark.test.tsx',
+  );
+  assert.match(technicalPlan, /npm run subtitle:postprocess:runtime-benchmark/u);
+  assert.match(technicalPlan, /postprocessClickToResultReadyDurationMs/u);
+  assert.match(technicalPlan, /playbackProbeResponsiveDuringPostprocess/u);
+});
+
 function readJsonl(path) {
   return readFileSync(path, 'utf8')
     .split(/\r?\n/u)

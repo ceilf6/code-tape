@@ -21,6 +21,8 @@
     "subtitle:curate": "node scripts/subtitle-llm/augment-corpus.mjs",
     "subtitle:distill": "node scripts/subtitle-llm/distill-corpus.mjs --seed ml/subtitle-postprocessor/data/seed_examples.jsonl --out ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:evaluate": "node scripts/subtitle-llm/evaluate-corpus.mjs ml/subtitle-postprocessor/data/generated/distilled.jsonl",
+    "subtitle:postprocess:evaluate": "node scripts/subtitle-llm/evaluate-postprocessor.mjs scripts/tests/fixtures/subtitle-postprocessor-eval.json",
+    "subtitle:postprocess:runtime-benchmark": "SUBTITLE_RUNTIME_BENCHMARK=1 npm run test -w apps/web -- src/features/subtitles/__tests__/subtitlePostProcessorRuntimeBenchmark.test.tsx",
     "subtitle:train": "python3 ml/subtitle-postprocessor/train_lora.py --train-jsonl ml/subtitle-postprocessor/data/generated/distilled.jsonl",
     "subtitle:train:help": "python3 ml/subtitle-postprocessor/train_lora.py --help",
     "dev": "npm run dev -w apps/web -- --host 127.0.0.1",
