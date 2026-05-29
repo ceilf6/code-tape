@@ -27,6 +27,7 @@ import { IconButton, useTheme } from "@/shared/ui";
 import type {
   CameraPositionPayload,
   DeviceInfo,
+  EventBus,
   MediaCapability,
   MediaDevicesController,
   OpenStreamResult,
@@ -83,7 +84,11 @@ type RecorderRuntimeState = {
  * RecorderPage — wires the recording core (clock + bus + producers + builder
  * + repository + media + runtime) and renders the workshop layout.
  */
-export function RecorderPage() {
+export type RecorderPageProps = {
+  onEventBusReady?: (bus: Pick<EventBus, "peek" | "subscribe">) => (() => void) | void;
+};
+
+export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   const navigate = useNavigate();
   const theme = useTheme();
   const editorRef = useRef<CodeEditorHandle | null>(null);
@@ -223,6 +228,10 @@ export function RecorderPage() {
   const [mediaPermissionNotice, setMediaPermissionNotice] = useState<string | null>(null);
   const [mediaPermissionRequesting, setMediaPermissionRequesting] = useState(false);
   const [runtimeState, setRuntimeState] = useState<RecorderRuntimeState>(INITIAL_RUNTIME_STATE);
+
+  useEffect(() => {
+    return onEventBusReady?.(stack.bus) ?? undefined;
+  }, [onEventBusReady, stack.bus]);
 
   const loadDevices = useCallback((options: { force?: boolean } = {}) => {
     if (deviceLoadPromiseRef.current && !options.force) return deviceLoadPromiseRef.current;

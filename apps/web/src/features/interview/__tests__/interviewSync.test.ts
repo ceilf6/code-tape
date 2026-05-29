@@ -38,14 +38,20 @@ function createFakeChannel(initialState: InterviewRealtimeDataChannel["readyStat
   return { channel, sent };
 }
 
-function createFakeEventBus(): Pick<EventBus, "subscribe"> & { emit(event: RecordingEvent): void } {
+function createFakeEventBus(
+  history: RecordingEvent[] = [],
+): Pick<EventBus, "peek" | "subscribe"> & { emit(event: RecordingEvent): void } {
   const listeners = new Set<(event: RecordingEvent) => void>();
   return {
+    peek() {
+      return history.slice();
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     emit(event) {
+      history.push(event);
       listeners.forEach((listener) => listener(event));
     },
   };
@@ -82,6 +88,28 @@ describe("InterviewSyncPublisher", () => {
       contentHash: "hash-1",
       event,
     });
+  });
+
+  it("only replays existing EventBus events when backlog publishing is requested", () => {
+    const { channel, sent } = createFakeChannel();
+    const event = contentEvent(1, "const beforeSubscribe = true;");
+    const bus = createFakeEventBus([event]);
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+    });
+
+    const unsubscribeWithoutBacklog = publisher.subscribeTo(bus);
+    unsubscribeWithoutBacklog();
+
+    expect(sent).toEqual([]);
+
+    const unsubscribeWithBacklog = publisher.subscribeTo(bus, { includeBacklog: true });
+    unsubscribeWithBacklog();
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]).event).toEqual(event);
   });
 
   it("returns an explicit failure when the DataChannel is not open", () => {

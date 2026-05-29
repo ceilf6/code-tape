@@ -68,7 +68,16 @@ export type InterviewSyncPublisherOptions = {
 
 export type InterviewSyncPublisher = {
   publishRecordingEvent(event: RecordingEvent): InterviewPublishResult;
-  subscribeTo(bus: Pick<EventBus, "subscribe">): () => void;
+  subscribeTo(
+    bus: Pick<EventBus, "subscribe"> & Partial<Pick<EventBus, "peek">>,
+    options?: InterviewSyncSubscribeOptions,
+  ): () => void;
+};
+
+export type InterviewSyncSubscribeOptions = {
+  includeBacklog?: boolean;
+  shouldPublishEvent?: (event: RecordingEvent) => boolean;
+  onPublishResult?: (event: RecordingEvent, result: InterviewPublishResult) => void;
 };
 
 export function createInterviewSyncPublisher(
@@ -104,10 +113,18 @@ export function createInterviewSyncPublisher(
 
   return {
     publishRecordingEvent,
-    subscribeTo(bus) {
-      return bus.subscribe((event) => {
-        publishRecordingEvent(event);
-      });
+    subscribeTo(bus, subscribeOptions = {}) {
+      const publishFromSubscription = (event: RecordingEvent) => {
+        if (subscribeOptions.shouldPublishEvent?.(event) === false) return;
+        const result = publishRecordingEvent(event);
+        subscribeOptions.onPublishResult?.(event, result);
+      };
+
+      if (subscribeOptions.includeBacklog) {
+        bus.peek?.().forEach(publishFromSubscription);
+      }
+
+      return bus.subscribe(publishFromSubscription);
     },
   };
 }

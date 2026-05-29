@@ -11,6 +11,7 @@ import type {
 import type { CodeEditorHandle, CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { CameraPreviewProps } from "@/features/media/CameraPreview";
 import type {
+  EventBus,
   MediaDevicesController,
   OpenStreamResult,
   RecordingRepository,
@@ -377,6 +378,24 @@ describe("RecorderPage", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
+  });
+
+  it("exposes the recording EventBus to an optional realtime subscriber and cleans it up", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    const cleanupSubscriber = vi.fn();
+    const onEventBusReady = vi.fn(
+      (_bus: Pick<EventBus, "peek" | "subscribe">) => cleanupSubscriber,
+    );
+
+    const { unmount } = render(<RecorderPage onEventBusReady={onEventBusReady} />);
+
+    await waitFor(() => expect(onEventBusReady).toHaveBeenCalledTimes(1));
+    expect(onEventBusReady.mock.calls[0][0].peek).toBeTypeOf("function");
+    expect(onEventBusReady.mock.calls[0][0].subscribe).toBeTypeOf("function");
+
+    unmount();
+
+    expect(cleanupSubscriber).toHaveBeenCalledTimes(1);
   });
 
   it("runs with the current editor language after producer-driven language changes", async () => {

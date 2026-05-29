@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, type ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appRoutes } from "@/app/routes";
+import type { EventBus, RecordingEvent } from "@/shared/recording-schema";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
 import { TooltipProvider } from "@/shared/ui/Tooltip";
 import type {
@@ -18,13 +19,63 @@ import type {
 } from "../interviewSignalingClient";
 import { CandidateInterviewPage, CandidateInterviewView } from "../CandidateInterviewPage";
 
-vi.mock("@/features/recorder/RecorderPage", () => ({
-  RecorderPage() {
-    return <div data-testid="recorder-workspace">Recorder workspace</div>;
-  },
-}));
+const recorderPageMock = vi.hoisted(() => {
+  const listeners = new Set<(event: RecordingEvent) => void>();
+  const history: RecordingEvent[] = [];
+  const unsubscribe = vi.fn();
+  const bus: Pick<EventBus, "peek" | "subscribe"> = {
+    peek: vi.fn(() => history.slice()),
+    subscribe: vi.fn((listener) => {
+      listeners.add(listener);
+      return () => {
+        unsubscribe();
+        listeners.delete(listener);
+      };
+    }),
+  };
+
+  return {
+    bus,
+    unsubscribe,
+    emit(event: RecordingEvent) {
+      history.push(event);
+      listeners.forEach((listener) => listener(event));
+    },
+    reset() {
+      listeners.clear();
+      history.length = 0;
+      unsubscribe.mockClear();
+      vi.mocked(bus.peek).mockClear();
+      vi.mocked(bus.subscribe).mockClear();
+    },
+    resetHistory() {
+      history.length = 0;
+    },
+  };
+});
+
+vi.mock("@/features/recorder/RecorderPage", async () => {
+  const React = (await vi.importActual("react")) as {
+    useEffect(effect: () => void | (() => void), deps: unknown[]): void;
+  };
+
+  return {
+    RecorderPage({
+      onEventBusReady,
+    }: {
+      onEventBusReady?: (bus: Pick<EventBus, "peek" | "subscribe">) => void | (() => void);
+    }) {
+      React.useEffect(() => onEventBusReady?.(recorderPageMock.bus), [onEventBusReady]);
+      return <div data-testid="recorder-workspace">Recorder workspace</div>;
+    },
+  };
+});
 
 describe("CandidateInterviewPage", () => {
+  beforeEach(() => {
+    recorderPageMock.reset();
+  });
+
   it("creates a room and connects candidate signaling from the candidate entry route", async () => {
     const roomClient = makeRoomClient({
       createRoom: vi.fn().mockResolvedValue({
@@ -134,6 +185,451 @@ describe("CandidateInterviewPage", () => {
     expect(media.session.ensureEventsDataChannel).toHaveBeenCalledTimes(1);
     expect(media.session.createOffer).toHaveBeenCalledTimes(1);
     expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes recorder EventBus events to the candidate events DataChannel", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const event = contentEvent(7, "const answer = 42;");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(event);
+    });
+
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+    expect(JSON.parse(vi.mocked(media.eventsDataChannel.send).mock.calls[0][0])).toEqual({
+      kind: "recording-event",
+      roomId: "room-created",
+      sessionId: "candidate-connection-1",
+      messageId: expect.any(String),
+      sentAt: expect.any(Number),
+      stateVersion: 0,
+      contentHash: "hash-7",
+      event,
+    });
+  });
+
+  it("waits for the candidate events DataChannel to open before subscribing and backfills queued events", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "connecting",
+      },
+    );
+    const queuedEvent = contentEvent(1, "const queued = true;");
+    const liveEvent = contentEvent(2, "const live = true;");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    expect(recorderPageMock.bus.subscribe).not.toHaveBeenCalled();
+    act(() => {
+      recorderPageMock.emit(queuedEvent);
+    });
+    expect(media.eventsDataChannel.send).not.toHaveBeenCalled();
+
+    act(() => {
+      media.setEventsDataChannelState("open");
+    });
+
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+    expect(JSON.parse(vi.mocked(media.eventsDataChannel.send).mock.calls[0][0]).event).toEqual(
+      queuedEvent,
+    );
+
+    act(() => {
+      recorderPageMock.emit(liveEvent);
+    });
+
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(2);
+    });
+    expect(JSON.parse(vi.mocked(media.eventsDataChannel.send).mock.calls[1][0]).event).toEqual(
+      liveEvent,
+    );
+  });
+
+  it("publishes already-recorded EventBus events when the interviewer joins late", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const firstEvent = contentEvent(1, "const beforeJoin = 1;");
+    const secondEvent = contentEvent(2, "const beforeJoin = 2;");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      recorderPageMock.emit(firstEvent);
+      recorderPageMock.emit(secondEvent);
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(2);
+    });
+    expect(vi.mocked(media.eventsDataChannel.send).mock.calls.map(([data]) => JSON.parse(data).event)).toEqual([
+      firstEvent,
+      secondEvent,
+    ]);
+  });
+
+  it("does not replay already-sent EventBus events after the events DataChannel reopens", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const firstEvent = contentEvent(1, "const first = true;");
+    const secondEvent = contentEvent(2, "const duringClose = true;");
+    const thirdEvent = contentEvent(3, "const afterReopen = true;");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(firstEvent);
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      media.setEventsDataChannelState("closed");
+      recorderPageMock.emit(secondEvent);
+    });
+    expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      media.setEventsDataChannelState("open");
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      recorderPageMock.emit(thirdEvent);
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(3);
+    });
+
+    expect(vi.mocked(media.eventsDataChannel.send).mock.calls.map(([data]) => JSON.parse(data).event)).toEqual([
+      firstEvent,
+      secondEvent,
+      thirdEvent,
+    ]);
+  });
+
+  it("publishes a new recorder session after the EventBus resets and reuses seq numbers", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const firstSessionEvent = contentEvent(1, "const firstSession = true;", "event-first-session");
+    const resetSessionEvent = contentEvent(1, "const resetSession = true;", "event-reset-session");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(firstSessionEvent);
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.resetHistory();
+      recorderPageMock.emit(resetSessionEvent);
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(2);
+    });
+
+    expect(vi.mocked(media.eventsDataChannel.send).mock.calls.map(([data]) => JSON.parse(data).event)).toEqual([
+      firstSessionEvent,
+      resetSessionEvent,
+    ]);
+  });
+
+  it("stops publishing recorder events when the interviewer leaves", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(contentEvent(1));
+    });
+    await waitFor(() => {
+      expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "leave",
+        roomId: "room-created",
+        role: "interviewer",
+        connectionId: "interviewer-connection-1",
+        messageId: "leave-1",
+        sentAt: 1_780_000_000_000,
+      });
+      recorderPageMock.emit(contentEvent(2));
+    });
+
+    expect(recorderPageMock.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(media.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays recorded backlog for a new interviewer after the previous interviewer leaves", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const firstMedia = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const secondMedia = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+    const createMediaSession = vi
+      .fn<() => InterviewMediaSession>()
+      .mockReturnValueOnce(firstMedia.session)
+      .mockReturnValueOnce(secondMedia.session);
+    const firstEvent = contentEvent(1, "const firstInterviewer = true;");
+    const secondEvent = contentEvent(2, "const nextInterviewer = true;");
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      recorderPageMock.emit(firstEvent);
+    });
+    await waitFor(() => {
+      expect(firstMedia.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "leave",
+        roomId: "room-created",
+        role: "interviewer",
+        connectionId: "interviewer-connection-1",
+        messageId: "leave-1",
+        sentAt: 1_780_000_000_000,
+      });
+      recorderPageMock.emit(secondEvent);
+    });
+    expect(firstMedia.eventsDataChannel.send).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+
+    await waitFor(() => {
+      expect(createMediaSession).toHaveBeenCalledTimes(2);
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(2);
+      expect(secondMedia.eventsDataChannel.send).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      vi.mocked(secondMedia.eventsDataChannel.send).mock.calls.map(([data]) => JSON.parse(data).event),
+    ).toEqual([firstEvent, secondEvent]);
+  });
+
+  it("stops publishing recorder events when the candidate page unmounts", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+
+    const view = renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    view.unmount();
+    act(() => {
+      recorderPageMock.emit(contentEvent(1));
+    });
+
+    expect(recorderPageMock.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(media.eventsDataChannel.send).not.toHaveBeenCalled();
   });
 
   it("bridges local ICE, remote answer, and remote ICE between media and signaling", async () => {
@@ -967,7 +1463,10 @@ function makeSignalingFactory() {
   };
 }
 
-function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
+function makeMediaSessionFactory(
+  patch: Partial<InterviewMediaSession> = {},
+  options: { eventsDataChannelState?: InterviewEventsDataChannel["readyState"] } = {},
+) {
   let state = makeMediaState();
   const listeners = new Set<(next: InterviewMediaSessionState) => void>();
   const updateState = (next: Partial<InterviewMediaSessionState>) => {
@@ -979,7 +1478,7 @@ function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
   const remoteStream = {} as MediaStream;
   const eventsDataChannel: InterviewEventsDataChannel = {
     label: "events",
-    readyState: "connecting",
+    readyState: options.eventsDataChannelState ?? "connecting",
     onopen: null,
     onclose: null,
     send: vi.fn(),
@@ -1039,10 +1538,40 @@ function makeMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
   return {
     create: vi.fn(() => session),
     session,
+    eventsDataChannel,
+    setEventsDataChannelState(next: InterviewEventsDataChannel["readyState"]) {
+      Object.defineProperty(eventsDataChannel, "readyState", {
+        configurable: true,
+        value: next,
+      });
+      updateState({ eventsDataChannelState: next });
+    },
     emitState(next: Partial<InterviewMediaSessionState>) {
       updateState(next);
     },
     localStream,
     remoteStream,
+  };
+}
+
+function contentEvent(seq: number, code = `code-${seq}`, id = `event-${seq}`): RecordingEvent {
+  return {
+    id,
+    seq,
+    timestampMs: seq * 100,
+    wallTime: "2026-05-29T17:00:00.000Z",
+    source: "editor",
+    track: "main",
+    type: "content-change",
+    payload: {
+      fileId: "main",
+      version: seq,
+      code,
+      contentHash: `hash-${seq}`,
+      language: "typescript",
+      changeReason: "input",
+      changeCount: 1,
+      flushedBy: "debounce",
+    },
   };
 }

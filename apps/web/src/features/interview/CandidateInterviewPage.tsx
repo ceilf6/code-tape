@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import {
   CircleDot,
@@ -12,12 +12,15 @@ import {
   VideoOff,
 } from "lucide-react";
 import { RecorderPage } from "@/features/recorder/RecorderPage";
+import type { EventBus } from "@/shared/recording-schema";
 import { Toggle, Tooltip } from "@/shared/ui";
 import {
   createInterviewMediaSession,
+  type InterviewEventsDataChannel,
   type InterviewMediaSession,
   type InterviewMediaSessionState,
 } from "./interviewMediaSession";
+import { createInterviewSyncPublisher } from "./interviewSync";
 import {
   createInterviewRoomClient,
   type InterviewRoomClient,
@@ -68,6 +71,14 @@ export type CandidateInterviewPageProps = {
   };
 };
 
+type RecorderEventBusSubscription = Pick<EventBus, "peek" | "subscribe">;
+
+type CandidateRealtimePublisherContext = {
+  channel: InterviewEventsDataChannel;
+  roomId: string;
+  sessionId: string;
+};
+
 const EMPTY_CANDIDATE_MEDIA_STATE: InterviewMediaSessionState = {
   localStream: null,
   remoteStream: null,
@@ -100,7 +111,7 @@ export function CandidateInterviewPage({ deps = {} }: CandidateInterviewPageProp
       roomId={session.roomId}
       roomState={session.roomState}
       mediaState={session.mediaState}
-      recordingWorkspace={<RecorderPage />}
+      recordingWorkspace={<RecorderPage onEventBusReady={session.onEventBusReady} />}
     />
   );
 }
@@ -121,6 +132,7 @@ function useCandidateInterviewRoomSession({
   roomId: string | null;
   roomState: CandidateInterviewRoomState;
   mediaState: InterviewMediaSessionState;
+  onEventBusReady: (bus: RecorderEventBusSubscription) => (() => void) | void;
 } {
   const [session, setSession] = useState<{
     roomId: string | null;
@@ -136,6 +148,60 @@ function useCandidateInterviewRoomSession({
     roomClient: InterviewRoomClient;
     request: ReturnType<InterviewRoomClient["createRoom"]>;
   } | null>(null);
+  const recorderEventBusRef = useRef<RecorderEventBusSubscription | null>(null);
+  const realtimePublisherContextRef = useRef<CandidateRealtimePublisherContext | null>(null);
+  const unsubscribeRealtimePublisherRef = useRef<(() => void) | null>(null);
+  const subscribedRealtimePublisherContextRef = useRef<CandidateRealtimePublisherContext | null>(null);
+  const subscribedRecorderEventBusRef = useRef<RecorderEventBusSubscription | null>(null);
+  const publishedRealtimeEventIdsRef = useRef<Set<string>>(new Set());
+  const stopRealtimePublisher = useCallback(() => {
+    unsubscribeRealtimePublisherRef.current?.();
+    unsubscribeRealtimePublisherRef.current = null;
+    subscribedRealtimePublisherContextRef.current = null;
+    subscribedRecorderEventBusRef.current = null;
+  }, []);
+  const refreshRealtimePublisher = useCallback(() => {
+    const bus = recorderEventBusRef.current;
+    const context = realtimePublisherContextRef.current;
+    if (!bus || !context || context.channel.readyState !== "open") {
+      stopRealtimePublisher();
+      return;
+    }
+    if (
+      subscribedRecorderEventBusRef.current === bus &&
+      subscribedRealtimePublisherContextRef.current === context
+    ) {
+      return;
+    }
+    stopRealtimePublisher();
+    unsubscribeRealtimePublisherRef.current = createInterviewSyncPublisher({
+      channel: context.channel,
+      roomId: context.roomId,
+      sessionId: context.sessionId,
+    }).subscribeTo(bus, {
+      includeBacklog: true,
+      shouldPublishEvent: (event) => !publishedRealtimeEventIdsRef.current.has(event.id),
+      onPublishResult: (event, result) => {
+        if (result.ok) {
+          publishedRealtimeEventIdsRef.current.add(event.id);
+        }
+      },
+    });
+    subscribedRecorderEventBusRef.current = bus;
+    subscribedRealtimePublisherContextRef.current = context;
+  }, [stopRealtimePublisher]);
+  const onEventBusReady = useCallback(
+    (bus: RecorderEventBusSubscription) => {
+      recorderEventBusRef.current = bus;
+      refreshRealtimePublisher();
+      return () => {
+        if (recorderEventBusRef.current !== bus) return;
+        recorderEventBusRef.current = null;
+        stopRealtimePublisher();
+      };
+    },
+    [refreshRealtimePublisher, stopRealtimePublisher],
+  );
 
   useEffect(() => {
     let closed = false;
@@ -144,10 +210,18 @@ function useCandidateInterviewRoomSession({
     let unsubscribeMediaSession: (() => void) | null = null;
     let mediaOfferStarted = false;
     let mediaSessionVersion = 0;
+    let lastEventsDataChannelState: InterviewMediaSessionState["eventsDataChannelState"] =
+      "not-created";
     let activeInterviewerConnectionId: string | null = null;
     const staleInterviewerConnectionIds = new Set<string>();
+    realtimePublisherContextRef.current = null;
+    publishedRealtimeEventIdsRef.current = new Set();
+    stopRealtimePublisher();
 
     const closeMediaSession = ({ publish }: { publish: boolean }) => {
+      realtimePublisherContextRef.current = null;
+      publishedRealtimeEventIdsRef.current = new Set();
+      stopRealtimePublisher();
       const current = mediaSession;
       if (!current) return;
       mediaSessionVersion += 1;
@@ -247,12 +321,27 @@ function useCandidateInterviewRoomSession({
         try {
           mediaSession = createMediaSession();
           mediaSessionVersion += 1;
-          setMediaState(mediaSession.getState());
+          const initialMediaState = mediaSession.getState();
+          lastEventsDataChannelState = initialMediaState.eventsDataChannelState;
+          setMediaState(initialMediaState);
           unsubscribeMediaSession = mediaSession.subscribe((next) => {
             if (closed) return;
             setMediaState(next);
             if (next.outgoingIceCandidates.length > 0) {
               sendPendingIceCandidates();
+            }
+            const previousEventsDataChannelState = lastEventsDataChannelState;
+            lastEventsDataChannelState = next.eventsDataChannelState;
+            if (
+              next.eventsDataChannelState === "open" &&
+              previousEventsDataChannelState !== "open"
+            ) {
+              refreshRealtimePublisher();
+            } else if (
+              next.eventsDataChannelState !== "open" &&
+              previousEventsDataChannelState === "open"
+            ) {
+              stopRealtimePublisher();
             }
           });
           return true;
@@ -291,10 +380,16 @@ function useCandidateInterviewRoomSession({
             if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
               return;
             }
-            currentMediaSession.ensureEventsDataChannel();
+            const eventsDataChannel = currentMediaSession.ensureEventsDataChannel();
             if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
               return;
             }
+            realtimePublisherContextRef.current = {
+              channel: eventsDataChannel,
+              roomId: room.roomId,
+              sessionId: signalingClient?.getConnectionId() ?? room.roomId,
+            };
+            refreshRealtimePublisher();
             const offer = await currentMediaSession.createOffer();
             if (!isCurrentMediaSession(currentMediaSession, currentMediaSessionVersion)) {
               return;
@@ -509,9 +604,16 @@ function useCandidateInterviewRoomSession({
       closeMediaSession({ publish: false });
       signalingClient?.close();
     };
-  }, [createMediaSession, createSignalingClient, roomClient, routeRoomId]);
+  }, [
+    createMediaSession,
+    createSignalingClient,
+    refreshRealtimePublisher,
+    roomClient,
+    routeRoomId,
+    stopRealtimePublisher,
+  ]);
 
-  return { ...session, mediaState };
+  return { ...session, mediaState, onEventBusReady };
 }
 
 function initialCandidateRoomState(routeRoomId: string | null): CandidateInterviewRoomState {
