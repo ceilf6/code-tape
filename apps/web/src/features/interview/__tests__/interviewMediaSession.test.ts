@@ -6,10 +6,16 @@ import {
 } from "../interviewMediaSession";
 
 class FakeTrack {
+  stopped = false;
+
   constructor(
     readonly kind: "audio" | "video",
     public enabled = true,
   ) {}
+
+  stop(): void {
+    this.stopped = true;
+  }
 }
 
 class FakeMediaStream {
@@ -49,7 +55,7 @@ class FakePeerConnection implements InterviewPeerConnection {
   oniceconnectionstatechange: (() => void) | null = null;
   onsignalingstatechange: (() => void) | null = null;
   readonly addedTracks: Array<{ track: MediaStreamTrack; stream: MediaStream }> = [];
-  readonly remoteCandidates: RTCIceCandidateInit[] = [];
+  readonly remoteCandidates: Array<RTCIceCandidateInit | null> = [];
   closed = false;
 
   addTrack(track: MediaStreamTrack, stream: MediaStream): void {
@@ -72,8 +78,8 @@ class FakePeerConnection implements InterviewPeerConnection {
     this.remoteDescription = { ...description };
   }
 
-  async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    this.remoteCandidates.push({ ...candidate });
+  async addIceCandidate(candidate: RTCIceCandidateInit | null): Promise<void> {
+    this.remoteCandidates.push(candidate ? { ...candidate } : null);
   }
 
   close(): void {
@@ -81,7 +87,7 @@ class FakePeerConnection implements InterviewPeerConnection {
     this.connectionState = "closed";
   }
 
-  emitIceCandidate(candidate: RTCIceCandidateInit): void {
+  emitIceCandidate(candidate: RTCIceCandidateInit | null): void {
     this.onicecandidate?.({ candidate });
   }
 
@@ -193,6 +199,46 @@ describe("InterviewMediaSession", () => {
       { candidate: "candidate:2", sdpMid: "0", sdpMLineIndex: 1 },
     ]);
     expect(session.getState().outgoingIceCandidates).toEqual([]);
+  });
+
+  it("forwards and accepts null ICE candidates as end-of-candidates signals", async () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+
+    peer.emitIceCandidate(null);
+    await session.addRemoteIceCandidate(null);
+
+    expect(session.drainOutgoingIceCandidates()).toEqual([null]);
+    expect(peer.remoteCandidates).toEqual([null]);
+  });
+
+  it("stops local media tracks and publishes disabled state when closed", async () => {
+    const { audioTrack, videoTrack, peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    const observedStates: Array<
+      Pick<ReturnType<typeof session.getState>, "microphoneEnabled" | "cameraEnabled">
+    > = [];
+    session.subscribe((state) => {
+      observedStates.push({
+        microphoneEnabled: state.microphoneEnabled,
+        cameraEnabled: state.cameraEnabled,
+      });
+    });
+    await session.requestLocalMedia();
+
+    const closed = session.close();
+
+    expect(audioTrack.stopped).toBe(true);
+    expect(videoTrack.stopped).toBe(true);
+    expect(peer.closed).toBe(true);
+    expect(closed.localStream).toBeNull();
+    expect(closed.remoteStream).toBeNull();
+    expect(closed.microphoneEnabled).toBe(false);
+    expect(closed.cameraEnabled).toBe(false);
+    expect(observedStates.at(-1)).toEqual({
+      microphoneEnabled: false,
+      cameraEnabled: false,
+    });
   });
 
   it("notifies subscribers when peer connection state changes and exposes isolated ICE snapshots", () => {

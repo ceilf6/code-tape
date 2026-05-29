@@ -17,6 +17,7 @@ export {
 export {
   createInterviewMediaSession,
   type InterviewIceCandidateEvent,
+  type InterviewIceCandidateSignal,
   type InterviewMediaSession,
   type InterviewMediaSessionDependencies,
   type InterviewMediaSessionOptions,

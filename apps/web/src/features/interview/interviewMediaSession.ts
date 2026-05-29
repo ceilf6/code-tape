@@ -1,6 +1,8 @@
 export type InterviewIceCandidateEvent = {
-  candidate: RTCIceCandidate | RTCIceCandidateInit | null;
+  candidate: RTCIceCandidate | InterviewIceCandidateSignal;
 };
+
+export type InterviewIceCandidateSignal = RTCIceCandidateInit | null;
 
 export type InterviewTrackEvent = {
   track: MediaStreamTrack;
@@ -23,7 +25,7 @@ export type InterviewPeerConnection = {
   createAnswer(options?: RTCAnswerOptions): Promise<RTCSessionDescriptionInit>;
   setLocalDescription(description: RTCSessionDescriptionInit): Promise<void>;
   setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void>;
-  addIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
+  addIceCandidate(candidate: InterviewIceCandidateSignal): Promise<void>;
   close(): void;
 };
 
@@ -47,7 +49,7 @@ export type InterviewMediaSessionState = {
   connectionState: RTCPeerConnectionState;
   iceConnectionState: RTCIceConnectionState;
   signalingState: RTCSignalingState;
-  outgoingIceCandidates: RTCIceCandidateInit[];
+  outgoingIceCandidates: InterviewIceCandidateSignal[];
 };
 
 export type InterviewMediaSession = {
@@ -58,8 +60,8 @@ export type InterviewMediaSession = {
   createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit>;
   createAnswer(options?: RTCAnswerOptions): Promise<RTCSessionDescriptionInit>;
   setRemoteDescription(description: RTCSessionDescriptionInit): Promise<InterviewMediaSessionState>;
-  addRemoteIceCandidate(candidate: RTCIceCandidateInit): Promise<InterviewMediaSessionState>;
-  drainOutgoingIceCandidates(): RTCIceCandidateInit[];
+  addRemoteIceCandidate(candidate: InterviewIceCandidateSignal): Promise<InterviewMediaSessionState>;
+  drainOutgoingIceCandidates(): InterviewIceCandidateSignal[];
   subscribe(listener: (state: InterviewMediaSessionState) => void): () => void;
   close(): InterviewMediaSessionState;
 };
@@ -76,7 +78,7 @@ export function createInterviewMediaSession(
   let remoteStream: MediaStream | null = null;
   let microphoneEnabled = false;
   let cameraEnabled = false;
-  let outgoingIceCandidates: RTCIceCandidateInit[] = [];
+  let outgoingIceCandidates: InterviewIceCandidateSignal[] = [];
 
   const snapshot = (): InterviewMediaSessionState => ({
     localStream,
@@ -96,10 +98,7 @@ export function createInterviewMediaSession(
   };
 
   peer.onicecandidate = (event) => {
-    if (!event.candidate) {
-      return;
-    }
-    outgoingIceCandidates = [...outgoingIceCandidates, cloneIceCandidate(event.candidate)];
+    outgoingIceCandidates = [...outgoingIceCandidates, cloneIceCandidateSignal(event.candidate)];
     notify();
   };
   peer.ontrack = (event) => {
@@ -165,6 +164,11 @@ export function createInterviewMediaSession(
       return () => listeners.delete(listener);
     },
     close() {
+      stopStreamTracks(localStream);
+      localStream = null;
+      remoteStream = null;
+      microphoneEnabled = false;
+      cameraEnabled = false;
       peer.close();
       return notify();
     },
@@ -228,8 +232,23 @@ function cloneSessionState(state: InterviewMediaSessionState): InterviewMediaSes
   };
 }
 
-function cloneIceCandidates(candidates: RTCIceCandidateInit[]): RTCIceCandidateInit[] {
-  return candidates.map(cloneIceCandidate);
+function stopStreamTracks(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => {
+    track.stop();
+  });
+}
+
+function cloneIceCandidates(candidates: InterviewIceCandidateSignal[]): InterviewIceCandidateSignal[] {
+  return candidates.map(cloneIceCandidateSignal);
+}
+
+function cloneIceCandidateSignal(
+  candidate: RTCIceCandidate | InterviewIceCandidateSignal,
+): InterviewIceCandidateSignal {
+  if (candidate === null) {
+    return null;
+  }
+  return cloneIceCandidate(candidate);
 }
 
 function cloneIceCandidate(candidate: RTCIceCandidate | RTCIceCandidateInit): RTCIceCandidateInit {
