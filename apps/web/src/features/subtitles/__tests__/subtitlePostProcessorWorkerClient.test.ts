@@ -23,21 +23,39 @@ async function flushPromises() {
 }
 
 function createMockWorker() {
-  const listeners = new Set<(event: MessageEvent) => void>();
+  const messageListeners = new Set<(event: MessageEvent) => void>();
+  const errorListeners = new Set<(event: ErrorEvent) => void>();
   const worker = {
     postMessage: vi.fn(),
     terminate: vi.fn(),
     addEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
-      if (type !== "message" || typeof listener !== "function") return;
-      listeners.add(listener as (event: MessageEvent) => void);
+      if (typeof listener !== "function") return;
+      if (type === "message") {
+        messageListeners.add(listener as (event: MessageEvent) => void);
+        return;
+      }
+      if (type === "error" || type === "messageerror") {
+        errorListeners.add(listener as (event: ErrorEvent) => void);
+      }
     }),
     removeEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
-      if (type !== "message" || typeof listener !== "function") return;
-      listeners.delete(listener as (event: MessageEvent) => void);
+      if (typeof listener !== "function") return;
+      if (type === "message") {
+        messageListeners.delete(listener as (event: MessageEvent) => void);
+        return;
+      }
+      if (type === "error" || type === "messageerror") {
+        errorListeners.delete(listener as (event: ErrorEvent) => void);
+      }
     }),
     dispatch(data: unknown) {
-      for (const listener of listeners) {
+      for (const listener of messageListeners) {
         listener({ data } as MessageEvent);
+      }
+    },
+    dispatchError(message: string) {
+      for (const listener of errorListeners) {
+        listener({ message } as ErrorEvent);
       }
     },
   };
@@ -172,6 +190,28 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
 
     await expect(promise).rejects.toThrow("Failed to fetch");
     expect(dispatchEvent).not.toHaveBeenCalled();
+  });
+
+  it("forwards stale Transformers chunk errors from worker error events to Vite preload recovery", async () => {
+    const worker = createMockWorker();
+    const dispatchEvent = vi.spyOn(globalThis, "dispatchEvent");
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      workerFactory: () => worker as unknown as Worker,
+    });
+
+    const promise = postProcessor.process({ track: makeTrack() });
+    await flushPromises();
+    const message =
+      "Failed to fetch dynamically imported module: https://ceilf6.github.io/code-tape/assets/transformers.web-Ddnr203B.js";
+
+    worker.dispatchError(message);
+
+    await expect(promise).rejects.toThrow("Failed to fetch dynamically imported module");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]?.[0];
+    expect(event?.type).toBe("vite:preloadError");
+    expect(event?.cancelable).toBe(true);
+    expect((event as Event & { payload?: unknown }).payload).toMatchObject({ message });
   });
 
   it("terminates in-flight worker inference when the request is aborted", async () => {

@@ -220,7 +220,9 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
       "message" in event && typeof event.message === "string"
         ? event.message
         : "字幕 LLM worker 执行失败";
-    terminateWorker(new Error(message));
+    const error = new Error(message);
+    requestStaleTransformersImportRecovery(error);
+    terminateWorker(error);
   }
 
   return {
