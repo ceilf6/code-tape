@@ -10,12 +10,13 @@
  * - 调用 complete API 通知服务端开始校验
  * - 查询录制详情与状态（GET /api/recordings/:id）
  * - 查询当前 owner 的 ready 录制列表（GET /api/recordings）
+ * - 获取 playback descriptor，重命名，软删除
  * - 管理持久化的 demo owner token
  *
  * 不包含：
  * - 上传按钮或完整 UI
- * - 云端播放页、playback descriptor、CloudPackageLoader
- * - 重命名、删除或分享
+ * - 云端播放页、CloudPackageLoader
+ * - 分享
  * - 对 P0 本地保存/回放主链路的任何修改
  */
 
@@ -29,6 +30,7 @@ import type {
   CompleteUploadSessionResponse,
   CreateUploadSessionRequest,
   CreateUploadSessionResponse,
+  CloudPlaybackDescriptor,
   ListRecordingsInput,
   ListRecordingsResponse,
   UploadProgress,
@@ -180,6 +182,63 @@ export function createCloudRecordingRepository(
         return handleJsonResponse<ListRecordingsResponse>(response);
       } catch (err) {
         return { ok: false, error: networkError("list recordings failed", err) };
+      }
+    },
+
+    // ── 获取云端播放描述 ──────────────────────────────────
+    async getPlaybackDescriptor(
+      recordingId: string,
+    ): Promise<CloudResult<CloudPlaybackDescriptor>> {
+      const token = repo.getOwnerToken();
+      try {
+        const response = await fetch(
+          `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}/playback`,
+          {
+            method: "GET",
+            headers: { "x-owner-token": token },
+          },
+        );
+        return handleJsonResponse<CloudPlaybackDescriptor>(response);
+      } catch (err) {
+        return { ok: false, error: networkError("get playback descriptor failed", err) };
+      }
+    },
+
+    // ── 重命名云端录制 ────────────────────────────────────
+    async rename(recordingId: string, title: string): Promise<CloudResult<void>> {
+      const token = repo.getOwnerToken();
+      try {
+        const response = await fetch(
+          `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}`,
+          {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              "x-owner-token": token,
+            },
+            body: JSON.stringify({ title }),
+          },
+        );
+        return handleVoidResponse(response);
+      } catch (err) {
+        return { ok: false, error: networkError("rename recording failed", err) };
+      }
+    },
+
+    // ── 软删除云端录制 ────────────────────────────────────
+    async remove(recordingId: string): Promise<CloudResult<void>> {
+      const token = repo.getOwnerToken();
+      try {
+        const response = await fetch(
+          `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}`,
+          {
+            method: "DELETE",
+            headers: { "x-owner-token": token },
+          },
+        );
+        return handleVoidResponse(response);
+      } catch (err) {
+        return { ok: false, error: networkError("delete recording failed", err) };
       }
     },
 
@@ -387,6 +446,13 @@ async function handleJsonResponse<T>(response: Response): Promise<CloudResult<T>
       },
     };
   }
+}
+
+async function handleVoidResponse(response: Response): Promise<CloudResult<void>> {
+  if (!response.ok) {
+    return parseApiError(response);
+  }
+  return { ok: true, value: undefined };
 }
 
 /** 从非 2xx 响应中解析结构化错误 */

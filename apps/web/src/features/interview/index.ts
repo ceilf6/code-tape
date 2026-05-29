@@ -15,6 +15,17 @@ export {
   type SnapshotRequestNeed,
 } from "./interviewSync";
 export {
+  createInterviewMediaSession,
+  type InterviewIceCandidateEvent,
+  type InterviewIceCandidateSignal,
+  type InterviewMediaSession,
+  type InterviewMediaSessionDependencies,
+  type InterviewMediaSessionOptions,
+  type InterviewMediaSessionState,
+  type InterviewPeerConnection,
+  type InterviewTrackEvent,
+} from "./interviewMediaSession";
+export {
   createRemoteInterviewWorkbench,
   type RemoteInterviewSyncStatus,
   type RemoteInterviewWorkbench,
