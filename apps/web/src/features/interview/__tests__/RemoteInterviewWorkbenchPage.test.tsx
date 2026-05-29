@@ -282,6 +282,46 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(channel.onmessage).toBeNull();
     expect(media.session.close).toHaveBeenCalledTimes(1);
   });
+
+  it("detaches the DataChannel receiver when the events channel closes", () => {
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{ createMediaSession: () => media.session }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+    let channel!: TestEventsDataChannel;
+    act(() => {
+      channel = media.attachEventsDataChannel();
+    });
+
+    expect(channel.onmessage).not.toBeNull();
+    act(() => {
+      media.closeEventsDataChannel();
+    });
+    channel.emit(JSON.stringify(recordingMessage(contentEvent(1, "const ignored = true;"))));
+
+    expect(channel.onmessage).toBeNull();
+    expect(latestCodeEditorProps().value).toBe("");
+  });
 });
 
 function latestCodeEditorProps(): CodeEditorProps {
@@ -368,13 +408,16 @@ function makeStableState(
 }
 
 type TestEventsDataChannel = InterviewEventsDataChannel & {
+  readyState: RTCDataChannelState;
   onmessage: ((event: { data: unknown }) => void) | null;
+  closeFromRemote(): void;
   emit(data: unknown): void;
 };
 
 function createFakeMediaSession(): {
   session: InterviewMediaSession;
   attachEventsDataChannel(): TestEventsDataChannel;
+  closeEventsDataChannel(): void;
 } {
   let state = makeMediaState();
   let channel: TestEventsDataChannel | null = null;
@@ -407,6 +450,14 @@ function createFakeMediaSession(): {
       notify();
       return channel;
     },
+    closeEventsDataChannel() {
+      if (!channel) {
+        return;
+      }
+      channel.closeFromRemote();
+      state = { ...state, eventsDataChannelState: "closed" };
+      notify();
+    },
   };
 }
 
@@ -419,6 +470,10 @@ function createFakeEventsChannel(): TestEventsDataChannel {
     onmessage: null,
     send: vi.fn(),
     close: vi.fn(),
+    closeFromRemote() {
+      this.readyState = "closed";
+      this.onclose?.();
+    },
     emit(data) {
       this.onmessage?.({ data });
     },

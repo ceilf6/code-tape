@@ -62,10 +62,24 @@ describe("InterviewRealtimeReceiver", () => {
     expect(channel.onmessage).toBeNull();
     expect(workbench.getState().stableState.editor.code).toBe("");
   });
+
+  it("detaches when the DataChannel closes so late messages are ignored", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+    const channel = createFakeEventsChannel();
+
+    createInterviewRealtimeReceiver({ roomId: "room-1", workbench }).attach(channel);
+    channel.closeFromRemote();
+    channel.emit(JSON.stringify(messageFor(contentEvent(1, "const ignored = true;"))));
+
+    expect(channel.onmessage).toBeNull();
+    expect(workbench.getState().stableState.editor.code).toBe("");
+  });
 });
 
 type TestEventsDataChannel = InterviewEventsDataChannel & {
+  readyState: RTCDataChannelState;
   onmessage: ((event: { data: unknown }) => void) | null;
+  closeFromRemote(): void;
   emit(data: unknown): void;
 };
 
@@ -78,6 +92,10 @@ function createFakeEventsChannel(): TestEventsDataChannel {
     onmessage: null,
     send: vi.fn(),
     close: vi.fn(),
+    closeFromRemote() {
+      this.readyState = "closed";
+      this.onclose?.();
+    },
     emit(data) {
       this.onmessage?.({ data });
     },

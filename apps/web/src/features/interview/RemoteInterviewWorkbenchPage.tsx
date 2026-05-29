@@ -88,7 +88,7 @@ export function RemoteInterviewWorkbenchPage({
     let attachedChannel: InterviewEventsDataChannel | null = null;
     let detachReceiver: (() => void) | null = null;
     const refreshReceiver = () => {
-      const nextChannel = mediaSession.getEventsDataChannel();
+      const nextChannel = receivableEventsDataChannel(mediaSession.getEventsDataChannel());
       if (nextChannel === attachedChannel) {
         return;
       }
@@ -127,6 +127,15 @@ function safeCreateMediaSession(
   } catch {
     return null;
   }
+}
+
+function receivableEventsDataChannel(
+  channel: InterviewEventsDataChannel | null,
+): InterviewEventsDataChannel | null {
+  if (!channel || channel.readyState === "closed" || channel.readyState === "closing") {
+    return null;
+  }
+  return channel;
 }
 
 function emptyInterviewMediaSessionState(): InterviewMediaSessionState {

@@ -83,19 +83,40 @@ export function createInterviewRealtimeReceiver(
 
   return {
     attach(channel) {
+      if (isClosedEventsDataChannel(channel)) {
+        return () => {};
+      }
       const previousHandler = channel.onmessage;
-      const handler = (event: { data: unknown }) => {
+      const previousCloseHandler = channel.onclose;
+      function handler(event: { data: unknown }) {
+        if (isClosedEventsDataChannel(channel)) {
+          detach();
+          return;
+        }
         handleData(event.data);
-      };
-      channel.onmessage = handler;
-      return () => {
+      }
+      function closeHandler() {
+        detach();
+        previousCloseHandler?.();
+      }
+      function detach() {
         if (channel.onmessage === handler) {
           channel.onmessage = previousHandler;
         }
-      };
+        if (channel.onclose === closeHandler) {
+          channel.onclose = previousCloseHandler;
+        }
+      }
+      channel.onmessage = handler;
+      channel.onclose = closeHandler;
+      return detach;
     },
     handleData,
   };
+}
+
+function isClosedEventsDataChannel(channel: InterviewEventsDataChannel): boolean {
+  return channel.readyState === "closed" || channel.readyState === "closing";
 }
 
 function isInterviewRecordingEventMessage(
