@@ -173,6 +173,21 @@ export type ListRecordingsResponse = {
   nextCursor: string | null;
 };
 
+export type CloudPlaybackDescriptor = {
+  id: string;
+  title: string;
+  durationMs: number;
+  schemaVersion: RecordingSchemaVersion;
+  manifestUrl: string;
+  metaUrl: string;
+  eventsUrl: string;
+  snapshotsUrl: string;
+  indexesUrl: string | null;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  expiresAt: string;
+};
+
 // ─────────────────────────────────────────────────────────────
 // 上传进度
 // ─────────────────────────────────────────────────────────────
@@ -234,6 +249,15 @@ export type CloudRecordingRepository = {
 
   /** 查询当前 owner 的 ready 录制列表 */
   list(input?: ListRecordingsInput): Promise<CloudResult<ListRecordingsResponse>>;
+
+  /** 获取 ready 录制的云端播放描述 */
+  getPlaybackDescriptor(recordingId: string): Promise<CloudResult<CloudPlaybackDescriptor>>;
+
+  /** 重命名当前 owner 可访问的云端录制 */
+  rename(recordingId: string, title: string): Promise<CloudResult<void>>;
+
+  /** 软删除当前 owner 可访问的云端录制 */
+  remove(recordingId: string): Promise<CloudResult<void>>;
 
   /** 获取当前持久化的 owner token */
   getOwnerToken(): string;

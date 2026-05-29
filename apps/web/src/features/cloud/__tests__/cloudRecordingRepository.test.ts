@@ -22,6 +22,7 @@ import type {
   CloudRecordingDetail,
   CloudRecordingDetailResponse,
   CloudRecordingListItem,
+  CloudPlaybackDescriptor,
   ListRecordingsResponse,
 } from "../types";
 import { createCloudRecordingRepository } from "../cloudRecordingRepository";
@@ -230,6 +231,26 @@ function makeListResponse(
   nextCursor: string | null = null,
 ): ListRecordingsResponse {
   return { items, nextCursor };
+}
+
+function makePlaybackDescriptor(
+  overrides: Partial<CloudPlaybackDescriptor> = {},
+): CloudPlaybackDescriptor {
+  return {
+    id: "rec_1",
+    title: "Test Recording",
+    durationMs: 5000,
+    schemaVersion: "0.1.0",
+    manifestUrl: "https://storage.example.com/rec_1/manifest.json",
+    metaUrl: "https://storage.example.com/rec_1/meta.json",
+    eventsUrl: "https://storage.example.com/rec_1/events.json",
+    snapshotsUrl: "https://storage.example.com/rec_1/snapshots.json",
+    indexesUrl: null,
+    mediaUrl: "https://storage.example.com/rec_1/media.webm",
+    thumbnailUrl: null,
+    expiresAt: "2026-05-29T00:05:00.000Z",
+    ...overrides,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -621,6 +642,137 @@ describe("CloudRecordingRepository", () => {
       expect(result2.ok).toBe(true);
       if (!result2.ok) throw new Error("expected ok");
       expect(result2.value.items).toHaveLength(0);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────
+  // getPlaybackDescriptor（云端播放描述）
+  // ───────────────────────────────────────────────────────
+
+  describe("getPlaybackDescriptor", () => {
+    it("返回 ready 录制的 playback descriptor", async () => {
+      const repo = setupRepo();
+      mockFetch(200, makePlaybackDescriptor({ indexesUrl: "https://storage.example.com/rec_1/indexes.json" }));
+
+      const result = await repo.getPlaybackDescriptor("rec_1");
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value).toMatchObject({
+        id: "rec_1",
+        manifestUrl: "https://storage.example.com/rec_1/manifest.json",
+        indexesUrl: "https://storage.example.com/rec_1/indexes.json",
+      });
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings/rec_1/playback",
+        expect.objectContaining({
+          method: "GET",
+          headers: { "x-owner-token": repo.getOwnerToken() },
+        }),
+      );
+    });
+
+    it("playback descriptor 错误时保留结构化错误和 requestId", async () => {
+      const repo = setupRepo();
+      mockFetch(404, {
+        error: { code: "not-found", message: "recording not found" },
+      }, { "x-request-id": "req-playback-1" });
+
+      const result = await repo.getPlaybackDescriptor("rec_missing");
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("not-found");
+      expect(result.error.message).toBe("recording not found");
+      expect(result.error.requestId).toBe("req-playback-1");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────
+  // rename（云端重命名）
+  // ───────────────────────────────────────────────────────
+
+  describe("rename", () => {
+    it("PATCH 录制标题并复用 owner token", async () => {
+      const repo = setupRepo();
+      mockFetch(200, {
+        id: "rec_1",
+        title: "New Title",
+        updatedAt: "2026-05-29T00:02:00.000Z",
+      });
+
+      const result = await repo.rename("rec_1", "  New Title  ");
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value).toBeUndefined();
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings/rec_1",
+        expect.objectContaining({
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            "x-owner-token": repo.getOwnerToken(),
+          },
+          body: JSON.stringify({ title: "  New Title  " }),
+        }),
+      );
+    });
+
+    it("rename 非法标题时返回后端结构化错误", async () => {
+      const repo = setupRepo();
+      mockFetch(400, {
+        error: { code: "bad-request", message: "title is required" },
+      }, { "x-request-id": "req-rename-1" });
+
+      const result = await repo.rename("rec_1", "");
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("bad-request");
+      expect(result.error.message).toBe("title is required");
+      expect(result.error.requestId).toBe("req-rename-1");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────
+  // remove（云端软删除）
+  // ───────────────────────────────────────────────────────
+
+  describe("remove", () => {
+    it("DELETE 录制并忽略 soft delete 响应细节", async () => {
+      const repo = setupRepo();
+      mockFetch(200, {
+        id: "rec_1",
+        status: "soft_deleted",
+        deletedAt: "2026-05-29T00:03:00.000Z",
+      });
+
+      const result = await repo.remove("rec_1");
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value).toBeUndefined();
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings/rec_1",
+        expect.objectContaining({
+          method: "DELETE",
+          headers: { "x-owner-token": repo.getOwnerToken() },
+        }),
+      );
+    });
+
+    it("remove 录制不存在时返回 not-found", async () => {
+      const repo = setupRepo();
+      mockFetch(404, {
+        error: { code: "not-found", message: "recording not found" },
+      });
+
+      const result = await repo.remove("rec_missing");
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("not-found");
     });
   });
 
