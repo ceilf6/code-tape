@@ -14,7 +14,13 @@ import {
 } from "lucide-react";
 import { CodeEditor } from "@/features/editor/CodeEditor";
 import { Toggle, Tooltip } from "@/shared/ui";
-import type { InterviewMediaSessionState } from "./interviewMediaSession";
+import {
+  createInterviewMediaSession,
+  type InterviewEventsDataChannel,
+  type InterviewMediaSession,
+  type InterviewMediaSessionState,
+} from "./interviewMediaSession";
+import { createInterviewRealtimeReceiver } from "./interviewRealtimeReceiver";
 import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
 import {
   createRemoteInterviewWorkbench,
@@ -25,6 +31,12 @@ export type RemoteInterviewWorkbenchViewProps = {
   roomId: string;
   workbenchState: RemoteInterviewWorkbenchState;
   mediaState: InterviewMediaSessionState;
+};
+
+export type RemoteInterviewWorkbenchPageProps = {
+  deps?: {
+    createMediaSession?: () => InterviewMediaSession;
+  };
 };
 
 const EMPTY_INTERVIEW_MEDIA_SESSION_STATE: InterviewMediaSessionState = {
@@ -39,19 +51,64 @@ const EMPTY_INTERVIEW_MEDIA_SESSION_STATE: InterviewMediaSessionState = {
   eventsDataChannelState: "not-created",
 };
 
-export function RemoteInterviewWorkbenchPage() {
+export function RemoteInterviewWorkbenchPage({
+  deps = {},
+}: RemoteInterviewWorkbenchPageProps = {}) {
   const { roomId = "unknown" } = useParams();
+  const createMediaSession = deps.createMediaSession ?? createInterviewMediaSession;
   const workbench = useMemo(
     () => createRemoteInterviewWorkbench({ initialState: INITIAL_REMOTE_INTERVIEW_STABLE_STATE }),
     [],
   );
+  const receiver = useMemo(
+    () => createInterviewRealtimeReceiver({ roomId, workbench }),
+    [roomId, workbench],
+  );
   const [workbenchState, setWorkbenchState] = useState(() => workbench.getState());
-  const [mediaState] = useState<InterviewMediaSessionState>(() => ({
-    ...EMPTY_INTERVIEW_MEDIA_SESSION_STATE,
-    outgoingIceCandidates: [],
-  }));
+  const [mediaSession, setMediaSession] = useState<InterviewMediaSession | null>(null);
+  const [mediaState, setMediaState] = useState<InterviewMediaSessionState>(
+    emptyInterviewMediaSessionState,
+  );
 
   useEffect(() => workbench.subscribe(setWorkbenchState), [workbench]);
+  useEffect(() => {
+    const nextMediaSession = safeCreateMediaSession(createMediaSession);
+    setMediaSession(nextMediaSession);
+    setMediaState(nextMediaSession?.getState() ?? emptyInterviewMediaSessionState());
+
+    return () => {
+      nextMediaSession?.close();
+    };
+  }, [createMediaSession]);
+  useEffect(() => {
+    if (!mediaSession) {
+      return undefined;
+    }
+
+    let attachedChannel: InterviewEventsDataChannel | null = null;
+    let detachReceiver: (() => void) | null = null;
+    const refreshReceiver = () => {
+      const nextChannel = mediaSession.getEventsDataChannel();
+      if (nextChannel === attachedChannel) {
+        return;
+      }
+      detachReceiver?.();
+      attachedChannel = nextChannel;
+      detachReceiver = nextChannel ? receiver.attach(nextChannel) : null;
+    };
+
+    setMediaState(mediaSession.getState());
+    refreshReceiver();
+    const unsubscribe = mediaSession.subscribe((next) => {
+      setMediaState(next);
+      refreshReceiver();
+    });
+
+    return () => {
+      unsubscribe();
+      detachReceiver?.();
+    };
+  }, [mediaSession, receiver]);
 
   return (
     <RemoteInterviewWorkbenchView
@@ -60,6 +117,23 @@ export function RemoteInterviewWorkbenchPage() {
       mediaState={mediaState}
     />
   );
+}
+
+function safeCreateMediaSession(
+  createMediaSession: () => InterviewMediaSession,
+): InterviewMediaSession | null {
+  try {
+    return createMediaSession();
+  } catch {
+    return null;
+  }
+}
+
+function emptyInterviewMediaSessionState(): InterviewMediaSessionState {
+  return {
+    ...EMPTY_INTERVIEW_MEDIA_SESSION_STATE,
+    outgoingIceCandidates: [],
+  };
 }
 
 export function RemoteInterviewWorkbenchView({

@@ -1481,11 +1481,13 @@ function makeMediaSessionFactory(
     readyState: options.eventsDataChannelState ?? "connecting",
     onopen: null,
     onclose: null,
+    onmessage: null,
     send: vi.fn(),
     close: vi.fn(),
   };
   const session: InterviewMediaSession = {
     getState: vi.fn(() => state),
+    getEventsDataChannel: vi.fn(() => eventsDataChannel),
     requestLocalMedia: vi.fn(async () =>
       updateState({
         localStream,

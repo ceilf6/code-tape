@@ -48,6 +48,7 @@ class FakeDataChannel implements InterviewEventsDataChannel {
   readyState: RTCDataChannelState = "connecting";
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
   closeCalls = 0;
 
   constructor(readonly label = "events") {}
@@ -258,6 +259,7 @@ describe("InterviewMediaSession", () => {
     const channel = peer.emitDataChannel("events");
 
     expect(session.getState().eventsDataChannelState).toBe("connecting");
+    expect(session.getEventsDataChannel()).toBe(channel);
 
     channel.open();
     channel.close();
@@ -338,10 +340,12 @@ describe("InterviewMediaSession", () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });
     session.ensureEventsDataChannel();
+    peer.createdDataChannels[0].channel.onmessage = () => {};
 
     const closed = session.close();
 
     expect(peer.createdDataChannels[0].channel.closeCalls).toBe(1);
+    expect(peer.createdDataChannels[0].channel.onmessage).toBeNull();
     expect(closed.eventsDataChannelState).toBe("closed");
     expect(session.getState().eventsDataChannelState).toBe("closed");
   });
@@ -350,10 +354,12 @@ describe("InterviewMediaSession", () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });
     const channel = peer.emitDataChannel("events");
+    channel.onmessage = () => {};
 
     const closed = session.close();
 
     expect(channel.closeCalls).toBe(1);
+    expect(channel.onmessage).toBeNull();
     expect(closed.eventsDataChannelState).toBe("closed");
     expect(session.getState().eventsDataChannelState).toBe("closed");
   });

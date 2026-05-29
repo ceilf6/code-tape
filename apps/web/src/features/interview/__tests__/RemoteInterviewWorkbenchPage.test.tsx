@@ -1,14 +1,21 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
-import type { ReplayStableState } from "@/shared/recording-schema";
+import type { RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
 import { TooltipProvider } from "@/shared/ui/Tooltip";
 import { appRoutes } from "@/app/routes";
-import type { InterviewMediaSessionState } from "../interviewMediaSession";
-import { RemoteInterviewWorkbenchView } from "../RemoteInterviewWorkbenchPage";
+import type {
+  InterviewEventsDataChannel,
+  InterviewMediaSession,
+  InterviewMediaSessionState,
+} from "../interviewMediaSession";
+import {
+  RemoteInterviewWorkbenchPage,
+  RemoteInterviewWorkbenchView,
+} from "../RemoteInterviewWorkbenchPage";
 import type { RemoteInterviewWorkbenchState } from "../remoteInterviewWorkbench";
 
 const codeEditorMock = vi.hoisted(() => ({
@@ -194,6 +201,87 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(screen.getByRole("heading", { name: "面试官工作台" })).toBeInTheDocument();
     expect(screen.getByText("room-route")).toBeInTheDocument();
   });
+
+  it("applies recording-event messages from the events DataChannel to the read-only workbench", async () => {
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{ createMediaSession: () => media.session }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    let channel!: TestEventsDataChannel;
+    act(() => {
+      channel = media.attachEventsDataChannel();
+    });
+
+    act(() => {
+      channel.emit(JSON.stringify(recordingMessage(contentEvent(1, "const fromCandidate = true;"))));
+    });
+
+    await waitFor(() => {
+      expect(latestCodeEditorProps().value).toBe("const fromCandidate = true;");
+    });
+    expect(latestCodeEditorProps().readOnly).toBe(true);
+    expect(screen.getAllByText("实时同步")).toHaveLength(2);
+    expect(screen.getByText("seq 1")).toBeInTheDocument();
+    expect(screen.getByText("seq 2")).toBeInTheDocument();
+  });
+
+  it("detaches the DataChannel receiver when the interviewer workbench unmounts", () => {
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{ createMediaSession: () => media.session }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live"],
+      },
+    );
+
+    const { unmount } = render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+    let channel!: TestEventsDataChannel;
+    act(() => {
+      channel = media.attachEventsDataChannel();
+    });
+
+    expect(channel.onmessage).not.toBeNull();
+    unmount();
+
+    expect(channel.onmessage).toBeNull();
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 function latestCodeEditorProps(): CodeEditorProps {
@@ -275,6 +363,97 @@ function makeStableState(
       previewHtml: null,
       errorMessage: null,
       ...patch.runtime,
+    },
+  };
+}
+
+type TestEventsDataChannel = InterviewEventsDataChannel & {
+  onmessage: ((event: { data: unknown }) => void) | null;
+  emit(data: unknown): void;
+};
+
+function createFakeMediaSession(): {
+  session: InterviewMediaSession;
+  attachEventsDataChannel(): TestEventsDataChannel;
+} {
+  let state = makeMediaState();
+  let channel: TestEventsDataChannel | null = null;
+  const listeners = new Set<(next: InterviewMediaSessionState) => void>();
+  const notify = () => listeners.forEach((listener) => listener({ ...state }));
+  const session = {
+    getState: () => ({ ...state }),
+    getEventsDataChannel: () => channel,
+    requestLocalMedia: vi.fn(),
+    setMicrophoneEnabled: vi.fn(),
+    setCameraEnabled: vi.fn(),
+    ensureEventsDataChannel: vi.fn(),
+    createOffer: vi.fn(),
+    createAnswer: vi.fn(),
+    setRemoteDescription: vi.fn(),
+    addRemoteIceCandidate: vi.fn(),
+    drainOutgoingIceCandidates: vi.fn(() => []),
+    subscribe(listener: (next: InterviewMediaSessionState) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    close: vi.fn(),
+  } as unknown as InterviewMediaSession;
+
+  return {
+    session,
+    attachEventsDataChannel() {
+      channel = createFakeEventsChannel();
+      state = { ...state, eventsDataChannelState: "open" };
+      notify();
+      return channel;
+    },
+  };
+}
+
+function createFakeEventsChannel(): TestEventsDataChannel {
+  return {
+    label: "events",
+    readyState: "open",
+    onopen: null,
+    onclose: null,
+    onmessage: null,
+    send: vi.fn(),
+    close: vi.fn(),
+    emit(data) {
+      this.onmessage?.({ data });
+    },
+  };
+}
+
+function recordingMessage(event: RecordingEvent) {
+  return {
+    kind: "recording-event" as const,
+    roomId: "room-live",
+    sessionId: "session-1",
+    messageId: `message-${event.seq}`,
+    sentAt: 1_000 + event.seq,
+    stateVersion: event.seq,
+    event,
+  };
+}
+
+function contentEvent(seq: number, code: string): RecordingEvent {
+  return {
+    id: `event-${seq}`,
+    seq,
+    timestampMs: seq * 100,
+    source: "editor",
+    track: "main",
+    type: "content-change",
+    payload: {
+      fileId: "main",
+      version: seq,
+      code,
+      contentHash: `hash-${seq}`,
+      language: "typescript",
+      changeReason: "input",
+      changeCount: 1,
+      flushedBy: "debounce",
     },
   };
 }

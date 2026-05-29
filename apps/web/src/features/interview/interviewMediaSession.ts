@@ -11,11 +11,16 @@ export type InterviewTrackEvent = {
 
 export type InterviewDataChannelState = "not-created" | RTCDataChannelState;
 
+export type InterviewDataChannelMessageEvent = {
+  data: unknown;
+};
+
 export type InterviewEventsDataChannel = {
   readonly label: string;
   readonly readyState: RTCDataChannelState;
   onopen: (() => void) | null;
   onclose: (() => void) | null;
+  onmessage: ((event: InterviewDataChannelMessageEvent) => void) | null;
   send(data: string): void;
   close(): void;
 };
@@ -72,6 +77,7 @@ export type InterviewMediaSessionState = {
 
 export type InterviewMediaSession = {
   getState(): InterviewMediaSessionState;
+  getEventsDataChannel(): InterviewEventsDataChannel | null;
   requestLocalMedia(constraints?: MediaStreamConstraints): Promise<InterviewMediaSessionState>;
   setMicrophoneEnabled(enabled: boolean): InterviewMediaSessionState;
   setCameraEnabled(enabled: boolean): InterviewMediaSessionState;
@@ -158,6 +164,9 @@ export function createInterviewMediaSession(
 
   return {
     getState: snapshot,
+    getEventsDataChannel() {
+      return eventsDataChannel;
+    },
     async requestLocalMedia(constraints = options.mediaConstraints ?? DEFAULT_MEDIA_CONSTRAINTS) {
       if (closed) {
         throw new Error("Interview media session is closed");
@@ -260,6 +269,7 @@ function closeEventsDataChannel(channel: InterviewEventsDataChannel | null): voi
   }
   channel.onopen = null;
   channel.onclose = null;
+  channel.onmessage = null;
   if (channel.readyState !== "closed") {
     channel.close();
   }
