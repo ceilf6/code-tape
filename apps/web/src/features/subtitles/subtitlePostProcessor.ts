@@ -304,8 +304,7 @@ export function buildSubtitlePostProcessorMessages(
       content: [
         "You are the code-tape subtitle post-processing model.",
         "Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.",
-        "Input subtitle rows are in inputSegments.",
-        "Timeline rows are in timeline.",
+        "Input subtitle rows with timing are in inputSegments.",
         "Only output JSON with segments and chapters. Do not output Markdown or explanations. 只输出 JSON。",
         "For speed, output only changed subtitle segments in segments. Omit unchanged segments.",
         "Each returned segment must contain only id and text.",
@@ -355,12 +354,9 @@ function buildSubtitlePostProcessorPayload({
     },
     inputSegments: track.segments.map((segment) => ({
       id: segment.id,
-      text: segment.text,
-    })),
-    timeline: track.segments.map((segment) => ({
-      id: segment.id,
       startMs: segment.startMs,
       endMs: segment.endMs,
+      text: segment.text,
     })),
   };
 }

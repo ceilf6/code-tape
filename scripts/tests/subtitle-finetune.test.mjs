@@ -226,28 +226,38 @@ test('rejects secrets in distillation inputs and outputs', () => {
 
 test('builds deterministic teacher distillation messages without secrets', () => {
   const messages = buildDistillationMessages(seedExample);
+  const userPayload = JSON.parse(messages[1].content);
 
   assert.equal(messages[0].role, 'system');
   assert.match(messages[0].content, /只输出 JSON/);
   assert.match(messages[0].content, /Goal: correct ASR subtitle text/u);
+  assert.match(messages[0].content, /Input subtitle rows with timing are in inputSegments/u);
   assert.doesNotMatch(messages[0].content, /corrected text/u);
   assert.match(messages[1].content, /Counter\.tsx/);
   assert.match(messages[1].content, /subtitle-1/);
   assert.match(messages[1].content, /"inputSegments"/u);
-  assert.match(messages[1].content, /"timeline"/u);
+  assert.doesNotMatch(messages[1].content, /"timeline"/u);
   assert.doesNotMatch(messages[1].content, /"segments"/u);
   assert.doesNotMatch(messages[1].content, /"language"/u);
+  assert.deepEqual(userPayload.inputSegments, seedExample.segments);
+  assert.equal(messages[1].content.match(/subtitle-1/gu).length, 1);
   assert.doesNotMatch(JSON.stringify(messages), new RegExp(`${'h'}${'f'}_|${'s'}${'k'}-`, 'u'));
 });
 
 test('subtitle scripts reuse the canonical prompt segment reader', () => {
   const payload = {
-    inputSegments: [{ id: 'subtitle-1', text: '继续讲 use state' }],
-    timeline: [{ id: 'subtitle-1', startMs: 0, endMs: 1200 }],
+    inputSegments: [{ id: 'subtitle-1', startMs: 0, endMs: 1200, text: '继续讲 use state' }],
+  };
+  const legacyPayload = {
+    inputSegments: [{ id: 'subtitle-2', text: '然后 set count 触发 render' }],
+    timeline: [{ id: 'subtitle-2', startMs: 1200, endMs: 2600 }],
   };
 
   assert.deepEqual(readPromptSegments(payload), [
     { id: 'subtitle-1', text: '继续讲 use state', startMs: 0, endMs: 1200 },
+  ]);
+  assert.deepEqual(readPromptSegments(legacyPayload), [
+    { id: 'subtitle-2', text: '然后 set count 触发 render', startMs: 1200, endMs: 2600 },
   ]);
 
   for (const path of [
@@ -299,6 +309,25 @@ test('subtitle fine-tuning corpora have enough domain coverage for stable local 
     'chapters',
   ]) {
     assert.match(corpusText, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  }
+});
+
+test('checked-in distilled corpus uses the runtime compact inputSegments prompt shape', () => {
+  const distilledRecords = readJsonl('ml/subtitle-postprocessor/data/generated/distilled.jsonl');
+
+  for (const [index, record] of distilledRecords.entries()) {
+    const [system, user] = record.messages;
+    const userPayload = JSON.parse(user.content);
+
+    assert.match(system.content, /Input subtitle rows with timing are in inputSegments/u);
+    assert.ok(Array.isArray(userPayload.inputSegments), `record ${index} inputSegments missing`);
+    assert.equal(userPayload.timeline, undefined, `record ${index} should not include timeline`);
+    for (const [segmentIndex, segment] of userPayload.inputSegments.entries()) {
+      assert.equal(typeof segment.id, 'string', `record ${index} segment ${segmentIndex} id missing`);
+      assert.equal(typeof segment.startMs, 'number', `record ${index} segment ${segmentIndex} startMs missing`);
+      assert.equal(typeof segment.endMs, 'number', `record ${index} segment ${segmentIndex} endMs missing`);
+      assert.equal(typeof segment.text, 'string', `record ${index} segment ${segmentIndex} text missing`);
+    }
   }
 });
 
@@ -1003,10 +1032,7 @@ test('LoRA training JSONL validator accepts inputSegments as the prompt-side sub
           role: 'user',
           content: JSON.stringify({
             inputSegments: [
-              { id: 'subtitle-1', text: '继续讲 use state' },
-            ],
-            timeline: [
-              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
+              { id: 'subtitle-1', startMs: 0, endMs: 1200, text: '继续讲 use state' },
             ],
           }),
         },
@@ -1068,12 +1094,8 @@ test('LoRA training JSONL validator rejects non-object inputSegments entries', (
           role: 'user',
           content: JSON.stringify({
             inputSegments: [
-              { id: 'subtitle-1', text: '继续讲 use state' },
+              { id: 'subtitle-1', startMs: 0, endMs: 1200, text: '继续讲 use state' },
               'bad-segment',
-            ],
-            timeline: [
-              { id: 'subtitle-1', startMs: 0, endMs: 1200 },
-              { id: 'subtitle-2', startMs: 1200, endMs: 2400 },
             ],
           }),
         },

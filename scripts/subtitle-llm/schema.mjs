@@ -64,7 +64,7 @@ export function buildDistillationMessages(example) {
       content: [
         'You are the code-tape subtitle post-processing model.',
         'Goal: correct ASR subtitle text for frontend/code terms and create playback chapter jump points.',
-        'Input subtitle rows are in inputSegments.',
+        'Input subtitle rows with timing are in inputSegments.',
         'Only output JSON with segments and chapters. Do not output Markdown or explanations. 只输出 JSON。',
         'For speed, output only changed subtitle segments in segments. Omit unchanged segments.',
         'Each returned segment must contain only id and text.',
@@ -78,12 +78,9 @@ export function buildDistillationMessages(example) {
         context: normalizedExample.context ?? {},
         inputSegments: normalizedExample.segments.map((segment) => ({
           id: segment.id,
-          text: segment.text,
-        })),
-        timeline: normalizedExample.segments.map((segment) => ({
-          id: segment.id,
           startMs: segment.startMs,
           endMs: segment.endMs,
+          text: segment.text,
         })),
       }),
     },

@@ -74,8 +74,8 @@ function readUserPayloadFromMessages(messages: unknown): {
 }
 
 function readPostProcessorPayload(messages: unknown): {
-  inputSegments: Array<{ id: string; text: string }>;
-  timeline: Array<{ startMs: number; endMs: number }>;
+  inputSegments: Array<{ id: string; startMs: number; endMs: number; text: string }>;
+  timeline?: unknown;
 } {
   if (!Array.isArray(messages)) throw new Error("messages must be an array");
   const userMessage = messages.find(
@@ -89,8 +89,8 @@ function readPostProcessorPayload(messages: unknown): {
   );
   if (!userMessage) throw new Error("missing user message");
   return JSON.parse(userMessage.content) as {
-    inputSegments: Array<{ id: string; text: string }>;
-    timeline: Array<{ startMs: number; endMs: number }>;
+    inputSegments: Array<{ id: string; startMs: number; endMs: number; text: string }>;
+    timeline?: unknown;
   };
 }
 
@@ -147,7 +147,20 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(JSON.stringify(promptMessages)).toContain("use state hook");
     expect(JSON.stringify(promptMessages)).toContain("inputSegments");
     expect(JSON.stringify(promptMessages)).not.toContain('"language"');
-    expect(JSON.parse(promptMessages[1]?.content ?? "{}")).not.toHaveProperty("segments");
+    const payload = JSON.parse(promptMessages[1]?.content ?? "{}") as {
+      inputSegments?: unknown;
+      timeline?: unknown;
+      segments?: unknown;
+    };
+    expect(payload).not.toHaveProperty("segments");
+    expect(payload).not.toHaveProperty("timeline");
+    expect(payload.inputSegments).toContainEqual({
+      id: "subtitle-1",
+      startMs: 0,
+      endMs: 1_000,
+      text: "use state hook",
+    });
+    expect(JSON.stringify(payload).match(/subtitle-1/gu)).toHaveLength(1);
     expect(result).toEqual({
       segments: [
         { id: "subtitle-1", text: "useState hook" },
@@ -760,9 +773,9 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     const pipeline = vi.fn(async (messages: unknown) => {
       const payload = readPostProcessorPayload(messages);
       const firstSegment = payload.inputSegments[0];
-      const firstTimeline = payload.timeline[0];
-      const lastTimeline = payload.timeline.at(-1);
-      if (!firstSegment || !firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      const lastSegment = payload.inputSegments.at(-1);
+      if (!firstSegment || !lastSegment) throw new Error("empty chunk");
+      expect(payload.timeline).toBeUndefined();
       return [
         {
           generated_text: JSON.stringify({
@@ -770,8 +783,8 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
             chapters: [
               {
                 title: `分块 ${pipeline.mock.calls.length}`,
-                startMs: firstTimeline.startMs,
-                endMs: lastTimeline.endMs,
+                startMs: firstSegment.startMs,
+                endMs: lastSegment.endMs,
               },
             ],
           }),
@@ -798,6 +811,7 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     for (const call of pipeline.mock.calls) {
       const payload = readPostProcessorPayload(call[0]);
       expect(payload.inputSegments.length).toBeLessThanOrEqual(60);
+      expect(payload.timeline).toBeUndefined();
     }
   });
 
@@ -807,9 +821,9 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     const pipeline = vi.fn(async (messages: unknown) => {
       const payload = readPostProcessorPayload(messages);
       const firstSegment = payload.inputSegments[0];
-      const firstTimeline = payload.timeline[0];
-      const lastTimeline = payload.timeline.at(-1);
-      if (!firstSegment || !firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      const lastSegment = payload.inputSegments.at(-1);
+      if (!firstSegment || !lastSegment) throw new Error("empty chunk");
+      expect(payload.timeline).toBeUndefined();
       return [
         {
           generated_text: JSON.stringify({
@@ -819,8 +833,8 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
               { id: "subtitle-999", text: "invented segment" },
             ],
             chapters: [
-              { title: "越界章节", startMs: lastTimeline.endMs + 10_000, endMs: lastTimeline.endMs + 12_000 },
-              { title: "有效章节", startMs: firstTimeline.startMs, endMs: lastTimeline.endMs },
+              { title: "越界章节", startMs: lastSegment.endMs + 10_000, endMs: lastSegment.endMs + 12_000 },
+              { title: "有效章节", startMs: firstSegment.startMs, endMs: lastSegment.endMs },
             ],
           }),
         },
@@ -860,24 +874,25 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     const track = makeTrackWithSegments(121);
     const pipeline = vi.fn(async (messages: unknown) => {
       const payload = readPostProcessorPayload(messages);
-      const firstTimeline = payload.timeline[0];
-      const lastTimeline = payload.timeline.at(-1);
-      if (!firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      const firstSegment = payload.inputSegments[0];
+      const lastSegment = payload.inputSegments.at(-1);
+      if (!firstSegment || !lastSegment) throw new Error("empty chunk");
+      expect(payload.timeline).toBeUndefined();
       const callIndex = pipeline.mock.calls.length;
       const chapters =
         callIndex === 2
           ? [
               { title: "重复片段", startMs: 0, endMs: 10_000 },
               { title: "窗口前污染", startMs: 50_000, endMs: 55_000 },
-              { title: "第二段", startMs: firstTimeline.startMs, endMs: lastTimeline.endMs },
+              { title: "第二段", startMs: firstSegment.startMs, endMs: lastSegment.endMs },
             ]
           : [
               {
                 title: `靠后 ${callIndex}`,
-                startMs: firstTimeline.startMs + 30_000,
-                endMs: Math.min(firstTimeline.startMs + 45_000, lastTimeline.endMs),
+                startMs: firstSegment.startMs + 30_000,
+                endMs: Math.min(firstSegment.startMs + 45_000, lastSegment.endMs),
               },
-              { title: `靠前 ${callIndex}`, startMs: firstTimeline.startMs, endMs: firstTimeline.startMs + 10_000 },
+              { title: `靠前 ${callIndex}`, startMs: firstSegment.startMs, endMs: firstSegment.startMs + 10_000 },
             ];
       return [
         {
@@ -991,7 +1006,9 @@ describe("buildSubtitlePostProcessorPrompt", () => {
 
     expect(prompt).toContain('"context"');
     expect(prompt).toContain('"inputSegments"');
-    expect(prompt).toContain('"timeline"');
+    expect(prompt).not.toContain('"timeline"');
+    expect(prompt).toContain('"startMs"');
+    expect(prompt).toContain('"endMs"');
     expect(prompt).not.toContain('"language"');
   });
 
