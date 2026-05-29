@@ -517,6 +517,28 @@ test('subtitle real model smoke runner preserves generation timing when processi
   assert.ok(metrics.totalDurationMs >= metrics.generationDurationMs);
 });
 
+test('subtitle real model smoke runner preserves pipeline timing when loading fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      throw new Error('fetch failed');
+    },
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'model-load-error');
+  assert.ok(metrics.pipelineReadyDurationMs > 0);
+  assert.equal(metrics.generationDurationMs, 0);
+  assert.ok(metrics.totalDurationMs >= metrics.pipelineReadyDurationMs);
+});
+
 test('subtitle real model smoke runner fails when quality expectations miss', async () => {
   const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
   const fixture = JSON.parse(
@@ -633,13 +655,13 @@ test('subtitle real model smoke default factory reports the web runtime config i
 
   const postProcessor = await createDefaultPostProcessor(
     {
-      model: 'ceilf6/test-subtitle-postprocessor',
       device: 'wasm',
       dtype: 'q8',
     },
     {
       loadWebModule: async () => ({
         module: {
+          DEFAULT_POSTPROCESSOR_MODEL: 'ceilf6/web-default-subtitle-postprocessor',
           DEFAULT_POSTPROCESSOR_RUNTIME_CONFIG: { device: 'wasm', dtype: 'q8' },
           createHuggingFaceSubtitlePostProcessor(options) {
             created.push(options);
@@ -659,7 +681,8 @@ test('subtitle real model smoke default factory reports the web runtime config i
     },
   );
 
-  assert.deepEqual(created, [{ model: 'ceilf6/test-subtitle-postprocessor' }]);
+  assert.deepEqual(created, [{ model: 'ceilf6/web-default-subtitle-postprocessor' }]);
+  assert.equal(postProcessor.model, 'ceilf6/web-default-subtitle-postprocessor');
   assert.deepEqual(postProcessor.runtimeConfig, { device: 'wasm', dtype: 'q8' });
   await postProcessor.dispose();
   assert.equal(disposed, 1);

@@ -13,7 +13,7 @@ import { parseJsonObject } from './schema.mjs';
 
 const DEFAULT_FIXTURE_PATH = 'scripts/tests/fixtures/subtitle-postprocessor-eval.json';
 const DEFAULT_SAMPLE_ID = 'react-state-loop';
-const DEFAULT_MODEL = 'ceilf6/code-tape-subtitle-postprocessor-onnx';
+const WEB_DEFAULT_MODEL_LABEL = 'web-default';
 const DEFAULT_DEVICE = 'wasm';
 const DEFAULT_DTYPE = 'q8';
 const SMOKE_NAME = 'subtitle-postprocessor-real-model-smoke';
@@ -35,7 +35,8 @@ async function main() {
 }
 
 export async function runRealModelSmoke(options = {}) {
-  const model = options.model ?? process.env.SUBTITLE_REAL_MODEL_SMOKE_MODEL ?? DEFAULT_MODEL;
+  const requestedModel = options.model ?? process.env.SUBTITLE_REAL_MODEL_SMOKE_MODEL;
+  let model = requestedModel ?? WEB_DEFAULT_MODEL_LABEL;
   const device = options.device ?? DEFAULT_DEVICE;
   const dtype = options.dtype ?? DEFAULT_DTYPE;
   let runtimeConfig = { device, dtype };
@@ -51,10 +52,14 @@ export async function runRealModelSmoke(options = {}) {
 
   try {
     const readyStartedAt = performance.now();
-    postProcessor = await createPostProcessor({ model, device, dtype });
-    runtimeConfig = readPostProcessorRuntimeConfig(postProcessor, runtimeConfig);
-    await postProcessor.warmUp?.();
-    pipelineReadyDurationMs = round(performance.now() - readyStartedAt);
+    try {
+      postProcessor = await createPostProcessor({ model: requestedModel, device, dtype });
+      model = readPostProcessorModel(postProcessor, model);
+      runtimeConfig = readPostProcessorRuntimeConfig(postProcessor, runtimeConfig);
+      await postProcessor.warmUp?.();
+    } finally {
+      pipelineReadyDurationMs = round(performance.now() - readyStartedAt);
+    }
 
     const generationStartedAt = performance.now();
     let result;
@@ -208,8 +213,10 @@ export async function createDefaultPostProcessor(
   try {
     const runtimeConfig = readDefaultRuntimeConfig(module);
     assertRuntimeConfigMatches(runtimeConfig, { device, dtype });
-    postProcessor = module.createHuggingFaceSubtitlePostProcessor({ model });
+    const effectiveModel = model ?? readDefaultModel(module);
+    postProcessor = module.createHuggingFaceSubtitlePostProcessor({ model: effectiveModel });
     return {
+      model: effectiveModel,
       runtimeConfig,
       async warmUp() {
         await postProcessor.warmUp?.();
@@ -263,8 +270,22 @@ export function buildDefaultWebModuleServerConfig(webRoot) {
   };
 }
 
+function readPostProcessorModel(postProcessor, fallback) {
+  return typeof postProcessor?.model === 'string' && postProcessor.model.trim()
+    ? postProcessor.model
+    : fallback;
+}
+
 function readPostProcessorRuntimeConfig(postProcessor, fallback) {
   return isRuntimeConfig(postProcessor?.runtimeConfig) ? postProcessor.runtimeConfig : fallback;
+}
+
+function readDefaultModel(module) {
+  const model = module?.DEFAULT_POSTPROCESSOR_MODEL;
+  if (typeof model !== 'string' || !model.trim()) {
+    throw new Error('subtitle postprocessor default model missing');
+  }
+  return model;
 }
 
 function readDefaultRuntimeConfig(module) {
