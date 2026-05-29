@@ -5,6 +5,7 @@ import type {
   SubtitleTrack,
 } from "./types";
 import { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
+import { loadTransformersPipeline } from "./transformersLoader";
 
 export { DEFAULT_POSTPROCESSOR_MODEL } from "./subtitlePostProcessorConfig";
 const MAX_PROMPT_CODE_CHARS = 6_000;
@@ -50,19 +51,6 @@ type PipelineFactory = (
   model: string,
   options: TextGenerationPipelineOptions,
 ) => Promise<TextGenerationPipeline>;
-
-type TransformersEnvironment = {
-  useBrowserCache?: boolean;
-  useCustomCache?: boolean;
-  customCache?: QuietBrowserCache | null;
-  cacheKey?: string;
-};
-
-type QuietBrowserCache = {
-  __codeTapeQuietCache: true;
-  match(cacheKey: string): Promise<Response | undefined>;
-  put(cacheKey: string, response: Response): Promise<void>;
-};
 
 export type HuggingFaceSubtitlePostProcessorOptions = {
   model?: string;
@@ -664,38 +652,7 @@ async function loadDefaultPipeline(
   model: string,
   options: TextGenerationPipelineOptions,
 ): Promise<TextGenerationPipeline> {
-  const module = await import("@huggingface/transformers");
-  configureQuietBrowserCache(module.env as TransformersEnvironment | undefined);
-  const pipe = await module.pipeline(task, model, options);
-  return pipe as unknown as TextGenerationPipeline;
-}
-
-function configureQuietBrowserCache(env: TransformersEnvironment | undefined): void {
-  if (!env?.useBrowserCache || typeof globalThis.caches === "undefined") return;
-  if (env.useCustomCache && env.customCache) return;
-
-  const cacheKey = env.cacheKey ?? "transformers-cache";
-  env.useCustomCache = true;
-  env.customCache = {
-    __codeTapeQuietCache: true,
-    async match(resourceKey) {
-      try {
-        const cache = await globalThis.caches.open(cacheKey);
-        return (await cache.match(resourceKey)) ?? undefined;
-      } catch {
-        return undefined;
-      }
-    },
-    async put(resourceKey, response) {
-      try {
-        const cache = await globalThis.caches.open(cacheKey);
-        await cache.put(resourceKey, response.clone());
-      } catch {
-        // Cache API writes can fail for large model files or browser storage issues.
-        // Model loading has already succeeded, so keep inference available and avoid noisy warnings.
-      }
-    },
-  };
+  return loadTransformersPipeline<TextGenerationPipeline>(task, model, options);
 }
 
 function readGeneratedText(output: unknown): string {
