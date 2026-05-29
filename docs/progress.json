@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T15:58:02Z",
+  "updatedAt": "2026-05-29T16:44:20Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        158,
-        162
+        162,
+        164,
+        166
       ],
       "completedIssues": [
         11,
@@ -34,7 +35,8 @@
         150,
         147,
         156,
-        157
+        157,
+        158
       ],
       "reviewedIssues": [
         4,
@@ -50,10 +52,10 @@
         119
       ],
       "bugPenalties": [],
-      "developmentScore": 54.75,
+      "developmentScore": 56.25,
       "reviewScore": 5.75,
       "penaltyScore": 0,
-      "totalScore": 60.5
+      "totalScore": 62
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -788,11 +790,11 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:38:41Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T16:35:38Z",
+      "mergedPr": 161
     },
     "162": {
       "number": 162,
@@ -805,6 +807,33 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T15:53:54Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "164": {
+      "number": 164,
+      "title": "[Bug] 生成字幕 Transformers 动态 chunk 加载失败",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T16:20:56Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "166": {
+      "number": 166,
+      "title": "[P1] 云端回放中心页面入口与本地上传",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T16:44:20Z",
       "closedAt": null,
       "mergedPr": null
     }
@@ -1415,6 +1444,18 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T15:58:02Z"
+    },
+    {
+      "id": "pr-161-merge",
+      "type": "feature_merge",
+      "issue": 158,
+      "pr": 161,
+      "score": 2,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 1.5,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T16:35:38Z"
     }
   ]
 }

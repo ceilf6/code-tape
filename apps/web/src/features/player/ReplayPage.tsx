@@ -8,7 +8,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, TerminalSquare } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
 import { createTimelineClock } from "./timelineClock";
@@ -18,16 +18,19 @@ import { CodeEditor } from "@/features/editor/CodeEditor";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createRecordingStore } from "@/features/library/recordingStore";
+import { createCloudRecordingRepository } from "@/features/cloud/cloudRecordingRepository";
 import { SubtitlePanel } from "@/features/subtitles";
 import { Toggle } from "@/shared/ui";
 import type {
   PackageWarning,
   MediaTimelineSegment,
+  PackageLoadResult,
   RecordingEvent,
   RecordingPackageV1,
   ReplaySchedulerState,
   ReplayStableState,
 } from "@/shared/recording-schema";
+import { createCloudPackageLoader } from "./cloudPackageLoader";
 
 const INITIAL_SCHEDULER_STATE: ReplaySchedulerState = {
   status: "loading",
@@ -85,6 +88,10 @@ const DEFAULT_DISPLAY_OPTIONS: ReplayDisplayOptions = {
   runtime: true,
   subtitles: true,
 };
+type ReplaySource = "local" | "cloud";
+type ReplayPackageLoader = {
+  load(recordingId: string): Promise<PackageLoadResult>;
+};
 
 function isEventOnlyMediaDegraded(
   pkg: RecordingPackageV1,
@@ -95,13 +102,31 @@ function isEventOnlyMediaDegraded(
   return warnings.some((warning) => warning.code === "media-missing");
 }
 
+function parseInitialSeekTimeMs(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.floor(parsed);
+}
+
 /**
  * ReplayPage — wires the replay core (scheduler + clock + repository + runtime)
  * and renders the playback layout.
  */
-export function ReplayPage() {
+export type ReplayPageProps = {
+  source?: ReplaySource;
+};
+
+export function ReplayPage({ source = "local" }: ReplayPageProps) {
   const { id } = useParams();
-  const repository = useMemo(() => createRecordingStore(), []);
+  const [searchParams] = useSearchParams();
+  const initialSeekTimeMs = parseInitialSeekTimeMs(searchParams.get("t"));
+  const packageLoader = useMemo<ReplayPackageLoader>(() => {
+    if (source === "cloud") {
+      return createCloudPackageLoader({ repository: createCloudRecordingRepository() });
+    }
+    return createRecordingStore();
+  }, [source]);
   const runtime = useMemo(() => createIframeRuntime(), []);
   const [schedulerState, setSchedulerState] =
     useState<ReplaySchedulerState>(INITIAL_SCHEDULER_STATE);
@@ -208,7 +233,7 @@ export function ReplayPage() {
     clearOverlayTimers();
     recordedMediaVideoRef.current?.pause();
     (async () => {
-      const result = await repository.load(id);
+      const result = await packageLoader.load(id);
       if (cancelled) return;
       if (!result.ok) {
         setLoadError(
@@ -227,11 +252,20 @@ export function ReplayPage() {
         isEventOnlyMediaDegraded(result.package, result.mediaBlob, result.warnings),
       );
       await scheduler.load(result.package);
+      if (cancelled) return;
+      if (initialSeekTimeMs !== null) await scheduler.seek(initialSeekTimeMs);
     })();
     return () => {
       cancelled = true;
     };
-  }, [clearOverlayTimers, createRecordedMediaAdapter, id, repository, scheduler]);
+  }, [
+    clearOverlayTimers,
+    createRecordedMediaAdapter,
+    id,
+    initialSeekTimeMs,
+    packageLoader,
+    scheduler,
+  ]);
 
   if (loadError) {
     return (

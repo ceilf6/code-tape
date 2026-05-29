@@ -86,13 +86,31 @@ const replayPageMock = vi.hoisted(() => {
       warnings: [],
     })),
   };
+  const cloudRepository = {
+    getPlaybackDescriptor: vi.fn(),
+  };
+  const cloudLoader = {
+    load: vi.fn<RecordingRepository["load"]>(async () => ({
+      ok: true as const,
+      package: packageData,
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      warnings: [],
+    })),
+  };
+  const createCloudRecordingRepository = vi.fn(() => cloudRepository);
+  const createCloudPackageLoader = vi.fn(() => cloudLoader);
 
   return {
     scheduler,
     schedulerState,
     repository,
+    cloudRepository,
+    cloudLoader,
+    createCloudRecordingRepository,
+    createCloudPackageLoader,
     packageData,
     routeId: "recording-1",
+    search: "",
     controlsProps: null as ReplayControlsProps | null,
     codeEditorProps: null as CodeEditorProps | null,
     previewPaneProps: null as PreviewPaneProps | null,
@@ -116,7 +134,12 @@ const replayPageMock = vi.hoisted(() => {
       schedulerState.mediaStatus = "none";
       schedulerState.driftMs = 0;
       repository.load.mockClear();
+      cloudRepository.getPlaybackDescriptor.mockClear();
+      cloudLoader.load.mockClear();
+      createCloudRecordingRepository.mockClear();
+      createCloudPackageLoader.mockClear();
       this.routeId = "recording-1";
+      this.search = "";
       this.controlsProps = null;
       this.codeEditorProps = null;
       this.previewPaneProps = null;
@@ -131,6 +154,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useParams: () => ({ id: replayPageMock.routeId }),
+    useSearchParams: () => [new URLSearchParams(replayPageMock.search), vi.fn()],
   };
 });
 
@@ -163,6 +187,14 @@ vi.mock("@/features/library/recordingStore", () => ({
   createRecordingStore: vi.fn(() => replayPageMock.repository),
 }));
 
+vi.mock("@/features/cloud/cloudRecordingRepository", () => ({
+  createCloudRecordingRepository: replayPageMock.createCloudRecordingRepository,
+}));
+
+vi.mock("../cloudPackageLoader", () => ({
+  createCloudPackageLoader: replayPageMock.createCloudPackageLoader,
+}));
+
 vi.mock("../replayScheduler", () => ({
   createReplayScheduler: vi.fn((options: { onTick?: (state: ReplayStableState, events?: RecordingEvent[], timelineTimeMs?: number) => void }) => {
     replayPageMock.onTick = options.onTick ?? null;
@@ -181,6 +213,73 @@ vi.mock("../ReplayControls", () => ({
 describe("ReplayPage", () => {
   beforeEach(() => {
     replayPageMock.reset();
+  });
+
+  it("loads cloud replays through the cloud package loader when source is cloud", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="cloud" />);
+
+    await waitFor(() => expect(replayPageMock.cloudLoader.load).toHaveBeenCalledWith("recording-1"));
+    expect(replayPageMock.createCloudRecordingRepository).toHaveBeenCalledTimes(1);
+    expect(replayPageMock.createCloudPackageLoader).toHaveBeenCalledWith({
+      repository: replayPageMock.cloudRepository,
+    });
+    expect(replayPageMock.repository.load).not.toHaveBeenCalled();
+    expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData);
+  });
+
+  it("keeps local replays on IndexedDB by default", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(replayPageMock.repository.load).toHaveBeenCalledWith("recording-1"));
+    expect(replayPageMock.cloudLoader.load).not.toHaveBeenCalled();
+    expect(replayPageMock.createCloudRecordingRepository).not.toHaveBeenCalled();
+  });
+
+  it("shows the event-only notice for cloud replays with missing media", async () => {
+    replayPageMock.cloudLoader.load.mockResolvedValueOnce({
+      ok: true,
+      package: replayPageMock.packageData,
+      mediaBlob: null,
+      warnings: [{ code: "media-missing", blobId: "cloud-media" }],
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="cloud" />);
+
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    expect(screen.getByText("音视频不可用，已切换为纯事件流回放")).toBeInTheDocument();
+  });
+
+  it("seeks to the cloud replay timestamp from the query string after loading", async () => {
+    replayPageMock.search = "?t=42000";
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="cloud" />);
+
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    await waitFor(() => expect(replayPageMock.scheduler.seek).toHaveBeenCalledWith(42_000));
+  });
+
+  it("blocks cloud replay when the cloud loader fails", async () => {
+    replayPageMock.cloudLoader.load.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "invalid-manifest", message: "descriptor failed" },
+    });
+    const { ReplayPage } = await import("../ReplayPage");
+    const { MemoryRouter } = await import("react-router-dom");
+
+    render(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <ReplayPage source="cloud" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/加载失败：invalid-manifest/)).toBeInTheDocument());
+    expect(replayPageMock.scheduler.load).not.toHaveBeenCalled();
   });
 
   it("wires replay control callbacks to scheduler commands", async () => {
