@@ -114,10 +114,25 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
   ): Promise<SubtitleCorrectionResult | undefined> => {
     if (signal?.aborted) throw createAbortError();
     const startedAt = performance.now();
-    const activeWorker = await ensureWorker();
-    const workerLoadDurationMs = performance.now() - startedAt;
-    if (activeWorker !== worker) throw createAbortError();
-    if (signal?.aborted) throw createAbortError();
+    let activeWorker: Worker;
+    let workerLoadDurationMs: number;
+    try {
+      activeWorker = await ensureWorker();
+      workerLoadDurationMs = performance.now() - startedAt;
+      if (activeWorker !== worker) throw createAbortError();
+      if (signal?.aborted) throw createAbortError();
+    } catch (error) {
+      const failedLoadDurationMs = performance.now() - startedAt;
+      emitMetric({
+        phase: request.type,
+        status: isAbortError(error) ? "aborted" : "error",
+        model,
+        workerLoadDurationMs: failedLoadDurationMs,
+        workerRequestDurationMs: 0,
+        totalDurationMs: failedLoadDurationMs,
+      });
+      throw error;
+    }
     const id = `subtitle-postprocess-${nextRequestId}`;
     nextRequestId += 1;
     const message = { ...request, id, model } as WorkerRequest;

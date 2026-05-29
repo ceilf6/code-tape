@@ -466,6 +466,84 @@ describe("SubtitlePanel", () => {
     expect(screen.getByRole("button", { name: "纠错并生成章节" })).not.toBeDisabled();
   });
 
+  it("ignores stale local LLM timeout after switching recordings", async () => {
+    const firstTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "old recording subtitle" }],
+    };
+    const secondTrack: SubtitleTrack = {
+      recordingId: "recording-2",
+      generatedAt: "2026-05-28T00:00:01.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-2", startMs: 0, endMs: 1_000, text: "current recording subtitle" }],
+    };
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(firstTrack, [{ id: "chapter-1", title: "旧章节", startMs: 0, endMs: 1_000 }]);
+    await store.saveWithChapters(secondTrack, [
+      { id: "chapter-2", title: "当前章节", startMs: 0, endMs: 1_000 },
+    ]);
+    let processSignal: AbortSignal | undefined;
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(
+        ({ signal }) =>
+          new Promise<SubtitleCorrectionResult>(() => {
+            processSignal = signal;
+          }),
+      ),
+    };
+    const props = {
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      hasAudio: true,
+      durationMs: 1_000,
+      currentTimeMs: 0,
+      onSeek: vi.fn(),
+      store,
+      transcriber: {
+        transcribe: vi.fn(async () => ({
+          model: "onnx-community/whisper-tiny",
+          source: "huggingface-local" as const,
+          segments: [],
+        })),
+      },
+      postProcessor,
+      postProcessTimeoutMs: 25,
+    };
+
+    const { rerender } = render(<SubtitlePanel recordingId="recording-1" {...props} />);
+
+    await waitFor(() => expect(screen.getByText("old recording subtitle")).toBeInTheDocument());
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+      await act(async () => {
+        await flushPromises();
+      });
+
+      rerender(<SubtitlePanel recordingId="recording-2" {...props} />);
+      await act(async () => {
+        await flushPromises();
+      });
+      expect(screen.getByText("current recording subtitle")).toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(25);
+        await flushPromises();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(processSignal?.aborted).toBe(true);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("current recording subtitle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /当前章节/ })).toBeInTheDocument();
+  });
+
   it("surfaces generation failure without blocking replay controls", async () => {
     const transcriber: SubtitleTranscriber = {
       transcribe: vi.fn(async () => {

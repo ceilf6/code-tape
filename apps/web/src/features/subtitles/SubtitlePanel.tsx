@@ -245,6 +245,7 @@ export function SubtitlePanel({
       setStatus("ready");
     } catch (err) {
       if (isPostProcessTimeoutError(err)) {
+        if (requestVersionRef.current !== requestVersion || generationAbortRef.current !== abortController) return;
         setError(formatSubtitleError(err));
         setStatus("error");
         return;

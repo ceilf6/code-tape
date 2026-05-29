@@ -95,6 +95,33 @@ describe("createWorkerBackedHuggingFaceSubtitlePostProcessor", () => {
     expect(JSON.stringify(onMetric.mock.calls[0]?.[0])).not.toContain("use state hook");
   });
 
+  it("emits an error metric when worker creation fails before posting a request", async () => {
+    const onMetric = vi.fn();
+    const workerFactory = vi.fn(() => {
+      throw new Error("worker bootstrap failed");
+    });
+    const postProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      model: "ceilf6/test-subtitle-model",
+      workerFactory,
+      onMetric,
+    });
+
+    await expect(postProcessor.process({ track: makeTrack() })).rejects.toThrow("worker bootstrap failed");
+
+    expect(workerFactory).toHaveBeenCalledTimes(1);
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "ceilf6/test-subtitle-model",
+        phase: "process",
+        status: "error",
+        workerLoadDurationMs: expect.any(Number),
+        workerRequestDurationMs: 0,
+        totalDurationMs: expect.any(Number),
+      }),
+    );
+    expect(JSON.stringify(onMetric.mock.calls[0]?.[0])).not.toContain("use state hook");
+  });
+
   it("terminates in-flight worker inference when the request is aborted", async () => {
     const worker = createMockWorker();
     const onMetric = vi.fn();
