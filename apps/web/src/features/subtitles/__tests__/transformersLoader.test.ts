@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   configureQuietBrowserCache,
   loadTransformersModule,
@@ -6,6 +6,11 @@ import {
   type TransformersEnvironment,
   type TransformersModule,
 } from "../transformersLoader";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("transformersLoader", () => {
   it("retries transient dynamic import failures before loading Transformers.js", async () => {
@@ -38,6 +43,19 @@ describe("transformersLoader", () => {
     );
 
     expect(importer).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrying after the configured import attempts", async () => {
+    const error = new TypeError("Failed to fetch dynamically imported module");
+    const importer = vi.fn<() => Promise<TransformersModule>>().mockRejectedValue(error);
+    const onRetry = vi.fn();
+
+    await expect(
+      loadTransformersModule({ importer, attempts: 2, retryDelayMs: 0, onRetry }),
+    ).rejects.toBe(error);
+
+    expect(importer).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it("loads a pipeline after a recovered import and applies the quiet browser cache", async () => {
