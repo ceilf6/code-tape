@@ -1,5 +1,6 @@
 import { loadPrGuardContext } from './action-context.mjs';
 import {
+  findAutomatedReviewSignals,
   findMaintainerMergeConfirmation,
   shouldDeferAutoMergeForForkReview,
   shouldWaitForRequiredChecks,
@@ -48,13 +49,30 @@ if (shouldDeferAutoMergeForForkReview(event, context.pr)) {
 }
 
 const maintainerLogin = context.rawPull.base.repo?.owner?.login ?? context.pr.baseRepoFullName?.split('/')[0];
+const automatedReviewResult = findAutomatedReviewSignals({
+  reviews: context.reviews,
+  reviewComments: context.reviewComments,
+  comments: context.comments,
+  latestCommitAt: context.pr.latestCommitAt,
+  latestCommitSha: context.rawPull.head.sha,
+  trustedRepoGuardLogin: maintainerLogin,
+});
+if (automatedReviewResult.wait) {
+  console.log(
+    `PR #${context.pr.number} is waiting for automated review feedback after the latest commit:\n- missing ${automatedReviewResult.missing.join('\n- missing ')}`,
+  );
+  process.exit(0);
+}
+
 const mergeConfirmer = findMaintainerMergeConfirmation({
   comments: context.comments,
   maintainerLogin,
-  latestCommitAt: context.pr.latestCommitAt,
+  latestCommitAt: automatedReviewResult.latestSignalAt ?? context.pr.latestCommitAt,
 });
 if (!mergeConfirmer) {
-  console.log(`PR #${context.pr.number} is waiting for @${maintainerLogin} to comment 确认合并 after the latest commit`);
+  console.log(
+    `PR #${context.pr.number} is waiting for @${maintainerLogin} to comment 确认合并 after Repo Guard, Codex, and Copilot feedback on the latest commit`,
+  );
   process.exit(0);
 }
 
@@ -79,7 +97,7 @@ if (requiredCheckResult.wait) {
 
 await client.mergePull(context.pr.number, {
   commitTitle: `#${result.issueNumber} ${context.rawPull.title}`,
-  commitMessage: `Closes #${result.issueNumber}\n\nMerged automatically after workflow guard, CR, and maintainer confirmation passed.`,
+  commitMessage: `Closes #${result.issueNumber}\n\nMerged automatically after workflow guard and maintainer confirmation passed.`,
 });
 
 if (context.pr.headRepoFullName === context.pr.baseRepoFullName && context.pr.headRef !== 'main') {

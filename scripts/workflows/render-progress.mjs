@@ -87,14 +87,17 @@ function deltaColumn(entry) {
   if (entry.type === 'bug_fix_merge') {
     return [
       `${entry.originalDeveloper} ${formatSigned(entry.originalDeveloperDelta)}`,
-      `${entry.originalReviewer} ${formatSigned(entry.originalReviewerDelta)}`,
+      entry.originalReviewer ? `${entry.originalReviewer} ${formatSigned(entry.originalReviewerDelta)}` : null,
       `${entry.fixDeveloper} ${formatSigned(entry.fixDeveloperDelta)}`,
-      `${entry.fixReviewer} ${formatSigned(entry.fixReviewerDelta)}`,
-    ].join(', ');
+      entry.fixReviewer ? `${entry.fixReviewer} ${formatSigned(entry.fixReviewerDelta)}` : null,
+    ].filter(Boolean).join(', ');
   }
   if (entry.type === 'manual_development_bonus') {
     const reason = entry.reason ? ` (${entry.reason})` : '';
     return `${entry.developer} ${formatSigned(entry.developerDelta)}${reason}`;
+  }
+  if (!entry.reviewer) {
+    return `${entry.developer} ${formatSigned(entry.developerDelta)}`;
   }
   return `${entry.developer} ${formatSigned(entry.developerDelta)}, ${entry.reviewer} ${formatSigned(entry.reviewerDelta)}`;
 }

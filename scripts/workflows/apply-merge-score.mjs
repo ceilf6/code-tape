@@ -28,10 +28,6 @@ const reviewer = findValidReviewer({
   latestCommitAt: context.pr.latestCommitAt,
 });
 
-if (!reviewer) {
-  throw new Error(`cannot score PR #${context.pr.number}: missing valid reviewer`);
-}
-
 let progress = await readProgress(progressJsonPath);
 const createdAt = event.pull_request.merged_at ?? new Date().toISOString();
 

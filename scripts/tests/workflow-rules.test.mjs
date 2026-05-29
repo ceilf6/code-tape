@@ -19,6 +19,7 @@ import {
   resolvePullNumberFromEvent,
 } from '../workflows/action-context.mjs';
 import {
+  findAutomatedReviewSignals,
   findMaintainerMergeConfirmation,
   shouldDeferAutoMergeForForkReview,
   shouldWaitForRequiredChecks,
@@ -390,7 +391,7 @@ test('findValidReviewer keeps claimant CR pass valid after new commits', () => {
   );
 });
 
-test('evaluatePrGuard enforces issue linkage, ownership, protected files, CR and timeout', () => {
+test('evaluatePrGuard does not require CR when the issue and PR are otherwise valid', () => {
   const progress = createEmptyProgress();
   const claimed = claimIssue(
     progress,
@@ -412,13 +413,13 @@ test('evaluatePrGuard enforces issue linkage, ownership, protected files, CR and
     issue: { number: 12, labels: ['score:5', 'stack:react', 'status:claimed'], assignee: 'alice' },
     changedFiles: ['src/App.tsx'],
     reviews: [],
-    comments: [{ user: { login: 'bob', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:20:00.000Z' }],
+    comments: [],
     now: '2026-05-22T11:00:00.000Z',
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.issueNumber, 12);
-  assert.equal(result.reviewer, 'bob');
+  assert.equal(result.reviewer, null);
 
   const protectedFile = evaluatePrGuard({
     progress: claimed,
@@ -433,7 +434,7 @@ test('evaluatePrGuard enforces issue linkage, ownership, protected files, CR and
     issue: { number: 12, labels: ['score:5', 'status:claimed'], assignee: 'alice' },
     changedFiles: ['docs/progress.json'],
     reviews: [],
-    comments: [{ user: { login: 'bob', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:20:00.000Z' }],
+    comments: [],
     now: '2026-05-22T11:00:00.000Z',
   });
 
@@ -770,6 +771,31 @@ test('feature scoring writes idempotent ledger and clears active issue', () => {
   assert.equal(rerun.students.alice.totalScore, 3.75);
 });
 
+test('feature scoring gives the full score to the developer when there is no reviewer', () => {
+  const progress = claimIssue(
+    createEmptyProgress(),
+    { number: 12, title: '实现录制控制栏', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:00:00.000Z',
+  );
+
+  const scored = applyFeatureMerge(progress, {
+    issue: 12,
+    pr: 34,
+    score: 5,
+    developer: 'alice',
+    reviewer: null,
+    createdAt: '2026-05-22T12:00:00.000Z',
+  });
+
+  assert.equal(scored.students.alice.activeIssue, null);
+  assert.equal(scored.students.alice.developmentScore, 5);
+  assert.equal(scored.students.alice.totalScore, 5);
+  assert.equal(scored.students.bob, undefined);
+  assert.equal(scored.ledger[0].reviewer, null);
+  assert.equal(scored.ledger[0].reviewerDelta, 0);
+});
+
 test('bug fix scoring penalizes original owner and rewards fix owner', () => {
   const progress = claimIssue(
     createEmptyProgress(),
@@ -808,6 +834,89 @@ test('bug fix scoring penalizes original owner and rewards fix owner', () => {
   assert.equal(scored.students.carol.developmentScore, 3.75);
   assert.equal(scored.students.dave.reviewScore, 1.25);
   assert.equal(scored.students.carol.activeIssue, null);
+});
+
+test('bug fix scoring gives the full fix score when there is no fix reviewer', () => {
+  const progress = claimIssue(
+    createEmptyProgress(),
+    { number: 12, title: '实现录制控制栏', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:00:00.000Z',
+  );
+  const merged = applyFeatureMerge(progress, {
+    issue: 12,
+    pr: 34,
+    score: 5,
+    developer: 'alice',
+    reviewer: 'bob',
+    createdAt: '2026-05-22T12:00:00.000Z',
+  });
+  const claimedBug = claimIssue(
+    merged,
+    { number: 41, title: '修复录制控制栏 bug', labels: ['score:5', 'stack:react', 'status:open'] },
+    'carol',
+    '2026-05-22T13:00:00.000Z',
+  );
+
+  const scored = applyBugFixMerge(claimedBug, {
+    sourceIssue: 12,
+    sourcePr: 34,
+    bugIssue: 41,
+    fixPr: 45,
+    score: 5,
+    fixDeveloper: 'carol',
+    fixReviewer: null,
+    createdAt: '2026-05-22T18:00:00.000Z',
+  });
+  const bugLedger = scored.ledger.at(-1);
+
+  assert.equal(scored.students.carol.developmentScore, 5);
+  assert.equal(scored.students.carol.totalScore, 5);
+  assert.equal(scored.students.dave, undefined);
+  assert.equal(bugLedger.fixReviewer, null);
+  assert.equal(bugLedger.fixReviewerDelta, 0);
+});
+
+test('bug fix scoring and rendering tolerate an original feature merge without reviewer', () => {
+  const progress = claimIssue(
+    createEmptyProgress(),
+    { number: 12, title: '实现录制控制栏', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:00:00.000Z',
+  );
+  const merged = applyFeatureMerge(progress, {
+    issue: 12,
+    pr: 34,
+    score: 5,
+    developer: 'alice',
+    reviewer: null,
+    createdAt: '2026-05-22T12:00:00.000Z',
+  });
+  const claimedBug = claimIssue(
+    merged,
+    { number: 41, title: '修复录制控制栏 bug', labels: ['score:5', 'stack:react', 'status:open'] },
+    'carol',
+    '2026-05-22T13:00:00.000Z',
+  );
+
+  const scored = applyBugFixMerge(claimedBug, {
+    sourceIssue: 12,
+    sourcePr: 34,
+    bugIssue: 41,
+    fixPr: 45,
+    score: 5,
+    fixDeveloper: 'carol',
+    fixReviewer: null,
+    createdAt: '2026-05-22T18:00:00.000Z',
+  });
+  const bugLedger = scored.ledger.at(-1);
+  const markdown = renderProgressMarkdown(scored);
+
+  assert.equal(scored.students.bob, undefined);
+  assert.equal(bugLedger.originalReviewer, null);
+  assert.equal(bugLedger.originalReviewerDelta, 0);
+  assert.doesNotMatch(markdown, /null/);
+  assert.match(markdown, /alice -7\.50, carol \+5\.00/);
 });
 
 test('parseBugReferences extracts source issue and PR from bug body', () => {
@@ -991,6 +1100,204 @@ test('auto merge waits for required quality checks', () => {
   );
 });
 
+test('auto merge waits for automated review signals after the latest commit', () => {
+  const latestCommitAt = '2026-05-22T10:00:00.000Z';
+
+  const blocked = findAutomatedReviewSignals({
+    latestCommitAt,
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    reviews: [
+      {
+        user: { login: 'ceilf6', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        submitted_at: '2026-05-22T10:05:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'chatgpt-codex-connector', type: 'Bot' },
+        body: '### 💡 Codex Review',
+        submitted_at: '2026-05-22T10:06:00.000Z',
+        commit_id: 'old-sha',
+      },
+    ],
+  });
+
+  assert.equal(blocked.wait, true);
+  assert.deepEqual(blocked.missing, ['Codex', 'Copilot']);
+  assert.equal(blocked.latestSignalAt, null);
+
+  const ready = findAutomatedReviewSignals({
+    latestCommitAt,
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    reviews: [
+      {
+        user: { login: 'ceilf6', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        submitted_at: '2026-05-22T10:05:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'chatgpt-codex-connector', type: 'Bot' },
+        body: '### 💡 Codex Review',
+        submitted_at: '2026-05-22T10:06:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'copilot-pull-request-reviewer', type: 'Bot' },
+        body: 'Copilot reviewed this pull request.',
+        submitted_at: '2026-05-22T10:07:00.000Z',
+        commit_id: 'head-sha',
+      },
+    ],
+  });
+
+  assert.equal(ready.wait, false);
+  assert.deepEqual(ready.missing, []);
+  assert.equal(ready.latestSignalAt, '2026-05-22T10:07:00.000Z');
+});
+
+test('auto merge ignores forged automated review markers from untrusted comments', () => {
+  const result = findAutomatedReviewSignals({
+    latestCommitAt: '2026-05-22T10:00:00.000Z',
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    comments: [
+      {
+        user: { login: 'alice', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        created_at: '2026-05-22T10:05:00.000Z',
+      },
+      {
+        user: { login: 'bob', type: 'User' },
+        body: '### 💡 Codex Review',
+        created_at: '2026-05-22T10:06:00.000Z',
+      },
+    ],
+    reviews: [
+      {
+        user: { login: 'copilot-pull-request-reviewer', type: 'Bot' },
+        body: 'Copilot reviewed this pull request.',
+        submitted_at: '2026-05-22T10:07:00.000Z',
+        commit_id: 'head-sha',
+      },
+    ],
+  });
+
+  assert.equal(result.wait, true);
+  assert.deepEqual(result.missing, ['Repo Guard', 'Codex']);
+});
+
+test('auto merge accepts automated review bot logins with bot suffixes', () => {
+  const result = findAutomatedReviewSignals({
+    latestCommitAt: '2026-05-22T10:00:00.000Z',
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    reviews: [
+      {
+        user: { login: 'ceilf6', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        submitted_at: '2026-05-22T10:05:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' },
+        body: '### 💡 Codex Review',
+        submitted_at: '2026-05-22T10:06:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'copilot-pull-request-reviewer[bot]', type: 'Bot' },
+        body: 'Copilot reviewed this pull request.',
+        submitted_at: '2026-05-22T10:07:00.000Z',
+        commit_id: 'head-sha',
+      },
+    ],
+  });
+
+  assert.equal(result.wait, false);
+  assert.deepEqual(result.missing, []);
+});
+
+test('auto merge ignores automated review comments without head-specific commit proof', () => {
+  const result = findAutomatedReviewSignals({
+    latestCommitAt: '2026-05-22T10:00:00.000Z',
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    comments: [
+      {
+        user: { login: 'ceilf6', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        created_at: '2026-05-22T10:05:00.000Z',
+      },
+      {
+        user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' },
+        body: '### 💡 Codex Review',
+        created_at: '2026-05-22T10:06:00.000Z',
+      },
+      {
+        user: { login: 'copilot-pull-request-reviewer[bot]', type: 'Bot' },
+        body: 'Copilot reviewed this pull request.',
+        created_at: '2026-05-22T10:07:00.000Z',
+      },
+    ],
+  });
+
+  assert.equal(result.wait, true);
+  assert.deepEqual(result.missing, ['Repo Guard', 'Codex', 'Copilot']);
+});
+
+test('auto merge requires maintainer confirmation after automated review feedback', () => {
+  const reviewSignals = findAutomatedReviewSignals({
+    latestCommitAt: '2026-05-22T10:00:00.000Z',
+    latestCommitSha: 'head-sha',
+    trustedRepoGuardLogin: 'ceilf6',
+    reviews: [
+      {
+        user: { login: 'ceilf6', type: 'User' },
+        body: '> 🛡️ [ceilf6/repo-guard](https://github.com/ceilf6/repo-guard)\n\n报告',
+        submitted_at: '2026-05-22T10:05:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'chatgpt-codex-connector', type: 'Bot' },
+        body: '### 💡 Codex Review',
+        submitted_at: '2026-05-22T10:06:00.000Z',
+        commit_id: 'head-sha',
+      },
+      {
+        user: { login: 'copilot-pull-request-reviewer', type: 'Bot' },
+        body: 'Copilot reviewed this pull request.',
+        submitted_at: '2026-05-22T10:07:00.000Z',
+        commit_id: 'head-sha',
+      },
+    ],
+  });
+
+  assert.equal(
+    findMaintainerMergeConfirmation({
+      comments: [
+        { user: { login: 'ceilf6', type: 'User' }, body: '确认合并', created_at: '2026-05-22T10:06:30.000Z' },
+      ],
+      maintainerLogin: 'ceilf6',
+      latestCommitAt: reviewSignals.latestSignalAt,
+    }),
+    null,
+  );
+
+  assert.equal(
+    findMaintainerMergeConfirmation({
+      comments: [
+        { user: { login: 'ceilf6', type: 'User' }, body: '确认合并', created_at: '2026-05-22T10:07:01.000Z' },
+      ],
+      maintainerLogin: 'ceilf6',
+      latestCommitAt: reviewSignals.latestSignalAt,
+    }),
+    'ceilf6',
+  );
+});
+
 test('auto merge requires maintainer confirmation after the latest commit', () => {
   const latestCommitAt = '2026-05-22T10:00:00.000Z';
   const comments = [
@@ -1083,6 +1390,13 @@ test('repo guard supports fork pull requests without checking out PR code', () =
   assert.doesNotMatch(workflow, /actions\/checkout@/);
   assert.match(workflow, /ceilf6\/repo-guard@main/);
   assert.match(workflow, /github-token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN\s*\}\}/);
+});
+
+test('workflow docs explain no-review bug fix scoring', () => {
+  const workflow = readFileSync('docs/规范工作流程.md', 'utf8');
+
+  assert.match(workflow, /如果原任务没有有效 CR，原 CR 扣分为 0/u);
+  assert.match(workflow, /如果 bug 修复 PR 没有有效 CR，修复开发者获得完整 `N` 分/u);
 });
 
 test('training PR workflows use the bot token for checkout and API reads when available', () => {

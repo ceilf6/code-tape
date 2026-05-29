@@ -110,19 +110,22 @@ export function applyFeatureMerge(progress, payload) {
     return next;
   }
 
-  const developerDelta = roundScore(payload.score * 0.75);
-  const reviewerDelta = roundScore(payload.score * 0.25);
+  const hasReviewer = Boolean(payload.reviewer);
+  const developerDelta = roundScore(payload.score * (hasReviewer ? 0.75 : 1));
+  const reviewerDelta = hasReviewer ? roundScore(payload.score * 0.25) : 0;
   const developer = ensureStudent(next, payload.developer);
-  const reviewer = ensureStudent(next, payload.reviewer);
+  const reviewer = hasReviewer ? ensureStudent(next, payload.reviewer) : null;
 
   developer.developmentScore = roundScore(developer.developmentScore + developerDelta);
   developer.totalScore = roundScore(developer.totalScore + developerDelta);
   developer.activeIssue = developer.activeIssue === payload.issue ? null : developer.activeIssue;
   pushUnique(developer.completedIssues, payload.issue);
 
-  reviewer.reviewScore = roundScore(reviewer.reviewScore + reviewerDelta);
-  reviewer.totalScore = roundScore(reviewer.totalScore + reviewerDelta);
-  pushUnique(reviewer.reviewedIssues, payload.issue);
+  if (reviewer) {
+    reviewer.reviewScore = roundScore(reviewer.reviewScore + reviewerDelta);
+    reviewer.totalScore = roundScore(reviewer.totalScore + reviewerDelta);
+    pushUnique(reviewer.reviewedIssues, payload.issue);
+  }
 
   const issue = next.issues[String(payload.issue)] ?? { number: payload.issue };
   next.issues[String(payload.issue)] = {
@@ -139,7 +142,7 @@ export function applyFeatureMerge(progress, payload) {
     pr: payload.pr,
     score: payload.score,
     developer: payload.developer,
-    reviewer: payload.reviewer,
+    reviewer: payload.reviewer ?? null,
     developerDelta,
     reviewerDelta,
     createdAt: payload.createdAt,
@@ -166,26 +169,32 @@ export function applyBugFixMerge(progress, payload) {
   }
 
   const originalDeveloperDelta = roundScore(-payload.score * 1.5);
-  const originalReviewerDelta = roundScore(-payload.score * 0.5);
-  const fixDeveloperDelta = roundScore(payload.score * 0.75);
-  const fixReviewerDelta = roundScore(payload.score * 0.25);
+  const hasOriginalReviewer = Boolean(sourceEntry.reviewer);
+  const hasFixReviewer = Boolean(payload.fixReviewer);
+  const originalReviewerDelta = hasOriginalReviewer ? roundScore(-payload.score * 0.5) : 0;
+  const fixDeveloperDelta = roundScore(payload.score * (hasFixReviewer ? 0.75 : 1));
+  const fixReviewerDelta = hasFixReviewer ? roundScore(payload.score * 0.25) : 0;
 
   const originalDeveloper = ensureStudent(next, sourceEntry.developer);
-  const originalReviewer = ensureStudent(next, sourceEntry.reviewer);
+  const originalReviewer = hasOriginalReviewer ? ensureStudent(next, sourceEntry.reviewer) : null;
   const fixDeveloper = ensureStudent(next, payload.fixDeveloper);
-  const fixReviewer = ensureStudent(next, payload.fixReviewer);
+  const fixReviewer = hasFixReviewer ? ensureStudent(next, payload.fixReviewer) : null;
 
   applyPenalty(originalDeveloper, payload.bugIssue, originalDeveloperDelta);
-  applyPenalty(originalReviewer, payload.bugIssue, originalReviewerDelta);
+  if (originalReviewer) {
+    applyPenalty(originalReviewer, payload.bugIssue, originalReviewerDelta);
+  }
 
   fixDeveloper.developmentScore = roundScore(fixDeveloper.developmentScore + fixDeveloperDelta);
   fixDeveloper.totalScore = roundScore(fixDeveloper.totalScore + fixDeveloperDelta);
   fixDeveloper.activeIssue = fixDeveloper.activeIssue === payload.bugIssue ? null : fixDeveloper.activeIssue;
   pushUnique(fixDeveloper.completedIssues, payload.bugIssue);
 
-  fixReviewer.reviewScore = roundScore(fixReviewer.reviewScore + fixReviewerDelta);
-  fixReviewer.totalScore = roundScore(fixReviewer.totalScore + fixReviewerDelta);
-  pushUnique(fixReviewer.reviewedIssues, payload.bugIssue);
+  if (fixReviewer) {
+    fixReviewer.reviewScore = roundScore(fixReviewer.reviewScore + fixReviewerDelta);
+    fixReviewer.totalScore = roundScore(fixReviewer.totalScore + fixReviewerDelta);
+    pushUnique(fixReviewer.reviewedIssues, payload.bugIssue);
+  }
 
   const issue = next.issues[String(payload.bugIssue)] ?? { number: payload.bugIssue };
   next.issues[String(payload.bugIssue)] = {
@@ -204,9 +213,9 @@ export function applyBugFixMerge(progress, payload) {
     fixPr: payload.fixPr,
     score: payload.score,
     originalDeveloper: sourceEntry.developer,
-    originalReviewer: sourceEntry.reviewer,
+    originalReviewer: sourceEntry.reviewer ?? null,
     fixDeveloper: payload.fixDeveloper,
-    fixReviewer: payload.fixReviewer,
+    fixReviewer: payload.fixReviewer ?? null,
     originalDeveloperDelta,
     originalReviewerDelta,
     fixDeveloperDelta,
