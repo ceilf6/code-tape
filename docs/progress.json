@@ -1,12 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T16:44:20Z",
+  "updatedAt": "2026-05-29T17:22:26Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         162,
-        164,
-        166
+        169
       ],
       "completedIssues": [
         11,
@@ -36,7 +35,9 @@
         147,
         156,
         157,
-        158
+        158,
+        164,
+        166
       ],
       "reviewedIssues": [
         4,
@@ -51,11 +52,16 @@
         118,
         119
       ],
-      "bugPenalties": [],
-      "developmentScore": 56.25,
+      "bugPenalties": [
+        {
+          "issue": 164,
+          "delta": -1.5
+        }
+      ],
+      "developmentScore": 58.5,
       "reviewScore": 5.75,
-      "penaltyScore": 0,
-      "totalScore": 62
+      "penaltyScore": -1.5,
+      "totalScore": 62.75
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -817,11 +823,11 @@
       "stack": [
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T16:20:56Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-29T16:55:56Z",
+      "mergedPr": 165
     },
     "166": {
       "number": 166,
@@ -831,9 +837,24 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-29T16:44:20Z",
+      "closedAt": "2026-05-29T17:17:23Z",
+      "mergedPr": 167
+    },
+    "169": {
+      "number": 169,
+      "title": "[P1] 时间点分享链接 API 与播放入口",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T17:22:26Z",
       "closedAt": null,
       "mergedPr": null
     }
@@ -1456,6 +1477,36 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-05-29T16:35:38Z"
+    },
+    {
+      "id": "bug-164-fix-pr-165",
+      "type": "bug_fix_merge",
+      "sourceIssue": 157,
+      "sourcePr": 159,
+      "bugIssue": 164,
+      "fixPr": 165,
+      "score": 1,
+      "originalDeveloper": "ceilf6",
+      "originalReviewer": null,
+      "fixDeveloper": "ceilf6",
+      "fixReviewer": null,
+      "originalDeveloperDelta": -1.5,
+      "originalReviewerDelta": 0,
+      "fixDeveloperDelta": 0.75,
+      "fixReviewerDelta": 0,
+      "createdAt": "2026-05-29T16:55:56Z"
+    },
+    {
+      "id": "pr-167-merge",
+      "type": "feature_merge",
+      "issue": 166,
+      "pr": 167,
+      "score": 2,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 1.5,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-29T17:17:23Z"
     }
   ]
 }

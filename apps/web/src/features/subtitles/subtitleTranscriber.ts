@@ -1,5 +1,6 @@
 import type { AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 import type { SubtitleSegment, SubtitleTranscriber } from "./types";
+import { loadTransformersPipeline } from "./transformersLoader";
 
 export const DEFAULT_TRANSCRIPTION_MODEL = "onnx-community/whisper-tiny";
 const DEFAULT_TRANSCRIPTION_LANGUAGE = "zh";
@@ -109,9 +110,7 @@ async function loadDefaultPipeline(
   model: string,
   options: AsrPipelineOptions,
 ): Promise<AsrPipeline> {
-  const module = await import("@huggingface/transformers");
-  const pipe = await module.pipeline(task, model, options);
-  return pipe as unknown as AsrPipeline;
+  return loadTransformersPipeline<AsrPipeline>(task, model, options);
 }
 
 function segmentFromChunk(
