@@ -25,7 +25,7 @@ async function flushPromises() {
 function createMockWorker() {
   const messageListeners = new Set<(event: MessageEvent) => void>();
   const errorListeners = new Set<(event: ErrorEvent) => void>();
-  const messageErrorListeners = new Set<(event: ErrorEvent) => void>();
+  const messageErrorListeners = new Set<(event: MessageEvent) => void>();
   const worker = {
     postMessage: vi.fn(),
     terminate: vi.fn(),
@@ -40,7 +40,7 @@ function createMockWorker() {
         return;
       }
       if (type === "messageerror") {
-        messageErrorListeners.add(listener as (event: ErrorEvent) => void);
+        messageErrorListeners.add(listener as (event: MessageEvent) => void);
       }
     }),
     removeEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
@@ -54,7 +54,7 @@ function createMockWorker() {
         return;
       }
       if (type === "messageerror") {
-        messageErrorListeners.delete(listener as (event: ErrorEvent) => void);
+        messageErrorListeners.delete(listener as (event: MessageEvent) => void);
       }
     }),
     dispatch(data: unknown) {
@@ -67,9 +67,9 @@ function createMockWorker() {
         listener({ message } as ErrorEvent);
       }
     },
-    dispatchMessageError(message: string) {
+    dispatchMessageError(data: unknown) {
       for (const listener of messageErrorListeners) {
-        listener({ message } as ErrorEvent);
+        listener(new MessageEvent("messageerror", { data }));
       }
     },
   };

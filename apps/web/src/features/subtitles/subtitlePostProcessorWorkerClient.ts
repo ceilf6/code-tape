@@ -215,11 +215,8 @@ export function createWorkerBackedHuggingFaceSubtitlePostProcessor(
     pending.reject(error, response.metrics);
   }
 
-  function handleWorkerError(event: Event | ErrorEvent) {
-    const message =
-      "message" in event && typeof event.message === "string"
-        ? event.message
-        : "字幕 LLM worker 执行失败";
+  function handleWorkerError(event: Event) {
+    const message = getWorkerEventMessage(event);
     const error = new Error(message);
     requestStaleTransformersImportRecovery(error);
     terminateWorker(error);
@@ -263,6 +260,23 @@ function deserializeWorkerError(error: SerializedWorkerError): Error {
 
 function createAbortError(): DOMException {
   return new DOMException("字幕纠错已取消", "AbortError");
+}
+
+function readWorkerEventMessage(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message;
+  if (!value || typeof value !== "object" || !("message" in value)) return undefined;
+  const message = (value as { message?: unknown }).message;
+  return typeof message === "string" ? message : undefined;
+}
+
+function getWorkerEventMessage(event: Event): string {
+  return (
+    readWorkerEventMessage((event as { message?: unknown }).message) ??
+    readWorkerEventMessage((event as { error?: unknown }).error) ??
+    readWorkerEventMessage((event as { data?: unknown }).data) ??
+    "字幕 LLM worker 执行失败"
+  );
 }
 
 function isAbortError(error: unknown): boolean {
