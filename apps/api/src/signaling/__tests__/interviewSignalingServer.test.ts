@@ -135,6 +135,56 @@ test("signaling server notifies the existing peer when the second role joins", (
   });
 });
 
+test("signaling server notifies the remaining peer when a socket disconnects", () => {
+  const rooms = createInterviewRoomService({
+    rooms: createMemoryInterviewRoomRepository(),
+    createId: () => "room-1",
+    createJoinCode: () => "JOIN1234",
+    now: () => new Date("2026-05-29T08:00:00.000Z"),
+  });
+  rooms.createRoom();
+  const server = createInterviewSignalingServer({ rooms });
+  const candidate = createFakeConnection("candidate-1");
+  const interviewer = createFakeConnection("interviewer-1");
+
+  server.receive(
+    candidate,
+    makeMessage({
+      kind: "join",
+      role: "candidate",
+      connectionId: candidate.id,
+    }),
+  );
+  server.receive(
+    interviewer,
+    makeMessage({
+      kind: "join",
+      role: "interviewer",
+      connectionId: interviewer.id,
+    }),
+  );
+
+  server.disconnect(interviewer.id);
+
+  assert.equal(candidate.messages.at(-1)?.kind, "leave");
+  assert.deepEqual(
+    {
+      kind: candidate.messages.at(-1)?.kind,
+      roomId: candidate.messages.at(-1)?.roomId,
+      role: candidate.messages.at(-1)?.role,
+      connectionId: candidate.messages.at(-1)?.connectionId,
+    },
+    {
+      kind: "leave",
+      roomId: "room-1",
+      role: "interviewer",
+      connectionId: "interviewer-1",
+    },
+  );
+  assert.equal(typeof candidate.messages.at(-1)?.messageId, "string");
+  assert.equal(typeof candidate.messages.at(-1)?.sentAt, "number");
+});
+
 test("signaling server rejects duplicate join on the same connection without leaking the original room slot", () => {
   const rooms = createInterviewRoomService({
     rooms: createMemoryInterviewRoomRepository(),

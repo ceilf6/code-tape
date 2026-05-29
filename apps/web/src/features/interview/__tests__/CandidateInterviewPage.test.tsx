@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { StrictMode, type ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { appRoutes } from "@/app/routes";
@@ -76,6 +76,22 @@ describe("CandidateInterviewPage", () => {
 
     expect(screen.getAllByText("面试官已加入")).toHaveLength(2);
     expect(screen.getByText("面试官在线")).toBeInTheDocument();
+  });
+
+  it("reuses in-flight room creation during StrictMode effect replay", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      strict: true,
+    });
+
+    expect(await screen.findByText("room-created")).toBeInTheDocument();
+    expect(roomClient.createRoom).toHaveBeenCalledTimes(1);
+    expect(signaling.create).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the recorder workspace visible when room creation fails", async () => {
@@ -415,10 +431,12 @@ function renderCandidatePage({
   initialEntry,
   roomClient,
   createSignalingClient,
+  strict = false,
 }: {
   initialEntry: string;
   roomClient: InterviewRoomClient;
   createSignalingClient: (options: InterviewSignalingClientOptions) => InterviewSignalingClient;
+  strict?: boolean;
 }) {
   const router = createMemoryRouter(
     [
@@ -437,13 +455,14 @@ function renderCandidatePage({
     { initialEntries: [initialEntry] },
   );
 
-  return render(
+  const tree = (
     <ThemeProvider>
       <TooltipProvider>
         <RouterProvider router={router} />
       </TooltipProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 function renderCandidateView(props: ComponentProps<typeof CandidateInterviewView>) {

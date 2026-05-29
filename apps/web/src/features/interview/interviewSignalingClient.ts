@@ -151,6 +151,12 @@ export function createInterviewSignalingClient(
       message: "interview signaling socket error",
     });
   };
+  socket.onclose = () => {
+    options.onError?.({
+      code: "socket-closed",
+      message: "interview signaling socket closed",
+    });
+  };
 
   const base = (): BaseSignalingMessage | null =>
     connectionId
@@ -216,6 +222,7 @@ export function createInterviewSignalingClient(
     close(code, reason) {
       socket.onmessage = null;
       socket.onerror = null;
+      socket.onclose = null;
       socket.close(code, reason);
     },
   };

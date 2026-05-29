@@ -115,12 +115,17 @@ function useCandidateInterviewRoomSession({
     roomId: routeRoomId,
     roomState: initialCandidateRoomState(routeRoomId),
   }));
+  const roomCreationRef = useRef<{
+    roomClient: InterviewRoomClient;
+    request: ReturnType<InterviewRoomClient["createRoom"]>;
+  } | null>(null);
 
   useEffect(() => {
     let closed = false;
     let signalingClient: InterviewSignalingClient | null = null;
 
     if (routeRoomId) {
+      roomCreationRef.current = null;
       setSession({
         roomId: routeRoomId,
         roomState: initialCandidateRoomState(routeRoomId),
@@ -137,7 +142,12 @@ function useCandidateInterviewRoomSession({
       },
     });
 
-    void roomClient.createRoom().then((result) => {
+    if (!roomCreationRef.current || roomCreationRef.current.roomClient !== roomClient) {
+      roomCreationRef.current = { roomClient, request: roomClient.createRoom() };
+    }
+    const roomRequest = roomCreationRef.current.request;
+
+    void roomRequest.then((result) => {
       if (closed) return;
 
       if (!result.ok) {
@@ -265,6 +275,10 @@ function useCandidateInterviewRoomSession({
           errorMessage: candidateRoomCreationErrorMessage(error),
         },
       });
+    }).finally(() => {
+      if (roomCreationRef.current?.request === roomRequest) {
+        roomCreationRef.current = null;
+      }
     });
 
     return () => {

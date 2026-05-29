@@ -88,6 +88,9 @@ export function createInterviewSignalingServer(deps: {
       const active = activeConnections.get(connectionId);
       if (active) {
         deps.rooms.leaveRoom({ roomId: active.roomId, connectionId });
+        activeConnections.delete(connectionId);
+        notifyPeerDisconnected(activeConnections, active);
+        return;
       }
       activeConnections.delete(connectionId);
     },
@@ -100,6 +103,26 @@ export function createInterviewSignalingServer(deps: {
       }
     },
   };
+}
+
+function notifyPeerDisconnected(
+  activeConnections: Map<string, ActiveConnection>,
+  active: ActiveConnection,
+): void {
+  const peer = findPeer(activeConnections, active.roomId, active.role);
+  if (!peer) return;
+
+  const sentAt = Date.now();
+  peer.connection.send(
+    JSON.stringify({
+      kind: "leave",
+      roomId: active.roomId,
+      role: active.role,
+      connectionId: active.connection.id,
+      messageId: `disconnect-${active.connection.id}-${sentAt}`,
+      sentAt,
+    }),
+  );
 }
 
 function handleJoin(input: {

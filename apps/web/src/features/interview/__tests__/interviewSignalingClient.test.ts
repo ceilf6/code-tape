@@ -217,6 +217,29 @@ describe("InterviewSignalingClient", () => {
 
     expect(client.sendHeartbeat()).toEqual({ ok: false, reason: "send-failed" });
   });
+
+  it("reports signaling socket closes through onError", () => {
+    const sockets: FakeWebSocket[] = [];
+    const errors: unknown[] = [];
+    createInterviewSignalingClient({
+      signalingUrl: "/api/interviews/rooms/room-1/signaling",
+      baseUrl: "https://app.example/interview",
+      roomId: "room-1",
+      role: "candidate",
+      joinCode: "JOIN1234",
+      WebSocket: createFakeWebSocketConstructor(sockets),
+      onError: (error) => errors.push(error),
+    });
+
+    sockets[0]?.emitClose();
+
+    expect(errors).toEqual([
+      {
+        code: "socket-closed",
+        message: "interview signaling socket closed",
+      },
+    ]);
+  });
 });
 
 class FakeWebSocket implements InterviewSignalingSocket {
@@ -250,6 +273,11 @@ class FakeWebSocket implements InterviewSignalingSocket {
 
   emitRaw(data: string): void {
     this.onmessage?.({ data } as MessageEvent<string>);
+  }
+
+  emitClose(): void {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.({ code: 1000, reason: "", wasClean: true } as CloseEvent);
   }
 }
 
