@@ -12,6 +12,7 @@ export type GetInterviewRoomResponse = {
   roomId: string;
   status: InterviewRoomStatus;
   expiresAt: string;
+  signalingUrl: string;
   candidateConnected: boolean;
   interviewerConnected: boolean;
 };
@@ -197,6 +198,7 @@ function parseGetRoomResponse(value: unknown): GetInterviewRoomResponse | null {
     !isNonEmptyString(value.roomId) ||
     !isInterviewRoomStatus(value.status) ||
     !isNonEmptyString(value.expiresAt) ||
+    !isNonEmptyString(value.signalingUrl) ||
     typeof value.candidateConnected !== "boolean" ||
     typeof value.interviewerConnected !== "boolean"
   ) {
@@ -206,6 +208,7 @@ function parseGetRoomResponse(value: unknown): GetInterviewRoomResponse | null {
     roomId: value.roomId,
     status: value.status,
     expiresAt: value.expiresAt,
+    signalingUrl: value.signalingUrl,
     candidateConnected: value.candidateConnected,
     interviewerConnected: value.interviewerConnected,
   };

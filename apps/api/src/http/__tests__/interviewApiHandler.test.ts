@@ -55,8 +55,14 @@ test("GET /api/interviews/rooms/:roomId returns room status when join code match
   const body = (await response.json()) as Record<string, unknown>;
 
   assert.equal(response.status, 200);
-  assert.equal(body.status, "waiting");
-  assert.equal(body.expiresAt, "2026-05-29T10:00:00.000Z");
+  assert.deepEqual(body, {
+    roomId: "room-1",
+    status: "waiting",
+    expiresAt: "2026-05-29T10:00:00.000Z",
+    signalingUrl: "/api/interviews/rooms/room-1/signaling",
+    candidateConnected: false,
+    interviewerConnected: false,
+  });
 });
 
 test("POST /api/interviews/rooms/:roomId/end ends a room only for the connected candidate", async () => {

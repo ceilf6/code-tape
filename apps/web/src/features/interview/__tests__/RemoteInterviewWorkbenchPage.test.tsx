@@ -12,6 +12,12 @@ import type {
   InterviewMediaSession,
   InterviewMediaSessionState,
 } from "../interviewMediaSession";
+import type { InterviewRoomClient } from "../interviewRoomClient";
+import type {
+  InboundSignalingMessage,
+  InterviewSignalingClient,
+  InterviewSignalingClientOptions,
+} from "../interviewSignalingClient";
 import {
   RemoteInterviewWorkbenchPage,
   RemoteInterviewWorkbenchView,
@@ -200,6 +206,369 @@ describe("RemoteInterviewWorkbenchPage", () => {
 
     expect(screen.getByRole("heading", { name: "面试官工作台" })).toBeInTheDocument();
     expect(screen.getByText("room-route")).toBeInTheDocument();
+  });
+
+  it("does not connect interviewer signaling without a join code", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{
+                roomClient,
+                createSignalingClient: signaling.create,
+                createMediaSession: () => media.session,
+              }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("缺少 joinCode，无法加入面试房间")).toBeInTheDocument();
+    expect(roomClient.getRoom).not.toHaveBeenCalled();
+    expect(signaling.create).not.toHaveBeenCalled();
+  });
+
+  it("joins interviewer signaling and answers candidate media offers", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{
+                roomClient,
+                createSignalingClient: signaling.create,
+                createMediaSession: () => media.session,
+              }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live?joinCode=JOIN1234"],
+      },
+    );
+
+    const { unmount } = render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(roomClient.getRoom).toHaveBeenCalledWith("room-live", "JOIN1234");
+    });
+    expect(signaling.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roomId: "room-live",
+        role: "interviewer",
+        joinCode: "JOIN1234",
+        signalingUrl: "/api/interviews/rooms/room-live/signaling",
+      }),
+    );
+
+    act(() => {
+      signaling.emit({
+        kind: "connected",
+        roomId: "room-live",
+        connectionId: "interviewer-connection-1",
+      });
+    });
+    expect(signaling.client.sendJoin).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-1",
+        sentAt: 1000,
+        sdp: "candidate-offer-sdp",
+      });
+    });
+
+    await waitFor(() => {
+      expect(media.session.requestLocalMedia).toHaveBeenCalledTimes(1);
+      expect(media.session.setRemoteDescription).toHaveBeenCalledWith({
+        type: "offer",
+        sdp: "candidate-offer-sdp",
+      });
+      expect(media.session.createAnswer).toHaveBeenCalledTimes(1);
+      expect(signaling.client.sendAnswer).toHaveBeenCalledWith("interviewer-answer-sdp");
+    });
+
+    act(() => {
+      media.emitState({
+        outgoingIceCandidates: [
+          {
+            candidate: "candidate:local",
+            sdpMid: "0",
+            sdpMLineIndex: 0,
+          },
+        ],
+      });
+    });
+    expect(media.session.drainOutgoingIceCandidates).toHaveBeenCalled();
+    expect(signaling.client.sendIceCandidate).toHaveBeenCalledWith({
+      candidate: "candidate:local",
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "ice-candidate",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "ice-1",
+        sentAt: 1001,
+        candidate: "candidate:remote",
+        sdpMid: "1",
+        sdpMLineIndex: 1,
+      });
+    });
+    await waitFor(() => {
+      expect(media.session.addRemoteIceCandidate).toHaveBeenCalledWith({
+        candidate: "candidate:remote",
+        sdpMid: "1",
+        sdpMLineIndex: 1,
+      });
+    });
+
+    act(() => {
+      const eventsChannel = media.attachEventsDataChannel();
+      eventsChannel.emit(
+        JSON.stringify(recordingMessage(contentEvent(1, "const viaSignaling = true;"))),
+      );
+    });
+    await waitFor(() => {
+      expect(latestCodeEditorProps().value).toBe("const viaSignaling = true;");
+    });
+
+    unmount();
+    expect(signaling.client.close).toHaveBeenCalledTimes(1);
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses interviewer local media when duplicate offers arrive for the same candidate", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{
+                roomClient,
+                createSignalingClient: signaling.create,
+                createMediaSession: () => media.session,
+              }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live?joinCode=JOIN1234"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-1",
+        sentAt: 1000,
+        sdp: "candidate-offer-sdp",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-2",
+        sentAt: 1001,
+        sdp: "candidate-offer-sdp-2",
+      });
+    });
+
+    await waitFor(() => {
+      expect(media.session.setRemoteDescription).toHaveBeenCalledWith({
+        type: "offer",
+        sdp: "candidate-offer-sdp-2",
+      });
+      expect(signaling.client.sendAnswer).toHaveBeenCalledTimes(2);
+    });
+    expect(media.session.requestLocalMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores stale candidate messages after that candidate connection leaves", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{
+                roomClient,
+                createSignalingClient: signaling.create,
+                createMediaSession: () => media.session,
+              }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live?joinCode=JOIN1234"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-1",
+        sentAt: 1000,
+        sdp: "candidate-offer-sdp",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "leave",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "leave-1",
+        sentAt: 1001,
+      });
+    });
+
+    vi.mocked(media.session.addRemoteIceCandidate).mockClear();
+    act(() => {
+      signaling.emit({
+        kind: "ice-candidate",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "ice-late",
+        sentAt: 1002,
+        candidate: "candidate:stale",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      });
+    });
+
+    expect(media.session.addRemoteIceCandidate).not.toHaveBeenCalled();
+  });
+
+  it("closes the interviewer media session when signaling reports an error", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = createFakeMediaSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{
+                roomClient,
+                createSignalingClient: signaling.create,
+                createMediaSession: () => media.session,
+              }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-live?joinCode=JOIN1234"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emitError({ code: "socket-error", message: "interviewer signaling failed" });
+    });
+
+    expect(await screen.findByText("interviewer signaling failed")).toBeInTheDocument();
+    expect(media.session.close).toHaveBeenCalledTimes(1);
   });
 
   it("applies recording-event messages from the events DataChannel to the read-only workbench", async () => {
@@ -487,6 +856,7 @@ function createFakeMediaSession(): {
   session: InterviewMediaSession;
   attachEventsDataChannel(): TestEventsDataChannel;
   closeEventsDataChannel(): void;
+  emitState(next: Partial<InterviewMediaSessionState>): void;
 } {
   let state = makeMediaState();
   let channel: TestEventsDataChannel | null = null;
@@ -495,15 +865,29 @@ function createFakeMediaSession(): {
   const session = {
     getState: () => ({ ...state }),
     getEventsDataChannel: () => channel,
-    requestLocalMedia: vi.fn(),
+    requestLocalMedia: vi.fn(async () => {
+      state = {
+        ...state,
+        localStream: {} as MediaStream,
+        microphoneEnabled: true,
+        cameraEnabled: true,
+      };
+      notify();
+      return state;
+    }),
     setMicrophoneEnabled: vi.fn(),
     setCameraEnabled: vi.fn(),
     ensureEventsDataChannel: vi.fn(),
     createOffer: vi.fn(),
-    createAnswer: vi.fn(),
-    setRemoteDescription: vi.fn(),
-    addRemoteIceCandidate: vi.fn(),
-    drainOutgoingIceCandidates: vi.fn(() => []),
+    createAnswer: vi.fn(async () => ({ type: "answer" as const, sdp: "interviewer-answer-sdp" })),
+    setRemoteDescription: vi.fn(async () => state),
+    addRemoteIceCandidate: vi.fn(async () => state),
+    drainOutgoingIceCandidates: vi.fn(() => {
+      const candidates = state.outgoingIceCandidates;
+      state = { ...state, outgoingIceCandidates: [] };
+      notify();
+      return candidates;
+    }),
     subscribe(listener: (next: InterviewMediaSessionState) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -526,6 +910,66 @@ function createFakeMediaSession(): {
       channel.closeFromRemote();
       state = { ...state, eventsDataChannelState: "closed" };
       notify();
+    },
+    emitState(next) {
+      state = { ...state, ...next };
+      notify();
+    },
+  };
+}
+
+function makeRoomClient(patch: Partial<InterviewRoomClient> = {}): InterviewRoomClient {
+  return {
+    createRoom: vi.fn(),
+    getRoom: vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        roomId: "room-live",
+        status: "waiting",
+        expiresAt: "2026-05-29T17:00:00.000Z",
+        signalingUrl: "/api/interviews/rooms/room-live/signaling",
+        candidateConnected: true,
+        interviewerConnected: false,
+      },
+    }),
+    endRoom: vi.fn(),
+    ...patch,
+  };
+}
+
+function makeSignalingFactory() {
+  let onMessage: ((message: InboundSignalingMessage) => void) | undefined;
+  let onError: InterviewSignalingClientOptions["onError"] | undefined;
+  const client: InterviewSignalingClient = {
+    socket: {} as InterviewSignalingClient["socket"],
+    getConnectionId: vi.fn(() => "interviewer-connection-1"),
+    sendJoin: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    sendOffer: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    sendAnswer: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    sendIceCandidate: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    sendHeartbeat: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    sendLeave: vi.fn(() => ({ ok: true as const, message: {} as never })),
+    close: vi.fn(),
+  };
+
+  return {
+    client,
+    create: vi.fn((options: InterviewSignalingClientOptions) => {
+      onMessage = options.onMessage;
+      onError = options.onError;
+      return client;
+    }),
+    emit(message: InboundSignalingMessage) {
+      if (!onMessage) {
+        throw new Error("signaling client was not created");
+      }
+      onMessage(message);
+    },
+    emitError(error: Parameters<NonNullable<InterviewSignalingClientOptions["onError"]>>[0]) {
+      if (!onError) {
+        throw new Error("signaling client was not created");
+      }
+      onError(error);
     },
   };
 }

@@ -27,11 +27,12 @@ describe("InterviewRoomClient", () => {
       ) {
         return json({
           roomId: "room/1",
-          status: "live",
-          expiresAt: "2026-05-29T10:00:00.000Z",
-          candidateConnected: true,
-          interviewerConnected: true,
-        });
+        status: "live",
+        expiresAt: "2026-05-29T10:00:00.000Z",
+        signalingUrl: "/api/interviews/rooms/room%2F1/signaling",
+        candidateConnected: true,
+        interviewerConnected: true,
+      });
       }
       if (
         request.method === "POST" &&
@@ -67,6 +68,7 @@ describe("InterviewRoomClient", () => {
         roomId: "room/1",
         status: "live",
         expiresAt: "2026-05-29T10:00:00.000Z",
+        signalingUrl: "/api/interviews/rooms/room%2F1/signaling",
         candidateConnected: true,
         interviewerConnected: true,
       },

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import {
   Activity,
   CircleDot,
@@ -21,28 +21,71 @@ import {
   type InterviewMediaSessionState,
 } from "./interviewMediaSession";
 import { createInterviewRealtimeReceiver } from "./interviewRealtimeReceiver";
+import {
+  createInterviewRoomClient,
+  type InterviewRoomClient,
+  type InterviewRoomStatus,
+} from "./interviewRoomClient";
+import {
+  createInterviewSignalingClient,
+  type InboundSignalingMessage,
+  type InterviewSignalingClient,
+  type InterviewSignalingClientOptions,
+} from "./interviewSignalingClient";
 import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
 import {
   createRemoteInterviewWorkbench,
   type RemoteInterviewWorkbenchState,
 } from "./remoteInterviewWorkbench";
 
+export type RemoteInterviewConnectionStatus =
+  | "missing-join-code"
+  | "checking-room"
+  | "connecting"
+  | "watching"
+  | "ended"
+  | "failed";
+
+export type RemoteInterviewConnectionState = {
+  status: RemoteInterviewConnectionStatus;
+  joinCode: string | null;
+  signalingUrl: string | null;
+  expiresAt: string | null;
+  candidateOnline: boolean;
+  errorMessage: string | null;
+};
+
 export type RemoteInterviewWorkbenchViewProps = {
   roomId: string;
   workbenchState: RemoteInterviewWorkbenchState;
   mediaState: InterviewMediaSessionState;
+  connectionState?: RemoteInterviewConnectionState;
 };
 
 export type RemoteInterviewWorkbenchPageProps = {
   deps?: {
+    roomClient?: InterviewRoomClient;
+    createSignalingClient?: (
+      options: InterviewSignalingClientOptions,
+    ) => InterviewSignalingClient;
     createMediaSession?: () => InterviewMediaSession;
   };
 };
 
 type RemoteInterviewWorkbenchRoomProps = {
   roomId: string;
+  joinCode: string | null;
   deps: NonNullable<RemoteInterviewWorkbenchPageProps["deps"]>;
 };
+
+type InboundOfferMessage = Extract<InboundSignalingMessage, { sdp: string }> & {
+  kind: "offer";
+};
+
+type InboundIceCandidateMessage = Extract<
+  InboundSignalingMessage,
+  { candidate: string }
+>;
 
 const EMPTY_INTERVIEW_MEDIA_SESSION_STATE: InterviewMediaSessionState = {
   localStream: null,
@@ -60,11 +103,29 @@ export function RemoteInterviewWorkbenchPage({
   deps = {},
 }: RemoteInterviewWorkbenchPageProps = {}) {
   const { roomId = "unknown" } = useParams();
+  const location = useLocation();
+  const joinCode = useMemo(() => readJoinCode(location.search), [location.search]);
 
-  return <RemoteInterviewWorkbenchRoom key={roomId} roomId={roomId} deps={deps} />;
+  return (
+    <RemoteInterviewWorkbenchRoom
+      key={`${roomId}:${joinCode ?? ""}`}
+      roomId={roomId}
+      joinCode={joinCode}
+      deps={deps}
+    />
+  );
 }
 
-function RemoteInterviewWorkbenchRoom({ roomId, deps }: RemoteInterviewWorkbenchRoomProps) {
+function RemoteInterviewWorkbenchRoom({
+  roomId,
+  joinCode,
+  deps,
+}: RemoteInterviewWorkbenchRoomProps) {
+  const roomClient = useMemo(
+    () => deps.roomClient ?? createInterviewRoomClient(),
+    [deps.roomClient],
+  );
+  const createSignalingClient = deps.createSignalingClient ?? createInterviewSignalingClient;
   const createMediaSession = deps.createMediaSession ?? createInterviewMediaSession;
   const workbench = useMemo(
     () => createRemoteInterviewWorkbench({ initialState: INITIAL_REMOTE_INTERVIEW_STABLE_STATE }),
@@ -78,6 +139,9 @@ function RemoteInterviewWorkbenchRoom({ roomId, deps }: RemoteInterviewWorkbench
   const [mediaSession, setMediaSession] = useState<InterviewMediaSession | null>(null);
   const [mediaState, setMediaState] = useState<InterviewMediaSessionState>(
     emptyInterviewMediaSessionState,
+  );
+  const [connectionState, setConnectionState] = useState<RemoteInterviewConnectionState>(() =>
+    initialRemoteConnectionState(joinCode),
   );
 
   useEffect(() => workbench.subscribe(setWorkbenchState), [workbench]);
@@ -119,12 +183,242 @@ function RemoteInterviewWorkbenchRoom({ roomId, deps }: RemoteInterviewWorkbench
       detachReceiver?.();
     };
   }, [mediaSession, receiver]);
+  useEffect(() => {
+    if (!joinCode) {
+      setConnectionState({
+        status: "missing-join-code",
+        joinCode: null,
+        signalingUrl: null,
+        expiresAt: null,
+        candidateOnline: false,
+        errorMessage: "缺少 joinCode，无法加入面试房间",
+      });
+      return undefined;
+    }
+
+    if (!mediaSession) {
+      setConnectionState({
+        status: "connecting",
+        joinCode,
+        signalingUrl: null,
+        expiresAt: null,
+        candidateOnline: false,
+        errorMessage: null,
+      });
+      return undefined;
+    }
+
+    let closed = false;
+    let signalingClient: InterviewSignalingClient | null = null;
+    let activeCandidateConnectionId: string | null = null;
+    let localMediaRequest: Promise<InterviewMediaSessionState> | null = null;
+    const retiredCandidateConnectionIds = new Set<string>();
+    setConnectionState({
+      status: "checking-room",
+      joinCode,
+      signalingUrl: null,
+      expiresAt: null,
+      candidateOnline: false,
+      errorMessage: null,
+    });
+
+    const fail = (message: string) => {
+      if (closed) return;
+      mediaSession.close();
+      setConnectionState((current) => ({
+        ...current,
+        status: "failed",
+        candidateOnline: false,
+        errorMessage: message,
+      }));
+    };
+    const shouldApplyCandidateMessage = (message: {
+      role: "candidate" | "interviewer";
+      connectionId: string;
+    }) => {
+      if (message.role !== "candidate") return false;
+      if (retiredCandidateConnectionIds.has(message.connectionId)) return false;
+      if (activeCandidateConnectionId && activeCandidateConnectionId !== message.connectionId) {
+        return false;
+      }
+      activeCandidateConnectionId = message.connectionId;
+      return true;
+    };
+    const ensureLocalMedia = () => {
+      const current = mediaSession.getState();
+      if (current.localStream) {
+        return Promise.resolve(current);
+      }
+      if (!localMediaRequest) {
+        localMediaRequest = mediaSession.requestLocalMedia().catch((error: unknown) => {
+          localMediaRequest = null;
+          throw error;
+        });
+      }
+      return localMediaRequest;
+    };
+    const sendPendingIceCandidates = () => {
+      if (!signalingClient || mediaSession.getState().outgoingIceCandidates.length === 0) {
+        return;
+      }
+      const candidates = mediaSession.drainOutgoingIceCandidates();
+      for (const candidate of candidates) {
+        if (!candidate?.candidate) continue;
+        const sendResult = signalingClient.sendIceCandidate({
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid ?? null,
+          sdpMLineIndex: candidate.sdpMLineIndex ?? null,
+        });
+        if (!sendResult.ok) {
+          fail(`ice candidate failed: ${sendResult.reason}`);
+          return;
+        }
+      }
+    };
+    const applyCandidateOffer = (message: InboundOfferMessage) => {
+      if (!shouldApplyCandidateMessage(message)) return;
+      void (async () => {
+        try {
+          await ensureLocalMedia();
+          if (closed) return;
+          await mediaSession.setRemoteDescription({ type: "offer", sdp: message.sdp });
+          if (closed) return;
+          const answer = await mediaSession.createAnswer();
+          if (closed) return;
+          if (!answer.sdp) {
+            throw new Error("interviewer media answer missing sdp");
+          }
+          const sendResult = signalingClient?.sendAnswer(answer.sdp);
+          if (!sendResult) {
+            throw new Error("interviewer signaling client is not available");
+          }
+          if (!sendResult.ok) {
+            throw new Error(`answer failed: ${sendResult.reason}`);
+          }
+          sendPendingIceCandidates();
+          setConnectionState((current) => ({
+            ...current,
+            status: "watching",
+            candidateOnline: true,
+            errorMessage: null,
+          }));
+        } catch (error) {
+          fail(interviewerConnectionErrorMessage(error));
+        }
+      })();
+    };
+    const applyRemoteIceCandidate = (message: InboundIceCandidateMessage) => {
+      if (!shouldApplyCandidateMessage(message)) return;
+      void mediaSession
+        .addRemoteIceCandidate({
+          candidate: message.candidate,
+          sdpMid: message.sdpMid ?? null,
+          sdpMLineIndex: message.sdpMLineIndex ?? null,
+        })
+        .catch((error: unknown) => fail(interviewerConnectionErrorMessage(error)));
+    };
+    const updateFromMessage = (message: InboundSignalingMessage) => {
+      if ("roomId" in message && message.roomId !== roomId) return;
+
+      if (message.kind === "connected") {
+        const sendResult = signalingClient?.sendJoin();
+        if (sendResult && !sendResult.ok) {
+          fail(`join failed: ${sendResult.reason}`);
+        }
+        return;
+      }
+      if (message.kind === "joined") {
+        setConnectionState((current) => ({
+          ...current,
+          status: connectionStatusFromRoomStatus(message.status),
+          candidateOnline: message.status === "live",
+          errorMessage: null,
+        }));
+        return;
+      }
+      if (message.kind === "ended") {
+        setConnectionState((current) => ({
+          ...current,
+          status: "ended",
+          candidateOnline: false,
+          errorMessage: null,
+        }));
+        return;
+      }
+      if (message.kind === "error") {
+        fail(message.message);
+        return;
+      }
+      if (message.kind === "leave" && message.role === "candidate") {
+        retiredCandidateConnectionIds.add(message.connectionId);
+        if (activeCandidateConnectionId !== message.connectionId) {
+          return;
+        }
+        activeCandidateConnectionId = null;
+        setConnectionState((current) => ({
+          ...current,
+          status: "connecting",
+          candidateOnline: false,
+          errorMessage: null,
+        }));
+        return;
+      }
+      if (isInboundOfferMessage(message)) {
+        applyCandidateOffer(message);
+        return;
+      }
+      if (message.kind === "ice-candidate") {
+        applyRemoteIceCandidate(message);
+      }
+    };
+
+    const unsubscribeIce = mediaSession.subscribe((next) => {
+      if (next.outgoingIceCandidates.length > 0) {
+        sendPendingIceCandidates();
+      }
+    });
+
+    void roomClient.getRoom(roomId, joinCode).then((result) => {
+      if (closed) return;
+      if (!result.ok) {
+        fail(result.error.message);
+        return;
+      }
+
+      const room = result.value;
+      setConnectionState({
+        status: connectionStatusFromRoomStatus(room.status),
+        joinCode,
+        signalingUrl: room.signalingUrl,
+        expiresAt: room.expiresAt,
+        candidateOnline: room.candidateConnected,
+        errorMessage: null,
+      });
+      signalingClient = createSignalingClient({
+        roomId,
+        role: "interviewer",
+        joinCode,
+        signalingUrl: room.signalingUrl,
+        onMessage: updateFromMessage,
+        onError: (error) => fail(error.message),
+      });
+    }).catch((error: unknown) => {
+      fail(interviewerConnectionErrorMessage(error));
+    });
+
+    return () => {
+      closed = true;
+      unsubscribeIce();
+      signalingClient?.close();
+    };
+  }, [createSignalingClient, joinCode, mediaSession, roomClient, roomId]);
 
   return (
     <RemoteInterviewWorkbenchView
       roomId={roomId}
       workbenchState={workbenchState}
       mediaState={mediaState}
+      connectionState={connectionState}
     />
   );
 }
@@ -155,10 +449,51 @@ function emptyInterviewMediaSessionState(): InterviewMediaSessionState {
   };
 }
 
+function readJoinCode(search: string): string | null {
+  const value = new URLSearchParams(search).get("joinCode")?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function initialRemoteConnectionState(joinCode: string | null): RemoteInterviewConnectionState {
+  return {
+    status: joinCode ? "connecting" : "missing-join-code",
+    joinCode,
+    signalingUrl: null,
+    expiresAt: null,
+    candidateOnline: false,
+    errorMessage: joinCode ? null : "缺少 joinCode，无法加入面试房间",
+  };
+}
+
+function connectionStatusFromRoomStatus(
+  status: InterviewRoomStatus,
+): RemoteInterviewConnectionStatus {
+  switch (status) {
+    case "waiting":
+    case "connecting":
+      return "connecting";
+    case "live":
+      return "watching";
+    case "ended":
+      return "ended";
+    case "expired":
+      return "failed";
+  }
+}
+
+function interviewerConnectionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "interviewer signaling setup failed";
+}
+
+function isInboundOfferMessage(message: InboundSignalingMessage): message is InboundOfferMessage {
+  return message.kind === "offer";
+}
+
 export function RemoteInterviewWorkbenchView({
   roomId,
   workbenchState,
   mediaState,
+  connectionState = initialRemoteConnectionState(null),
 }: RemoteInterviewWorkbenchViewProps) {
   const editor = workbenchState.stableState.editor;
   const sync = syncStatusView(workbenchState);
@@ -216,7 +551,12 @@ export function RemoteInterviewWorkbenchView({
           aria-label="实时面试侧栏"
           className="flex min-h-0 flex-col gap-4 overflow-auto bg-surface px-4 py-4"
         >
-          <SyncDetailPanel state={workbenchState} label={sync.label} detail={sync.detail} />
+          <SyncDetailPanel
+            state={workbenchState}
+            label={sync.label}
+            detail={sync.detail}
+            connectionState={connectionState}
+          />
           <InterviewMediaPanel state={mediaState} />
         </aside>
       </div>
@@ -228,10 +568,12 @@ function SyncDetailPanel({
   state,
   label,
   detail,
+  connectionState,
 }: {
   state: RemoteInterviewWorkbenchState;
   label: string;
   detail: string;
+  connectionState: RemoteInterviewConnectionState;
 }) {
   return (
     <section className="rounded-md border border-border bg-background p-3">
@@ -241,12 +583,54 @@ function SyncDetailPanel({
       </div>
       <p className="mt-3 text-sm font-medium text-foreground">{label}</p>
       <p className="mt-1 text-xs leading-5 text-muted">{detail}</p>
+      <p className="mt-2 text-xs leading-5 text-muted">
+        {connectionStatusText(connectionState)}
+      </p>
       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <Metric label="已应用" value={`seq ${state.lastAppliedSeq}`} />
         <Metric label="下一个" value={`seq ${state.expectedSeq}`} />
+        <Metric label="房间" value={connectionLabel(connectionState)} />
+        <Metric label="候选人" value={connectionState.candidateOnline ? "在线" : "离线"} />
       </dl>
     </section>
   );
+}
+
+function connectionStatusText(state: RemoteInterviewConnectionState): string {
+  if (state.errorMessage) {
+    return state.errorMessage;
+  }
+  switch (state.status) {
+    case "missing-join-code":
+      return "缺少 joinCode，无法加入面试房间";
+    case "checking-room":
+      return "正在校验面试房间";
+    case "connecting":
+      return "正在加入面试房间";
+    case "watching":
+      return "已加入面试房间";
+    case "ended":
+      return "面试已结束";
+    case "failed":
+      return "面试连接失败";
+  }
+}
+
+function connectionLabel(state: RemoteInterviewConnectionState): string {
+  switch (state.status) {
+    case "missing-join-code":
+      return "缺少 joinCode";
+    case "checking-room":
+      return "校验中";
+    case "connecting":
+      return "连接中";
+    case "watching":
+      return "已加入";
+    case "ended":
+      return "已结束";
+    case "failed":
+      return "失败";
+  }
 }
 
 function InterviewMediaPanel({ state }: { state: InterviewMediaSessionState }) {

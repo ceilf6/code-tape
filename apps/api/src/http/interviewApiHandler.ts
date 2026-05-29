@@ -71,6 +71,7 @@ export function createInterviewApiHandler(deps: {
           roomId: result.room.id,
           status: result.room.status,
           expiresAt: result.room.expiresAt,
+          signalingUrl: `/api/interviews/rooms/${encodeURIComponent(result.room.id)}/signaling`,
           candidateConnected: Boolean(result.room.candidateConnectionId),
           interviewerConnected: Boolean(result.room.interviewerConnectionId),
         },
