@@ -191,7 +191,7 @@ export function SubtitlePanel({
     });
     return () => {
       cancelled = true;
-      cancelPostProcessorWarmUpState(postProcessorWarmUpRef, warmUpState);
+      cancelPendingPostProcessorWarmUpState(postProcessorWarmUpRef, warmUpState);
     };
   }, [hasAudio, postProcessor, recordingId, status, track]);
 
@@ -256,7 +256,7 @@ export function SubtitlePanel({
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     generationAbortRef.current?.abort();
-    cancelActivePostProcessorWarmUp(postProcessorWarmUpRef, postProcessor);
+    cancelPendingPostProcessorWarmUp(postProcessorWarmUpRef, postProcessor);
     const abortController = new AbortController();
     generationAbortRef.current = abortController;
     setStatus("post-processing");
@@ -502,6 +502,25 @@ function cancelPostProcessorWarmUpState(
   warmUpRef.current = null;
   if (warmUpState.status === "running") {
     warmUpState.postProcessor.dispose?.();
+  }
+}
+
+function cancelPendingPostProcessorWarmUp(
+  warmUpRef: MutableRefObject<PostProcessorWarmUpState | null>,
+  postProcessor: SubtitlePostProcessor | null,
+): void {
+  const warmUpState = warmUpRef.current;
+  if (!warmUpState || warmUpState.postProcessor !== postProcessor) return;
+  cancelPendingPostProcessorWarmUpState(warmUpRef, warmUpState);
+}
+
+function cancelPendingPostProcessorWarmUpState(
+  warmUpRef: MutableRefObject<PostProcessorWarmUpState | null>,
+  warmUpState: PostProcessorWarmUpState,
+): void {
+  warmUpState.cancel();
+  if (warmUpRef.current === warmUpState && warmUpState.status === "pending") {
+    warmUpRef.current = null;
   }
 }
 

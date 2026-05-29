@@ -1333,6 +1333,82 @@ describe("SubtitlePanel", () => {
     });
   });
 
+  it("keeps a running local LLM warm-up instance when starting post-processing", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestIdleCallback",
+      vi.fn((callback: IdleRequestCallback) => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      }),
+    );
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    const warmUpDeferred = createDeferred<void>();
+    const events: string[] = [];
+    const dispose = vi.fn(() => {
+      events.push("dispose");
+    });
+    const process = vi.fn(async () => {
+      events.push("process");
+      return {
+        segments: [{ id: "subtitle-1", text: "useState hook" }],
+        chapters: [{ title: "状态设计", startMs: 0, endMs: 1_000 }],
+      };
+    });
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: vi.fn(() => {
+            events.push("warmUp");
+            return warmUpDeferred.promise;
+          }),
+          process,
+          dispose,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() => expect(process).toHaveBeenCalledTimes(1));
+    expect(events).toEqual(["warmUp", "process"]);
+    expect(dispose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      warmUpDeferred.resolve();
+      await flushPromises();
+    });
+  });
+
   it("warms up a replacement local LLM post-processor instance for the same recording", async () => {
     const store = createMemorySubtitleStore();
     await store.save({
