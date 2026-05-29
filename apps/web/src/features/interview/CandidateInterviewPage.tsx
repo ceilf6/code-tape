@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import {
   CircleDot,
@@ -14,11 +14,24 @@ import {
 import { RecorderPage } from "@/features/recorder/RecorderPage";
 import { Toggle, Tooltip } from "@/shared/ui";
 import type { InterviewMediaSessionState } from "./interviewMediaSession";
+import {
+  createInterviewRoomClient,
+  type InterviewRoomClient,
+  type InterviewRoomStatus,
+} from "./interviewRoomClient";
+import {
+  createInterviewSignalingClient,
+  type InboundSignalingMessage,
+  type InterviewSignalingClient,
+  type InterviewSignalingClientOptions,
+} from "./interviewSignalingClient";
 
 export type CandidateInterviewStatus =
   | "idle"
+  | "creating-room"
   | "waiting-interviewer"
   | "connecting"
+  | "interviewer-connected"
   | "live-recording"
   | "live-paused"
   | "ending"
@@ -29,6 +42,9 @@ export type CandidateInterviewRoomState = {
   status: CandidateInterviewStatus;
   joinCode: string | null;
   interviewerOnline: boolean;
+  expiresAt?: string | null;
+  signalingUrl?: string | null;
+  errorMessage?: string | null;
 };
 
 export type CandidateInterviewViewProps = {
@@ -36,6 +52,15 @@ export type CandidateInterviewViewProps = {
   roomState: CandidateInterviewRoomState;
   mediaState: InterviewMediaSessionState;
   recordingWorkspace: ReactNode;
+};
+
+export type CandidateInterviewPageProps = {
+  deps?: {
+    roomClient?: InterviewRoomClient;
+    createSignalingClient?: (
+      options: InterviewSignalingClientOptions,
+    ) => InterviewSignalingClient;
+  };
 };
 
 const EMPTY_CANDIDATE_MEDIA_STATE: InterviewMediaSessionState = {
@@ -49,32 +74,210 @@ const EMPTY_CANDIDATE_MEDIA_STATE: InterviewMediaSessionState = {
   outgoingIceCandidates: [],
 };
 
-export function CandidateInterviewPage() {
+export function CandidateInterviewPage({ deps = {} }: CandidateInterviewPageProps = {}) {
   const { roomId = null } = useParams();
-  const roomState = useMemo<CandidateInterviewRoomState>(
-    () =>
-      roomId
-        ? {
-            status: "waiting-interviewer",
-            joinCode: null,
-            interviewerOnline: false,
-          }
-        : {
-            status: "idle",
-            joinCode: null,
-            interviewerOnline: false,
-          },
-    [roomId],
+  const roomClient = useMemo(
+    () => deps.roomClient ?? createInterviewRoomClient(),
+    [deps.roomClient],
   );
+  const createSignalingClient = deps.createSignalingClient ?? createInterviewSignalingClient;
+  const session = useCandidateInterviewRoomSession({
+    routeRoomId: roomId,
+    roomClient,
+    createSignalingClient,
+  });
 
   return (
     <CandidateInterviewView
-      roomId={roomId}
-      roomState={roomState}
+      roomId={session.roomId}
+      roomState={session.roomState}
       mediaState={EMPTY_CANDIDATE_MEDIA_STATE}
       recordingWorkspace={<RecorderPage />}
     />
   );
+}
+
+function useCandidateInterviewRoomSession({
+  routeRoomId,
+  roomClient,
+  createSignalingClient,
+}: {
+  routeRoomId: string | null;
+  roomClient: InterviewRoomClient;
+  createSignalingClient: (
+    options: InterviewSignalingClientOptions,
+  ) => InterviewSignalingClient;
+}): { roomId: string | null; roomState: CandidateInterviewRoomState } {
+  const [session, setSession] = useState<{
+    roomId: string | null;
+    roomState: CandidateInterviewRoomState;
+  }>(() => ({
+    roomId: routeRoomId,
+    roomState: initialCandidateRoomState(routeRoomId),
+  }));
+
+  useEffect(() => {
+    let closed = false;
+    let signalingClient: InterviewSignalingClient | null = null;
+
+    if (routeRoomId) {
+      setSession({
+        roomId: routeRoomId,
+        roomState: initialCandidateRoomState(routeRoomId),
+      });
+      return undefined;
+    }
+
+    setSession({
+      roomId: null,
+      roomState: {
+        status: "creating-room",
+        joinCode: null,
+        interviewerOnline: false,
+      },
+    });
+
+    void roomClient.createRoom().then((result) => {
+      if (closed) return;
+
+      if (!result.ok) {
+        setSession({
+          roomId: null,
+          roomState: {
+            status: "failed",
+            joinCode: null,
+            interviewerOnline: false,
+            errorMessage: result.error.message,
+          },
+        });
+        return;
+      }
+
+      const room = result.value;
+      const updateFromMessage = (message: InboundSignalingMessage) => {
+        if ("roomId" in message && message.roomId !== room.roomId) return;
+
+        if (message.kind === "connected") {
+          const sendResult = signalingClient?.sendJoin();
+          if (sendResult && !sendResult.ok) {
+            setSession((current) => ({
+              ...current,
+              roomState: {
+                ...current.roomState,
+                status: "failed",
+                errorMessage: `join failed: ${sendResult.reason}`,
+              },
+            }));
+          }
+          return;
+        }
+
+        if (message.kind === "joined") {
+          setSession({
+            roomId: room.roomId,
+            roomState: {
+              status: candidateStatusFromRoomStatus(message.status),
+              joinCode: room.joinCode,
+              interviewerOnline: message.status !== "waiting",
+              expiresAt: room.expiresAt,
+              signalingUrl: room.signalingUrl,
+            },
+          });
+          return;
+        }
+
+        if (message.kind === "ended") {
+          setSession((current) => ({
+            ...current,
+            roomState: {
+              ...current.roomState,
+              status: "completed",
+              interviewerOnline: false,
+            },
+          }));
+          return;
+        }
+
+        if (message.kind === "error") {
+          setSession((current) => ({
+            ...current,
+            roomState: {
+              ...current.roomState,
+              status: "failed",
+              errorMessage: message.message,
+            },
+          }));
+        }
+      };
+
+      setSession({
+        roomId: room.roomId,
+        roomState: {
+          status: candidateStatusFromRoomStatus(room.status),
+          joinCode: room.joinCode,
+          interviewerOnline: room.status !== "waiting",
+          expiresAt: room.expiresAt,
+          signalingUrl: room.signalingUrl,
+        },
+      });
+
+      signalingClient = createSignalingClient({
+        roomId: room.roomId,
+        role: "candidate",
+        joinCode: room.joinCode,
+        signalingUrl: room.signalingUrl,
+        onMessage: updateFromMessage,
+        onError: (error) => {
+          if (closed) return;
+          setSession((current) => ({
+            ...current,
+            roomState: {
+              ...current.roomState,
+              status: "failed",
+              errorMessage: error.message,
+            },
+          }));
+        },
+      });
+    });
+
+    return () => {
+      closed = true;
+      signalingClient?.close();
+    };
+  }, [createSignalingClient, roomClient, routeRoomId]);
+
+  return session;
+}
+
+function initialCandidateRoomState(routeRoomId: string | null): CandidateInterviewRoomState {
+  return routeRoomId
+    ? {
+        status: "waiting-interviewer",
+        joinCode: null,
+        interviewerOnline: false,
+        errorMessage: "缺少 joinCode，当前仅展示候选人录制工作区",
+      }
+    : {
+        status: "idle",
+        joinCode: null,
+        interviewerOnline: false,
+      };
+}
+
+function candidateStatusFromRoomStatus(status: InterviewRoomStatus): CandidateInterviewStatus {
+  switch (status) {
+    case "waiting":
+      return "waiting-interviewer";
+    case "connecting":
+      return "connecting";
+    case "live":
+      return "interviewer-connected";
+    case "ended":
+      return "completed";
+    case "expired":
+      return "failed";
+  }
 }
 
 export function CandidateInterviewView({
@@ -132,6 +335,10 @@ export function CandidateInterviewView({
             <p className="mt-1 text-xs leading-5 text-muted">{status.detail}</p>
             <dl className="mt-3 grid gap-2 text-xs">
               <Metric label="面试官" value={roomState.interviewerOnline ? "在线" : "离线"} />
+              {roomState.expiresAt ? <Metric label="有效期" value={roomState.expiresAt} /> : null}
+              {roomState.signalingUrl ? (
+                <Metric label="信令" value={roomState.signalingUrl} />
+              ) : null}
               <Metric label="WebRTC" value={mediaState.connectionState} />
               <Metric label="ICE" value={mediaState.iceConnectionState} />
             </dl>
@@ -261,10 +468,16 @@ function candidateStatusView(state: CandidateInterviewRoomState): {
         detail: "创建房间后可分享 joinCode，并继续使用现有录制工作区",
         toneClass: "border-border bg-surface text-muted",
       };
+    case "creating-room":
+      return {
+        label: "正在创建房间",
+        detail: "正在请求面试房间和短期 joinCode",
+        toneClass: "border-warning/40 bg-warning/10 text-warning",
+      };
     case "waiting-interviewer":
       return {
         label: "等待面试官",
-        detail: "面试官加入前可以先确认设备和录制环境",
+        detail: state.errorMessage ?? "面试官加入前可以先确认设备和录制环境",
         toneClass: "border-warning/40 bg-warning/10 text-warning",
       };
     case "connecting":
@@ -272,6 +485,12 @@ function candidateStatusView(state: CandidateInterviewRoomState): {
         label: "连接中",
         detail: "正在建立信令和媒体连接",
         toneClass: "border-warning/40 bg-warning/10 text-warning",
+      };
+    case "interviewer-connected":
+      return {
+        label: "面试官已加入",
+        detail: "信令已连接，等待后续媒体和事件同步接线",
+        toneClass: "border-success/40 bg-success/10 text-success",
       };
     case "live-recording":
       return {
@@ -300,7 +519,7 @@ function candidateStatusView(state: CandidateInterviewRoomState): {
     case "failed":
       return {
         label: "连接失败",
-        detail: "保留录制工作区，稍后可重新连接",
+        detail: state.errorMessage ?? "保留录制工作区，稍后可重新连接",
         toneClass: "border-danger/40 bg-danger/10 text-danger",
       };
   }
