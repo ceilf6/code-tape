@@ -239,6 +239,17 @@ function useCandidateInterviewRoomSession({
           }));
         },
       });
+    }).catch((error: unknown) => {
+      if (closed) return;
+      setSession({
+        roomId: null,
+        roomState: {
+          status: "failed",
+          joinCode: null,
+          interviewerOnline: false,
+          errorMessage: candidateRoomCreationErrorMessage(error),
+        },
+      });
     });
 
     return () => {
@@ -263,6 +274,10 @@ function initialCandidateRoomState(routeRoomId: string | null): CandidateIntervi
         joinCode: null,
         interviewerOnline: false,
       };
+}
+
+function candidateRoomCreationErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "interview room request failed";
 }
 
 function candidateStatusFromRoomStatus(status: InterviewRoomStatus): CandidateInterviewStatus {

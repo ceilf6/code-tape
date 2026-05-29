@@ -99,6 +99,24 @@ describe("CandidateInterviewPage", () => {
     expect(signaling.create).not.toHaveBeenCalled();
   });
 
+  it("keeps the recorder workspace visible when room creation rejects", async () => {
+    const roomClient = makeRoomClient({
+      createRoom: vi.fn().mockRejectedValue(new Error("fetch failed")),
+    });
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+
+    expect(await screen.findAllByText("连接失败")).toHaveLength(2);
+    expect(screen.getByText("fetch failed")).toBeInTheDocument();
+    expect(screen.getByTestId("recorder-workspace")).toBeInTheDocument();
+    expect(signaling.create).not.toHaveBeenCalled();
+  });
+
   it("maps candidate signaling ended and error messages to visible room state", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();
@@ -124,6 +142,29 @@ describe("CandidateInterviewPage", () => {
     });
     expect(screen.getAllByText("连接失败")).toHaveLength(2);
     expect(screen.getByText("room already has a candidate")).toBeInTheDocument();
+  });
+
+  it("maps malformed signaling client errors to visible failed room state", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emitError({
+        code: "bad-message",
+        message: "signaling message is missing kind",
+      });
+    });
+
+    expect(screen.getAllByText("连接失败")).toHaveLength(2);
+    expect(screen.getByText("signaling message is missing kind")).toBeInTheDocument();
+    expect(screen.getByTestId("recorder-workspace")).toBeInTheDocument();
   });
 
   it("closes the signaling client when the candidate page unmounts", async () => {
@@ -301,6 +342,7 @@ function makeRoomClient(patch: Partial<InterviewRoomClient> = {}): InterviewRoom
 
 function makeSignalingFactory() {
   let onMessage: ((message: InboundSignalingMessage) => void) | undefined;
+  let onError: InterviewSignalingClientOptions["onError"] | undefined;
   const client: InterviewSignalingClient = {
     socket: {} as InterviewSignalingClient["socket"],
     getConnectionId: vi.fn(() => "candidate-connection-1"),
@@ -317,6 +359,7 @@ function makeSignalingFactory() {
     client,
     create: vi.fn((options: InterviewSignalingClientOptions) => {
       onMessage = options.onMessage;
+      onError = options.onError;
       return client;
     }),
     emit(message: InboundSignalingMessage) {
@@ -324,6 +367,12 @@ function makeSignalingFactory() {
         throw new Error("signaling client was not created");
       }
       onMessage(message);
+    },
+    emitError(error: Parameters<NonNullable<InterviewSignalingClientOptions["onError"]>>[0]) {
+      if (!onError) {
+        throw new Error("signaling client was not created");
+      }
+      onError(error);
     },
   };
 }
