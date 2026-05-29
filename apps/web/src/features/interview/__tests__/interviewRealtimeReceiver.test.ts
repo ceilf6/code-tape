@@ -51,6 +51,44 @@ describe("InterviewRealtimeReceiver", () => {
     expect(ignoredReasons).toEqual(["invalid-json", "room-mismatch"]);
   });
 
+  it("ignores malformed payloads and non-integer event sequence numbers", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+    const channel = createFakeEventsChannel();
+    const ignoredReasons: string[] = [];
+
+    createInterviewRealtimeReceiver({
+      roomId: "room-1",
+      workbench,
+      onMessageResult: (result) => {
+        if (!result.ok) {
+          ignoredReasons.push(result.reason);
+        }
+      },
+    }).attach(channel);
+
+    channel.emit(
+      JSON.stringify(
+        messageFor({
+          ...contentEvent(1, "const invalidPayload = true;"),
+          payload: {},
+        } as RecordingEvent),
+      ),
+    );
+    channel.emit(
+      JSON.stringify(
+        messageFor({
+          ...contentEvent(1.5, "const fractionalSeq = true;"),
+          id: "event-fractional",
+          seq: 1.5,
+        } as RecordingEvent),
+      ),
+    );
+
+    expect(workbench.getState().stableState.editor.code).toBe("");
+    expect(workbench.getState().lastAppliedSeq).toBe(0);
+    expect(ignoredReasons).toEqual(["invalid-message", "invalid-message"]);
+  });
+
   it("detaches the message handler so closed or unmounted views stop applying events", () => {
     const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
     const channel = createFakeEventsChannel();

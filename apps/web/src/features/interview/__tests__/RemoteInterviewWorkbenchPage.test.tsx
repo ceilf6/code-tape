@@ -322,6 +322,75 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(channel.onmessage).toBeNull();
     expect(latestCodeEditorProps().value).toBe("");
   });
+
+  it("resets room-scoped workbench and media session when the route room changes", async () => {
+    const firstMedia = createFakeMediaSession();
+    const secondMedia = createFakeMediaSession();
+    const createMediaSession = vi
+      .fn<() => InterviewMediaSession>()
+      .mockReturnValueOnce(firstMedia.session)
+      .mockReturnValueOnce(secondMedia.session);
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/interview/interviewer/:roomId",
+          element: (
+            <RemoteInterviewWorkbenchPage
+              deps={{ createMediaSession }}
+            />
+          ),
+        },
+      ],
+      {
+        initialEntries: ["/interview/interviewer/room-a"],
+      },
+    );
+
+    render(
+      <ThemeProvider>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </ThemeProvider>,
+    );
+    let firstChannel!: TestEventsDataChannel;
+    act(() => {
+      firstChannel = firstMedia.attachEventsDataChannel();
+      firstChannel.emit(
+        JSON.stringify(recordingMessage(contentEvent(1, "const roomA = true;"), "room-a")),
+      );
+    });
+    await waitFor(() => {
+      expect(latestCodeEditorProps().value).toBe("const roomA = true;");
+    });
+
+    await act(async () => {
+      await router.navigate("/interview/interviewer/room-b");
+    });
+
+    expect(firstMedia.session.close).toHaveBeenCalledTimes(1);
+    expect(firstChannel.onmessage).toBeNull();
+    expect(screen.getByText("room-b")).toBeInTheDocument();
+    expect(latestCodeEditorProps().value).toBe("");
+
+    act(() => {
+      firstChannel.emit(
+        JSON.stringify(recordingMessage(contentEvent(2, "const stale = true;"), "room-a")),
+      );
+    });
+    expect(latestCodeEditorProps().value).toBe("");
+
+    act(() => {
+      const secondChannel = secondMedia.attachEventsDataChannel();
+      secondChannel.emit(
+        JSON.stringify(recordingMessage(contentEvent(1, "const roomB = true;"), "room-b")),
+      );
+    });
+    await waitFor(() => {
+      expect(latestCodeEditorProps().value).toBe("const roomB = true;");
+    });
+    expect(createMediaSession).toHaveBeenCalledTimes(2);
+  });
 });
 
 function latestCodeEditorProps(): CodeEditorProps {
@@ -480,10 +549,10 @@ function createFakeEventsChannel(): TestEventsDataChannel {
   };
 }
 
-function recordingMessage(event: RecordingEvent) {
+function recordingMessage(event: RecordingEvent, roomId = "room-live") {
   return {
     kind: "recording-event" as const,
-    roomId: "room-live",
+    roomId,
     sessionId: "session-1",
     messageId: `message-${event.seq}`,
     sentAt: 1_000 + event.seq,

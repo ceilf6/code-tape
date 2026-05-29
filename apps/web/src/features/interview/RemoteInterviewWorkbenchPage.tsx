@@ -39,6 +39,11 @@ export type RemoteInterviewWorkbenchPageProps = {
   };
 };
 
+type RemoteInterviewWorkbenchRoomProps = {
+  roomId: string;
+  deps: NonNullable<RemoteInterviewWorkbenchPageProps["deps"]>;
+};
+
 const EMPTY_INTERVIEW_MEDIA_SESSION_STATE: InterviewMediaSessionState = {
   localStream: null,
   remoteStream: null,
@@ -55,6 +60,11 @@ export function RemoteInterviewWorkbenchPage({
   deps = {},
 }: RemoteInterviewWorkbenchPageProps = {}) {
   const { roomId = "unknown" } = useParams();
+
+  return <RemoteInterviewWorkbenchRoom key={roomId} roomId={roomId} deps={deps} />;
+}
+
+function RemoteInterviewWorkbenchRoom({ roomId, deps }: RemoteInterviewWorkbenchRoomProps) {
   const createMediaSession = deps.createMediaSession ?? createInterviewMediaSession;
   const workbench = useMemo(
     () => createRemoteInterviewWorkbench({ initialState: INITIAL_REMOTE_INTERVIEW_STABLE_STATE }),
