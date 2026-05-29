@@ -62,7 +62,7 @@ test('parseStack extracts stack labels without non-stack labels', () => {
   ]);
 });
 
-test('claimIssue records active issue and rejects second active task', () => {
+test('claimIssue records multiple active issues for the same assignee', () => {
   const progress = createEmptyProgress();
   const issue = {
     number: 12,
@@ -73,12 +73,56 @@ test('claimIssue records active issue and rejects second active task', () => {
   const claimed = claimIssue(progress, issue, 'alice', '2026-05-22T10:00:00.000Z');
 
   assert.equal(claimed.students.alice.activeIssue, 12);
+  assert.deepEqual(claimed.students.alice.activeIssues, [12]);
   assert.equal(claimed.issues['12'].status, 'claimed');
   assert.equal(claimed.issues['12'].assignee, 'alice');
-  assert.throws(
-    () => claimIssue(claimed, { ...issue, number: 13 }, 'alice', '2026-05-22T10:01:00.000Z'),
-    /already has active issue #12/,
+
+  const secondClaim = claimIssue(
+    claimed,
+    { ...issue, number: 13, title: '实现章节跳转' },
+    'alice',
+    '2026-05-22T10:01:00.000Z',
   );
+
+  assert.equal(secondClaim.students.alice.activeIssue, 12);
+  assert.deepEqual(secondClaim.students.alice.activeIssues, [12, 13]);
+  assert.equal(secondClaim.issues['13'].status, 'claimed');
+  assert.equal(secondClaim.issues['13'].assignee, 'alice');
+});
+
+test('claimIssue migrates legacy activeIssue when claiming another issue', () => {
+  const progress = createEmptyProgress();
+  progress.students.alice = {
+    activeIssue: 12,
+    completedIssues: [],
+    reviewedIssues: [],
+    bugPenalties: [],
+    developmentScore: 0,
+    reviewScore: 0,
+    penaltyScore: 0,
+    totalScore: 0,
+  };
+  progress.issues['12'] = {
+    number: 12,
+    title: '实现录制控制栏',
+    score: 5,
+    stack: ['react'],
+    status: 'claimed',
+    assignee: 'alice',
+    claimedAt: '2026-05-22T10:00:00.000Z',
+    closedAt: null,
+    mergedPr: null,
+  };
+
+  const claimed = claimIssue(
+    progress,
+    { number: 13, title: '实现章节跳转', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T10:01:00.000Z',
+  );
+
+  assert.equal(claimed.students.alice.activeIssue, 12);
+  assert.deepEqual(claimed.students.alice.activeIssues, [12, 13]);
 });
 
 test('claimIssue validates GitHub issue status and supports repair reruns', () => {
@@ -390,7 +434,7 @@ test('findValidReviewer keeps claimant CR pass valid after new commits', () => {
   );
 });
 
-test('evaluatePrGuard enforces issue linkage, ownership, protected files, CR and timeout', () => {
+test('evaluatePrGuard enforces issue linkage, ownership, protected files and timeout without requiring CR', () => {
   const progress = createEmptyProgress();
   const claimed = claimIssue(
     progress,
@@ -412,13 +456,13 @@ test('evaluatePrGuard enforces issue linkage, ownership, protected files, CR and
     issue: { number: 12, labels: ['score:5', 'stack:react', 'status:claimed'], assignee: 'alice' },
     changedFiles: ['src/App.tsx'],
     reviews: [],
-    comments: [{ user: { login: 'bob', type: 'User' }, body: 'CR通过', created_at: '2026-05-22T10:20:00.000Z' }],
+    comments: [],
     now: '2026-05-22T11:00:00.000Z',
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.issueNumber, 12);
-  assert.equal(result.reviewer, 'bob');
+  assert.equal(result.reviewer, null);
 
   const protectedFile = evaluatePrGuard({
     progress: claimed,
@@ -770,6 +814,37 @@ test('feature scoring writes idempotent ledger and clears active issue', () => {
   assert.equal(rerun.students.alice.totalScore, 3.75);
 });
 
+test('feature scoring supports maintainer-only merge without reviewer', () => {
+  const firstClaim = claimIssue(
+    createEmptyProgress(),
+    { number: 12, title: '实现录制控制栏', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:00:00.000Z',
+  );
+  const progress = claimIssue(
+    firstClaim,
+    { number: 13, title: '实现章节跳转', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:05:00.000Z',
+  );
+
+  const scored = applyFeatureMerge(progress, {
+    issue: 12,
+    pr: 34,
+    score: 5,
+    developer: 'alice',
+    reviewer: null,
+    createdAt: '2026-05-22T12:00:00.000Z',
+  });
+
+  assert.equal(scored.students.alice.activeIssue, 13);
+  assert.deepEqual(scored.students.alice.activeIssues, [13]);
+  assert.equal(scored.students.alice.developmentScore, 3.75);
+  assert.equal(scored.students.null, undefined);
+  assert.equal(scored.ledger[0].reviewer, null);
+  assert.equal(scored.ledger[0].reviewerDelta, 0);
+});
+
 test('bug fix scoring penalizes original owner and rewards fix owner', () => {
   const progress = claimIssue(
     createEmptyProgress(),
@@ -808,6 +883,48 @@ test('bug fix scoring penalizes original owner and rewards fix owner', () => {
   assert.equal(scored.students.carol.developmentScore, 3.75);
   assert.equal(scored.students.dave.reviewScore, 1.25);
   assert.equal(scored.students.carol.activeIssue, null);
+});
+
+test('bug fix scoring supports source and fix PRs without reviewers', () => {
+  const progress = claimIssue(
+    createEmptyProgress(),
+    { number: 12, title: '实现录制控制栏', labels: ['score:5', 'stack:react', 'status:open'] },
+    'alice',
+    '2026-05-22T09:00:00.000Z',
+  );
+  const merged = applyFeatureMerge(progress, {
+    issue: 12,
+    pr: 34,
+    score: 5,
+    developer: 'alice',
+    reviewer: null,
+    createdAt: '2026-05-22T12:00:00.000Z',
+  });
+  const claimedBug = claimIssue(
+    merged,
+    { number: 41, title: '修复录制控制栏 bug', labels: ['score:5', 'stack:react', 'status:open'] },
+    'carol',
+    '2026-05-22T13:00:00.000Z',
+  );
+
+  const scored = applyBugFixMerge(claimedBug, {
+    sourceIssue: 12,
+    sourcePr: 34,
+    bugIssue: 41,
+    fixPr: 45,
+    score: 5,
+    fixDeveloper: 'carol',
+    fixReviewer: null,
+    createdAt: '2026-05-22T18:00:00.000Z',
+  });
+
+  assert.equal(scored.students.alice.penaltyScore, -7.5);
+  assert.equal(scored.students.carol.developmentScore, 3.75);
+  assert.equal(scored.students.null, undefined);
+  assert.equal(scored.ledger[1].originalReviewer, null);
+  assert.equal(scored.ledger[1].originalReviewerDelta, 0);
+  assert.equal(scored.ledger[1].fixReviewer, null);
+  assert.equal(scored.ledger[1].fixReviewerDelta, 0);
 });
 
 test('parseBugReferences extracts source issue and PR from bug body', () => {

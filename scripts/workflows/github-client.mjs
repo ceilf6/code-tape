@@ -127,12 +127,6 @@ export class GitHubClient {
     return this.paginate(`/repos/${this.owner}/${this.repo}/pulls?state=open&per_page=100`);
   }
 
-  async listOpenClaimedIssuesByAssignee(username) {
-    const q = `repo:${this.owner}/${this.repo} is:issue is:open assignee:${username} label:status:claimed`;
-    const data = await this.request('GET', `/search/issues?q=${encodeURIComponent(q)}&per_page=100`);
-    return data.items ?? [];
-  }
-
   async deleteBranch(branch) {
     return this.request('DELETE', `/repos/${this.owner}/${this.repo}/git/refs/heads/${encodeURIComponent(branch)}`);
   }

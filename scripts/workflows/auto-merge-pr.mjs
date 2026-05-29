@@ -79,7 +79,7 @@ if (requiredCheckResult.wait) {
 
 await client.mergePull(context.pr.number, {
   commitTitle: `#${result.issueNumber} ${context.rawPull.title}`,
-  commitMessage: `Closes #${result.issueNumber}\n\nMerged automatically after workflow guard, CR, and maintainer confirmation passed.`,
+  commitMessage: `Closes #${result.issueNumber}\n\nMerged automatically after workflow guard and maintainer confirmation passed.`,
 });
 
 if (context.pr.headRepoFullName === context.pr.baseRepoFullName && context.pr.headRef !== 'main') {

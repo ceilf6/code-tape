@@ -85,18 +85,25 @@ function prColumn(entry) {
 
 function deltaColumn(entry) {
   if (entry.type === 'bug_fix_merge') {
-    return [
+    return compact([
       `${entry.originalDeveloper} ${formatSigned(entry.originalDeveloperDelta)}`,
-      `${entry.originalReviewer} ${formatSigned(entry.originalReviewerDelta)}`,
+      entry.originalReviewer ? `${entry.originalReviewer} ${formatSigned(entry.originalReviewerDelta)}` : null,
       `${entry.fixDeveloper} ${formatSigned(entry.fixDeveloperDelta)}`,
-      `${entry.fixReviewer} ${formatSigned(entry.fixReviewerDelta)}`,
-    ].join(', ');
+      entry.fixReviewer ? `${entry.fixReviewer} ${formatSigned(entry.fixReviewerDelta)}` : null,
+    ]).join(', ');
   }
   if (entry.type === 'manual_development_bonus') {
     const reason = entry.reason ? ` (${entry.reason})` : '';
     return `${entry.developer} ${formatSigned(entry.developerDelta)}${reason}`;
   }
-  return `${entry.developer} ${formatSigned(entry.developerDelta)}, ${entry.reviewer} ${formatSigned(entry.reviewerDelta)}`;
+  return compact([
+    `${entry.developer} ${formatSigned(entry.developerDelta)}`,
+    entry.reviewer ? `${entry.reviewer} ${formatSigned(entry.reviewerDelta)}` : null,
+  ]).join(', ');
+}
+
+function compact(items) {
+  return items.filter(Boolean);
 }
 
 function formatTime(value) {
