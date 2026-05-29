@@ -144,6 +144,137 @@ describe("CandidateInterviewPage", () => {
     expect(screen.getByText("room already has a candidate")).toBeInTheDocument();
   });
 
+  it("keeps interviewer offline for a candidate-only join until the interviewer joins", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "candidate",
+        status: "connecting",
+      });
+    });
+    expect(screen.getByText("面试官离线")).toBeInTheDocument();
+    expect(screen.queryByText("面试官在线")).not.toBeInTheDocument();
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    expect(screen.getByText("面试官在线")).toBeInTheDocument();
+  });
+
+  it("clears interviewer presence when signaling fails after a live join", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    expect(screen.getByText("面试官在线")).toBeInTheDocument();
+
+    act(() => {
+      signaling.emit({
+        kind: "error",
+        code: "join-rejected",
+        message: "room already has a candidate",
+      });
+    });
+    expect(screen.getAllByText("连接失败")).toHaveLength(2);
+    expect(screen.getByText("面试官离线")).toBeInTheDocument();
+  });
+
+  it("clears interviewer presence when the signaling socket errors after a live join", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    expect(screen.getByText("面试官在线")).toBeInTheDocument();
+
+    act(() => {
+      signaling.emitError({
+        code: "socket-error",
+        message: "interview signaling socket error",
+      });
+    });
+    expect(screen.getAllByText("连接失败")).toHaveLength(2);
+    expect(screen.getByText("面试官离线")).toBeInTheDocument();
+  });
+
+  it("marks the interviewer offline when an interviewer leave message arrives", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    expect(screen.getByText("面试官在线")).toBeInTheDocument();
+
+    act(() => {
+      signaling.emit({
+        kind: "leave",
+        roomId: "room-created",
+        role: "interviewer",
+        connectionId: "interviewer-connection-1",
+        messageId: "leave-1",
+        sentAt: 1_780_000_000_000,
+      });
+    });
+    expect(screen.getAllByText("等待面试官")).toHaveLength(2);
+    expect(screen.getByText("面试官离线")).toBeInTheDocument();
+  });
+
   it("maps malformed signaling client errors to visible failed room state", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();

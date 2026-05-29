@@ -152,6 +152,22 @@ function handleJoin(input: {
       status: joined.room.status,
     }),
   );
+
+  const peer = findPeer(
+    input.activeConnections,
+    input.message.roomId,
+    input.message.role,
+  );
+  if (peer) {
+    peer.connection.send(
+      JSON.stringify({
+        kind: "joined",
+        roomId: input.message.roomId,
+        role: input.message.role,
+        status: joined.room.status,
+      }),
+    );
+  }
 }
 
 function findPeer(

@@ -165,6 +165,7 @@ function useCandidateInterviewRoomSession({
               roomState: {
                 ...current.roomState,
                 status: "failed",
+                interviewerOnline: false,
                 errorMessage: `join failed: ${sendResult.reason}`,
               },
             }));
@@ -178,7 +179,7 @@ function useCandidateInterviewRoomSession({
             roomState: {
               status: candidateStatusFromRoomStatus(message.status),
               joinCode: room.joinCode,
-              interviewerOnline: message.status !== "waiting",
+              interviewerOnline: message.status === "live",
               expiresAt: room.expiresAt,
               signalingUrl: room.signalingUrl,
             },
@@ -204,7 +205,20 @@ function useCandidateInterviewRoomSession({
             roomState: {
               ...current.roomState,
               status: "failed",
+              interviewerOnline: false,
               errorMessage: message.message,
+            },
+          }));
+          return;
+        }
+
+        if (message.kind === "leave" && message.role === "interviewer") {
+          setSession((current) => ({
+            ...current,
+            roomState: {
+              ...current.roomState,
+              status: "waiting-interviewer",
+              interviewerOnline: false,
             },
           }));
         }
@@ -215,7 +229,7 @@ function useCandidateInterviewRoomSession({
         roomState: {
           status: candidateStatusFromRoomStatus(room.status),
           joinCode: room.joinCode,
-          interviewerOnline: room.status !== "waiting",
+          interviewerOnline: room.status === "live",
           expiresAt: room.expiresAt,
           signalingUrl: room.signalingUrl,
         },
@@ -234,6 +248,7 @@ function useCandidateInterviewRoomSession({
             roomState: {
               ...current.roomState,
               status: "failed",
+              interviewerOnline: false,
               errorMessage: error.message,
             },
           }));
