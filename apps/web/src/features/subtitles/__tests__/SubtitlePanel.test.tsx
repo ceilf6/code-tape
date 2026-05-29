@@ -56,6 +56,8 @@ async function flushPromises() {
 
 describe("SubtitlePanel", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -741,7 +743,7 @@ describe("SubtitlePanel", () => {
     await waitFor(() => expect(warmUp).toHaveBeenCalledTimes(1));
   });
 
-  it("warms up the local LLM when audio is available before subtitles are generated", async () => {
+  it("does not warm up the local LLM before subtitles exist", async () => {
     const transcriberWarmUp = vi.fn(async () => undefined);
     const postProcessorWarmUp = vi.fn(async () => undefined);
     const process = vi.fn(async () => ({ segments: [], chapters: [] }));
@@ -770,11 +772,77 @@ describe("SubtitlePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
     expect(process).not.toHaveBeenCalled();
   });
 
-  it("disposes the local LLM post-processor on unmount after warm-up starts", async () => {
+  it("does not warm up the local LLM for no-audio recordings with saved subtitles", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Saved subtitles." }],
+    });
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 10 });
+      return 1;
+    });
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={null}
+        hasAudio={false}
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("onnx-community/whisper-tiny")).toBeInTheDocument());
+    expect(screen.getByText("无音频轨道")).toBeInTheDocument();
+    expect(requestIdleCallback).not.toHaveBeenCalled();
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+  });
+
+  it("cancels pending idle local LLM warm-up on unmount", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Saved subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return 7;
+    });
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
     const postProcessorWarmUp = vi.fn(async () => undefined);
     const dispose = vi.fn();
 
@@ -786,7 +854,7 @@ describe("SubtitlePanel", () => {
         durationMs={3_000}
         currentTimeMs={0}
         onSeek={vi.fn()}
-        store={createMemorySubtitleStore()}
+        store={store}
         transcriber={{
           transcribe: vi.fn(async () => ({
             model: "onnx-community/whisper-tiny",
@@ -802,14 +870,45 @@ describe("SubtitlePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("Saved subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
 
     unmount();
 
+    expect(cancelIdleCallback).toHaveBeenCalledWith(7);
     expect(dispose).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
   });
 
-  it("disposes the local LLM post-processor when switching recordings", async () => {
+  it("cancels pending idle local LLM warm-up when switching recordings", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "First recording." }],
+    });
+    await store.save({
+      recordingId: "recording-2",
+      generatedAt: "2026-05-28T00:00:01.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Second recording." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return idleCallbacks.length;
+    });
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
     const postProcessorWarmUp = vi.fn(async () => undefined);
     const dispose = vi.fn();
     const postProcessor: SubtitlePostProcessor = {
@@ -827,7 +926,7 @@ describe("SubtitlePanel", () => {
         durationMs={3_000}
         currentTimeMs={0}
         onSeek={vi.fn()}
-        store={createMemorySubtitleStore()}
+        store={store}
         transcriber={{
           transcribe: vi.fn(async () => ({
             model: "onnx-community/whisper-tiny",
@@ -839,7 +938,9 @@ describe("SubtitlePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("First recording.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
 
     rerender(
       <SubtitlePanel
@@ -849,7 +950,7 @@ describe("SubtitlePanel", () => {
         durationMs={3_000}
         currentTimeMs={0}
         onSeek={vi.fn()}
-        store={createMemorySubtitleStore()}
+        store={store}
         transcriber={{
           transcribe: vi.fn(async () => ({
             model: "onnx-community/whisper-tiny",
@@ -862,10 +963,39 @@ describe("SubtitlePanel", () => {
     );
 
     expect(dispose).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Second recording.")).toBeInTheDocument());
+    expect(cancelIdleCallback).toHaveBeenCalledWith(1);
+    expect(requestIdleCallback).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+
+    await act(async () => {
+      idleCallbacks[1]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).toHaveBeenCalledTimes(1);
   });
 
-  it("warms up the local LLM before the media blob finishes loading", async () => {
+  it("schedules local LLM warm-up after saved subtitles load even before the media blob finishes loading", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Saved subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return 1;
+    });
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
     const postProcessorWarmUp = vi.fn(async () => undefined);
 
     render(
@@ -876,7 +1006,7 @@ describe("SubtitlePanel", () => {
         durationMs={3_000}
         currentTimeMs={0}
         onSeek={vi.fn()}
-        store={createMemorySubtitleStore()}
+        store={store}
         transcriber={{
           transcribe: vi.fn(async () => ({
             model: "onnx-community/whisper-tiny",
@@ -891,7 +1021,328 @@ describe("SubtitlePanel", () => {
       />,
     );
 
+    await waitFor(() => expect(screen.getByText("Saved subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+
     await waitFor(() => expect(postProcessorWarmUp).toHaveBeenCalledTimes(1));
+  });
+
+  it("skips local LLM warm-up when the browser has no idle callback API", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Saved subtitles." }],
+    });
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={3_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Saved subtitles.")).toBeInTheDocument());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flushPromises();
+    });
+
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+  });
+
+  it("starts local LLM post-processing even if idle warm-up has not run yet", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "use state hook" }],
+    });
+    const requestIdleCallback = vi.fn(() => 1);
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+    const process = vi.fn(async () => ({
+      segments: [{ id: "subtitle-1", text: "useState hook" }],
+      chapters: [{ title: "状态设计", startMs: 0, endMs: 1_000 }],
+    }));
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+
+    await waitFor(() => expect(process).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+  });
+
+  it("reschedules local LLM warm-up when a pending idle warm-up is canceled by a new subtitle track", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Old subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return idleCallbacks.length;
+    });
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={2_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [{ id: "subtitle-1", startMs: 0, endMs: 2_000, text: "New subtitles." }],
+          })),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Old subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+
+    await waitFor(() => expect(screen.getByText("New subtitles.")).toBeInTheDocument());
+    expect(cancelIdleCallback).toHaveBeenCalledWith(1);
+    expect(requestIdleCallback).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+
+    await act(async () => {
+      idleCallbacks[1]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels pending idle local LLM warm-up while subtitles are generating", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Old subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return idleCallbacks.length;
+    });
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+    const postProcessorWarmUp = vi.fn(async () => undefined);
+    const generatedTrack = createDeferred<SubtitleTrackDraft>();
+
+    render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={2_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(() => generatedTrack.promise),
+        }}
+        postProcessor={{
+          warmUp: postProcessorWarmUp,
+          process: vi.fn(async () => ({ segments: [], chapters: [] })),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Old subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "生成字幕" }));
+
+    await waitFor(() => expect(cancelIdleCallback).toHaveBeenCalledWith(1));
+    await act(async () => {
+      idleCallbacks[0]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).not.toHaveBeenCalled();
+
+    await act(async () => {
+      generatedTrack.resolve({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local",
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 2_000, text: "New subtitles." }],
+      });
+      await flushPromises();
+    });
+    await waitFor(() => expect(screen.getByText("New subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      idleCallbacks[1]?.({ didTimeout: false, timeRemaining: () => 10 });
+      await flushPromises();
+    });
+    expect(postProcessorWarmUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("warms up a replacement local LLM post-processor instance for the same recording", async () => {
+    const store = createMemorySubtitleStore();
+    await store.save({
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "Saved subtitles." }],
+    });
+    const idleCallbacks: IdleRequestCallback[] = [];
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback);
+      return idleCallbacks.length;
+    });
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    const firstWarmUp = vi.fn(async () => undefined);
+    const secondWarmUp = vi.fn(async () => undefined);
+    const createPostProcessor = (warmUp: () => Promise<void>): SubtitlePostProcessor => ({
+      warmUp,
+      process: vi.fn(async () => ({ segments: [], chapters: [] })),
+      dispose: vi.fn(),
+    });
+
+    const { rerender } = render(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={createPostProcessor(firstWarmUp)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Saved subtitles.")).toBeInTheDocument());
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <SubtitlePanel
+        recordingId="recording-1"
+        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        hasAudio
+        durationMs={1_000}
+        currentTimeMs={0}
+        onSeek={vi.fn()}
+        store={store}
+        transcriber={{
+          transcribe: vi.fn(async () => ({
+            model: "onnx-community/whisper-tiny",
+            source: "huggingface-local" as const,
+            segments: [],
+          })),
+        }}
+        postProcessor={createPostProcessor(secondWarmUp)}
+      />,
+    );
+
+    await act(async () => {
+      await flushPromises();
+    });
+    await waitFor(() => expect(requestIdleCallback.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await act(async () => {
+      for (const idleCallback of idleCallbacks) {
+        idleCallback({ didTimeout: false, timeRemaining: () => 10 });
+      }
+      await flushPromises();
+    });
+
+    expect(firstWarmUp).not.toHaveBeenCalled();
+    await waitFor(() => expect(secondWarmUp).toHaveBeenCalledTimes(1));
   });
 
   it("does not repeat warm-up for the same recording media when transcriber identity changes", async () => {

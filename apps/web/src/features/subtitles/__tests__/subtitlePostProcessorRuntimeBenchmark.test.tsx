@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS,
   SubtitlePanel,
@@ -60,6 +60,11 @@ function roundDuration(value: number): number {
 }
 
 describe("subtitle postprocessor runtime benchmark", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("measures click-to-ready timing without blocking subtitle and chapter seeking", async () => {
     const originalTrack: SubtitleTrack = {
       recordingId: "recording-1",
@@ -105,6 +110,14 @@ describe("subtitle postprocessor runtime benchmark", () => {
       })),
     };
     const onSeek = vi.fn();
+    vi.stubGlobal(
+      "requestIdleCallback",
+      vi.fn((callback: IdleRequestCallback) => {
+        callback({ didTimeout: false, timeRemaining: () => 10 });
+        return 1;
+      }),
+    );
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
 
     render(
       <SubtitlePanel
