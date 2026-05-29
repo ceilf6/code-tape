@@ -448,12 +448,14 @@ function constrainCorrectionChaptersToTrack(
   chapters: NonNullable<SubtitleCorrectionResult["chapters"]>,
   track: SubtitleTrack,
 ): NonNullable<SubtitleCorrectionResult["chapters"]> {
+  const subtitleStartMs = Math.min(Number.POSITIVE_INFINITY, ...track.segments.map((segment) => segment.startMs));
   const subtitleEndMs = Math.max(0, ...track.segments.map((segment) => segment.endMs));
   const timelineState = {
     previousEndMs: Number.NEGATIVE_INFINITY,
     seenTimelines: new Set<string>(),
   };
   return chapters
+    .filter((chapter) => chapter.startMs >= subtitleStartMs)
     .filter((chapter) => chapter.startMs < subtitleEndMs)
     .filter((chapter) => !chapter.title.includes("\uFFFD"))
     .map((chapter) => ({

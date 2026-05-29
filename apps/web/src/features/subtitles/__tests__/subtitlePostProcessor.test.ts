@@ -856,6 +856,54 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     }
   });
 
+  it("keeps merged chunk chapters ordered and scoped to each subtitle window", async () => {
+    const track = makeTrackWithSegments(121);
+    const pipeline = vi.fn(async (messages: unknown) => {
+      const payload = readPostProcessorPayload(messages);
+      const firstTimeline = payload.timeline[0];
+      const lastTimeline = payload.timeline.at(-1);
+      if (!firstTimeline || !lastTimeline) throw new Error("empty chunk");
+      const callIndex = pipeline.mock.calls.length;
+      const chapters =
+        callIndex === 2
+          ? [
+              { title: "重复片段", startMs: 0, endMs: 10_000 },
+              { title: "窗口前污染", startMs: 50_000, endMs: 55_000 },
+              { title: "第二段", startMs: firstTimeline.startMs, endMs: lastTimeline.endMs },
+            ]
+          : [
+              {
+                title: `靠后 ${callIndex}`,
+                startMs: firstTimeline.startMs + 30_000,
+                endMs: Math.min(firstTimeline.startMs + 45_000, lastTimeline.endMs),
+              },
+              { title: `靠前 ${callIndex}`, startMs: firstTimeline.startMs, endMs: firstTimeline.startMs + 10_000 },
+            ];
+      return [
+        {
+          generated_text: JSON.stringify({
+            segments: [],
+            chapters,
+          }),
+        },
+      ];
+    });
+    const postProcessor = createHuggingFaceSubtitlePostProcessor({
+      pipelineFactory: vi.fn(async () => pipeline),
+    });
+
+    await expect(postProcessor.process({ track })).resolves.toEqual({
+      segments: [],
+      chapters: [
+        { title: "靠前 1", startMs: 0, endMs: 10_000 },
+        { title: "靠后 1", startMs: 30_000, endMs: 45_000 },
+        { title: "第二段", startMs: 60_000, endMs: 120_000 },
+        { title: "靠前 3", startMs: 120_000, endMs: 121_000 },
+      ],
+    });
+    expect(pipeline).toHaveBeenCalledTimes(3);
+  });
+
   it("stops chunked local LLM processing after aborting between oversized track windows", async () => {
     const abortController = new AbortController();
     const pipeline = vi.fn(async () => {
