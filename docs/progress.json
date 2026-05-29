@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T17:22:26Z",
+  "updatedAt": "2026-05-29T17:28:02Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         162,
+        168,
         169
       ],
       "completedIssues": [
@@ -842,6 +843,20 @@
       "claimedAt": "2026-05-29T16:44:20Z",
       "closedAt": "2026-05-29T17:17:23Z",
       "mergedPr": 167
+    },
+    "168": {
+      "number": 168,
+      "title": "[P1+] AI 字幕 LLM 空闲预热避免抢占 ASR",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T17:28:02Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "169": {
       "number": 169,
