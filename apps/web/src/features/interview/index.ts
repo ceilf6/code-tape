@@ -14,3 +14,10 @@ export {
   type RemoteTimelineBufferResult,
   type SnapshotRequestNeed,
 } from "./interviewSync";
+export {
+  createRemoteInterviewWorkbench,
+  type RemoteInterviewSyncStatus,
+  type RemoteInterviewWorkbench,
+  type RemoteInterviewWorkbenchOptions,
+  type RemoteInterviewWorkbenchState,
+} from "./remoteInterviewWorkbench";
