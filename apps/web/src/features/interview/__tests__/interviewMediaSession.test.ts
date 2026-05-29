@@ -241,6 +241,39 @@ describe("InterviewMediaSession", () => {
     });
   });
 
+  it("ignores late peer events after close and clears pending ICE candidates", async () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    await session.requestLocalMedia();
+    peer.emitIceCandidate({ candidate: "candidate:before-close", sdpMid: "0", sdpMLineIndex: 0 });
+
+    session.close();
+    let lateNotifications = 0;
+    session.subscribe(() => {
+      lateNotifications += 1;
+    });
+    peer.emitIceCandidate({ candidate: "candidate:after-close", sdpMid: "0", sdpMLineIndex: 1 });
+    peer.emitRemoteTrack(new FakeTrack("video") as unknown as MediaStreamTrack);
+    peer.setConnectionState("connected");
+
+    expect(lateNotifications).toBe(0);
+    expect(session.getState().remoteStream).toBeNull();
+    expect(session.getState().connectionState).toBe("closed");
+    expect(session.getState().outgoingIceCandidates).toEqual([]);
+  });
+
+  it("rejects repeated local media requests to avoid duplicate peer tracks", async () => {
+    const { peer, deps } = createFixture();
+    const session = createInterviewMediaSession({ deps });
+    await session.requestLocalMedia();
+
+    await expect(session.requestLocalMedia()).rejects.toThrow(
+      "Local media has already been requested for this interview session",
+    );
+
+    expect(peer.addedTracks).toHaveLength(2);
+  });
+
   it("notifies subscribers when peer connection state changes and exposes isolated ICE snapshots", () => {
     const { peer, deps } = createFixture();
     const session = createInterviewMediaSession({ deps });

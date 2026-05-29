@@ -79,15 +79,16 @@ export function createInterviewMediaSession(
   let microphoneEnabled = false;
   let cameraEnabled = false;
   let outgoingIceCandidates: InterviewIceCandidateSignal[] = [];
+  let closed = false;
 
   const snapshot = (): InterviewMediaSessionState => ({
     localStream,
     remoteStream,
     microphoneEnabled,
     cameraEnabled,
-    connectionState: peer.connectionState,
-    iceConnectionState: peer.iceConnectionState,
-    signalingState: peer.signalingState,
+    connectionState: closed ? "closed" : peer.connectionState,
+    iceConnectionState: closed ? "closed" : peer.iceConnectionState,
+    signalingState: closed ? "closed" : peer.signalingState,
     outgoingIceCandidates: cloneIceCandidates(outgoingIceCandidates),
   });
 
@@ -98,10 +99,16 @@ export function createInterviewMediaSession(
   };
 
   peer.onicecandidate = (event) => {
+    if (closed) {
+      return;
+    }
     outgoingIceCandidates = [...outgoingIceCandidates, cloneIceCandidateSignal(event.candidate)];
     notify();
   };
   peer.ontrack = (event) => {
+    if (closed) {
+      return;
+    }
     remoteStream = event.streams[0] ?? remoteStream ?? deps.createMediaStream();
     if (event.streams.length === 0) {
       remoteStream.addTrack(event.track);
@@ -115,6 +122,12 @@ export function createInterviewMediaSession(
   return {
     getState: snapshot,
     async requestLocalMedia(constraints = options.mediaConstraints ?? DEFAULT_MEDIA_CONSTRAINTS) {
+      if (closed) {
+        throw new Error("Interview media session is closed");
+      }
+      if (localStream) {
+        throw new Error("Local media has already been requested for this interview session");
+      }
       localStream = await deps.getUserMedia(constraints);
       localStream.getTracks().forEach((track) => {
         peer.addTrack(track, localStream as MediaStream);
@@ -164,11 +177,21 @@ export function createInterviewMediaSession(
       return () => listeners.delete(listener);
     },
     close() {
+      if (closed) {
+        return snapshot();
+      }
+      closed = true;
+      peer.onicecandidate = null;
+      peer.ontrack = null;
+      peer.onconnectionstatechange = null;
+      peer.oniceconnectionstatechange = null;
+      peer.onsignalingstatechange = null;
       stopStreamTracks(localStream);
       localStream = null;
       remoteStream = null;
       microphoneEnabled = false;
       cameraEnabled = false;
+      outgoingIceCandidates = [];
       peer.close();
       return notify();
     },
