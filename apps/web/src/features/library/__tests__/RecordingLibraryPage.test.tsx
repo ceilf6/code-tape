@@ -401,6 +401,44 @@ describe("RecordingLibraryPage", () => {
     expect(screen.getByRole("link", { name: BASE_TITLE })).toBeInTheDocument();
   });
 
+  it("keeps the local recording when cloud polling fails", async () => {
+    repositoryMocks.list.mockResolvedValue([BASE_ITEM]);
+    cloudRepositoryMocks.pollUntilReady.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "network-error", message: "validation timeout", requestId: "req-1" },
+    });
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    fireEvent.click(screen.getByRole("button", { name: "上传到云端" }));
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "上传失败：validation timeout（network-error，requestId: req-1）",
+    );
+    expect(repositoryMocks.remove).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: BASE_TITLE })).toBeInTheDocument();
+  });
+
+  it("keeps the local recording when cloud validation fails", async () => {
+    repositoryMocks.list.mockResolvedValue([BASE_ITEM]);
+    cloudRepositoryMocks.pollUntilReady.mockResolvedValueOnce({
+      ok: true,
+      value: makeCloudDetailResponse({
+        status: "failed",
+        failureCode: "checksum-mismatch",
+        failureMessage: "events checksum mismatch",
+      }),
+    });
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    fireEvent.click(screen.getByRole("button", { name: "上传到云端" }));
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent("上传失败：events checksum mismatch");
+    expect(repositoryMocks.remove).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: BASE_TITLE })).toBeInTheDocument();
+  });
+
   it("renders cloud recordings and links them to the cloud replay route", async () => {
     cloudRepositoryMocks.list.mockResolvedValueOnce({
       ok: true,
