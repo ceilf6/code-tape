@@ -1,10 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-29T13:20:22Z",
+  "updatedAt": "2026-05-29T14:00:05Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        135
+        135,
+        147,
+        149
       ],
       "completedIssues": [
         11,
@@ -688,6 +690,34 @@
       "claimedAt": "2026-05-29T12:34:16Z",
       "closedAt": "2026-05-29T13:20:22Z",
       "mergedPr": 148
+    },
+    "147": {
+      "number": 147,
+      "title": "[P1] CloudPackageLoader 云端录制包加载",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T13:46:48Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "149": {
+      "number": 149,
+      "title": "[P1+ WebRTC] 面试官只读工作台 UI 接线",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-29T14:00:05Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
