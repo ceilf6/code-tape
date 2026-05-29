@@ -365,8 +365,14 @@ test('PR self-check asks for one correction and chapter generation evaluation re
   assert.match(template, /playbackProbeResponsiveDuringPostprocess/u);
   assert.equal(
     packageJson.scripts['subtitle:postprocess:runtime-benchmark'],
-    'SUBTITLE_RUNTIME_BENCHMARK=1 npm run test -w apps/web -- src/features/subtitles/__tests__/subtitlePostProcessorRuntimeBenchmark.test.tsx',
+    'node scripts/subtitle-llm/run-runtime-benchmark.mjs',
   );
+  const runtimeBenchmarkRunner = readFileSync(
+    'scripts/subtitle-llm/run-runtime-benchmark.mjs',
+    'utf8',
+  );
+  assert.match(runtimeBenchmarkRunner, /SUBTITLE_RUNTIME_BENCHMARK/u);
+  assert.match(runtimeBenchmarkRunner, /subtitlePostProcessorRuntimeBenchmark\.test\.tsx/u);
   assert.match(technicalPlan, /npm run subtitle:postprocess:runtime-benchmark/u);
   assert.match(technicalPlan, /postprocessClickToResultReadyDurationMs/u);
   assert.match(technicalPlan, /playbackProbeResponsiveDuringPostprocess/u);
