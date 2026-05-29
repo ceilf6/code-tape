@@ -26,6 +26,12 @@ export {
   type InterviewTrackEvent,
 } from "./interviewMediaSession";
 export {
+  RemoteInterviewWorkbenchPage,
+  RemoteInterviewWorkbenchView,
+  type RemoteInterviewWorkbenchViewProps,
+} from "./RemoteInterviewWorkbenchPage";
+export { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
+export {
   createRemoteInterviewWorkbench,
   type RemoteInterviewSyncStatus,
   type RemoteInterviewWorkbench,
