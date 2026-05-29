@@ -56,11 +56,15 @@ export async function runRealModelSmoke(options = {}) {
     pipelineReadyDurationMs = round(performance.now() - readyStartedAt);
 
     const generationStartedAt = performance.now();
-    const result = await postProcessor.process({
-      track: buildTrackFromSample(sample),
-      context: buildContextFromSample(sample),
-    });
-    generationDurationMs = round(performance.now() - generationStartedAt);
+    let result;
+    try {
+      result = await postProcessor.process({
+        track: buildTrackFromSample(sample),
+        context: buildContextFromSample(sample),
+      });
+    } finally {
+      generationDurationMs = round(performance.now() - generationStartedAt);
+    }
 
     const evaluation = await evaluatePostprocessorFixtures(
       { samples: [sample] },
@@ -138,7 +142,7 @@ export function classifyRealModelSmokeIssues(failures = []) {
     if (Array.isArray(failure?.issues)) return failure.issues;
     return [];
   });
-  if (issues.length === 0) return null;
+  if (issues.length === 0) return failures.length > 0 ? 'expectation-miss' : null;
   if (issues.includes('invalid-json')) return 'invalid-json';
   if (
     issues.includes('unknown-segment') ||
@@ -157,7 +161,7 @@ export function classifyRealModelSmokeIssues(failures = []) {
 export function classifyRealModelSmokeError(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (
-    /当前浏览器无法加载本地字幕 LLM 模型|Could not locate file|Could not load model|Not Found|Failed to fetch|Load failed|NetworkError|MatMulNBits|Missing required scale/iu.test(
+    /当前浏览器无法加载本地字幕 LLM 模型|Could not locate file|Could not load model|Not Found|Failed to fetch|fetch failed|Load failed|NetworkError|network timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|MatMulNBits|Missing required scale/iu.test(
       message,
     )
   ) {

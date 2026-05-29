@@ -492,6 +492,65 @@ test('subtitle real model smoke runner reports timing and contract metrics with 
   assert.deepEqual(metrics.failures, []);
 });
 
+test('subtitle real model smoke runner preserves generation timing when processing fails', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error('LLM 输出中未找到 JSON 对象');
+      },
+      dispose() {},
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'invalid-json');
+  assert.ok(metrics.generationDurationMs > 0);
+  assert.ok(metrics.totalDurationMs >= metrics.generationDurationMs);
+});
+
+test('subtitle real model smoke runner fails when quality expectations miss', async () => {
+  const { runRealModelSmoke } = await import('../subtitle-llm/run-real-model-smoke.mjs');
+  const fixture = JSON.parse(
+    readFileSync('scripts/tests/fixtures/subtitle-postprocessor-eval.json', 'utf8'),
+  );
+
+  const metrics = await runRealModelSmoke({
+    fixture,
+    sampleId: 'react-state-loop',
+    createPostProcessor: async () => ({
+      async warmUp() {},
+      async process() {
+        return {
+          segments: [
+            { id: 'subtitle-1', text: '这里用 use state 保存 count' },
+            { id: 'subtitle-2', text: '然后 set count 会触发 render' },
+          ],
+          chapters: [
+            { title: '状态更新', startMs: 0, endMs: 3600 },
+            { title: '问题定位', startMs: 3600, endMs: 7200 },
+          ],
+        };
+      },
+      dispose() {},
+    }),
+  });
+
+  assert.equal(metrics.ok, false);
+  assert.equal(metrics.errorType, 'expectation-miss');
+  assert.ok(metrics.representativePassRate < 1);
+  assert.deepEqual(metrics.failures[0].issues, []);
+  assert.deepEqual(metrics.failures[0].missingTerms, ['useState', 'setCount']);
+});
+
 test('subtitle real model smoke runner classifies common failure modes', async () => {
   const { classifyRealModelSmokeError, classifyRealModelSmokeIssues } = await import(
     '../subtitle-llm/run-real-model-smoke.mjs'
@@ -499,6 +558,14 @@ test('subtitle real model smoke runner classifies common failure modes', async (
 
   assert.equal(
     classifyRealModelSmokeError(new Error('当前浏览器无法加载本地字幕 LLM 模型（wasm/q8）')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('fetch failed')),
+    'model-load-error',
+  );
+  assert.equal(
+    classifyRealModelSmokeError(new Error('network timeout: ETIMEDOUT')),
     'model-load-error',
   );
   assert.equal(
@@ -512,6 +579,10 @@ test('subtitle real model smoke runner classifies common failure modes', async (
   assert.equal(
     classifyRealModelSmokeIssues([{ id: 'sample', issues: ['invalid-chapter-timeline'] }]),
     'invalid-chapter-timeline',
+  );
+  assert.equal(
+    classifyRealModelSmokeIssues([{ id: 'sample', issues: [], missingTerms: ['useState'] }]),
+    'expectation-miss',
   );
 });
 
