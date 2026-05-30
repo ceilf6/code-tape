@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type { EventBus, RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
+import {
+  cloneReplayStableState,
+  replayReducer,
+  type EventBus,
+  type RecordingEvent,
+  type ReplayStableState,
+} from "@/shared/recording-schema";
 import {
   createInterviewSyncPublisher,
   createRemoteTimelineBuffer,
   type InterviewRealtimeDataChannel,
 } from "../interviewSync";
+import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "../remoteInterviewInitialState";
+
+function initialStableState(): ReplayStableState {
+  return cloneReplayStableState(INITIAL_REMOTE_INTERVIEW_STABLE_STATE);
+}
 
 function contentEvent(seq: number, code = `code-${seq}`): RecordingEvent {
   return {
@@ -143,6 +154,110 @@ describe("InterviewSyncPublisher", () => {
       ok: false,
       reason: "send-failed",
     });
+  });
+
+  it("publishes a state snapshot reflecting all published events", () => {
+    const { channel, sent } = createFakeChannel();
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      messageIdProvider: () => "snapshot-message",
+      nowProvider: () => 4321,
+      stateVersionProvider: () => 9,
+      snapshotState: initialStableState(),
+    });
+
+    publisher.publishRecordingEvent(contentEvent(1, "const a = 1;"));
+    publisher.publishRecordingEvent(contentEvent(2, "const a = 2;"));
+    const result = publisher.publishSnapshot();
+
+    expect(result.ok).toBe(true);
+    const expectedState = [contentEvent(1, "const a = 1;"), contentEvent(2, "const a = 2;")].reduce(
+      replayReducer,
+      initialStableState(),
+    );
+    const snapshotPayload = JSON.parse(sent.at(-1)!);
+    expect(snapshotPayload).toEqual({
+      kind: "state-snapshot",
+      roomId: "room-1",
+      sessionId: "session-1",
+      messageId: "snapshot-message",
+      sentAt: 4321,
+      snapshotSeq: 2,
+      snapshotTimeMs: 200,
+      stateVersion: 9,
+      state: expectedState,
+    });
+  });
+
+  it("auto-emits a snapshot every N stable events while subscribed", () => {
+    const { channel, sent } = createFakeChannel();
+    const bus = createFakeEventBus();
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      snapshotState: initialStableState(),
+      snapshotEventInterval: 3,
+      snapshotTimeIntervalMs: Number.POSITIVE_INFINITY,
+    });
+
+    const unsubscribe = publisher.subscribeTo(bus);
+    for (let seq = 1; seq <= 3; seq += 1) {
+      bus.emit(contentEvent(seq, `const v = ${seq};`));
+    }
+    unsubscribe();
+
+    const kinds = sent.map((raw) => JSON.parse(raw).kind);
+    expect(kinds.filter((kind) => kind === "recording-event")).toHaveLength(3);
+    const snapshots = sent
+      .map((raw) => JSON.parse(raw))
+      .filter((message) => message.kind === "state-snapshot");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].snapshotSeq).toBe(3);
+  });
+
+  it("auto-emits a snapshot once the time interval elapses", () => {
+    const { channel, sent } = createFakeChannel();
+    const bus = createFakeEventBus();
+    let now = 1000;
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      nowProvider: () => now,
+      snapshotState: initialStableState(),
+      snapshotEventInterval: Number.POSITIVE_INFINITY,
+      snapshotTimeIntervalMs: 5000,
+    });
+
+    const unsubscribe = publisher.subscribeTo(bus);
+    bus.emit(contentEvent(1, "const v = 1;"));
+    expect(sent.map((raw) => JSON.parse(raw).kind)).toEqual(["recording-event"]);
+
+    now = 6500;
+    bus.emit(contentEvent(2, "const v = 2;"));
+    unsubscribe();
+
+    const snapshots = sent
+      .map((raw) => JSON.parse(raw))
+      .filter((message) => message.kind === "state-snapshot");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].snapshotSeq).toBe(2);
+  });
+
+  it("does not emit a snapshot when the channel is not open", () => {
+    const { channel, sent } = createFakeChannel("closed");
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      snapshotState: initialStableState(),
+    });
+
+    expect(publisher.publishSnapshot()).toEqual({ ok: false, reason: "channel-not-open" });
+    expect(sent).toEqual([]);
   });
 });
 

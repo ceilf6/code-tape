@@ -1,4 +1,11 @@
-import type { EventBus, RecordingEvent, ReplayStableState } from "@/shared/recording-schema";
+import {
+  cloneReplayStableState,
+  replayReducer,
+  STABLE_EVENT_TYPES,
+  type EventBus,
+  type RecordingEvent,
+  type ReplayStableState,
+} from "@/shared/recording-schema";
 
 export type InterviewRealtimeDataChannel = {
   readyState: "connecting" | "open" | "closing" | "closed";
@@ -57,6 +64,10 @@ export type InterviewPublishResult =
   | { ok: true; message: InterviewRecordingEventMessage }
   | { ok: false; reason: "channel-not-open" | "send-failed" };
 
+export type InterviewSnapshotPublishResult =
+  | { ok: true; message: InterviewSnapshotMessage }
+  | { ok: false; reason: "channel-not-open" | "send-failed" | "no-published-events" };
+
 export type InterviewSyncPublisherOptions = {
   channel: InterviewRealtimeDataChannel;
   roomId: string;
@@ -64,10 +75,14 @@ export type InterviewSyncPublisherOptions = {
   messageIdProvider?: () => string;
   nowProvider?: () => number;
   stateVersionProvider?: () => number;
+  snapshotState?: ReplayStableState;
+  snapshotEventInterval?: number;
+  snapshotTimeIntervalMs?: number;
 };
 
 export type InterviewSyncPublisher = {
   publishRecordingEvent(event: RecordingEvent): InterviewPublishResult;
+  publishSnapshot(): InterviewSnapshotPublishResult;
   subscribeTo(
     bus: Pick<EventBus, "subscribe"> & Partial<Pick<EventBus, "peek">>,
     options?: InterviewSyncSubscribeOptions,
@@ -86,6 +101,29 @@ export function createInterviewSyncPublisher(
   const messageIdProvider = options.messageIdProvider ?? createMessageId;
   const nowProvider = options.nowProvider ?? (() => Date.now());
   const stateVersionProvider = options.stateVersionProvider ?? (() => 0);
+  const snapshotEventInterval = options.snapshotEventInterval ?? DEFAULT_SNAPSHOT_EVENT_INTERVAL;
+  const snapshotTimeIntervalMs =
+    options.snapshotTimeIntervalMs ?? DEFAULT_SNAPSHOT_TIME_INTERVAL_MS;
+  const tracksSnapshots = options.snapshotState !== undefined;
+
+  let snapshotState = options.snapshotState
+    ? cloneReplayStableState(options.snapshotState)
+    : null;
+  let lastPublishedSeq: number | null = null;
+  let lastPublishedTimestampMs = 0;
+  let stableEventsSinceSnapshot = 0;
+  let lastSnapshotAtMs: number | null = null;
+
+  const advanceSnapshotState = (event: RecordingEvent) => {
+    if (snapshotState) {
+      snapshotState = replayReducer(snapshotState, event);
+    }
+    lastPublishedSeq = event.seq;
+    lastPublishedTimestampMs = event.timestampMs;
+    if (STABLE_EVENT_TYPES.has(event.type)) {
+      stableEventsSinceSnapshot += 1;
+    }
+  };
 
   const publishRecordingEvent = (event: RecordingEvent): InterviewPublishResult => {
     if (options.channel.readyState !== "open") {
@@ -105,19 +143,75 @@ export function createInterviewSyncPublisher(
 
     try {
       options.channel.send(JSON.stringify(message));
-      return { ok: true, message };
     } catch {
       return { ok: false, reason: "send-failed" };
+    }
+
+    advanceSnapshotState(event);
+    return { ok: true, message };
+  };
+
+  const publishSnapshot = (): InterviewSnapshotPublishResult => {
+    if (options.channel.readyState !== "open") {
+      return { ok: false, reason: "channel-not-open" };
+    }
+    if (!snapshotState || lastPublishedSeq === null) {
+      return { ok: false, reason: "no-published-events" };
+    }
+
+    const message: InterviewSnapshotMessage = {
+      kind: "state-snapshot",
+      roomId: options.roomId,
+      sessionId: options.sessionId,
+      messageId: messageIdProvider(),
+      sentAt: nowProvider(),
+      snapshotSeq: lastPublishedSeq,
+      snapshotTimeMs: lastPublishedTimestampMs,
+      stateVersion: stateVersionProvider(),
+      state: cloneReplayStableState(snapshotState),
+    };
+
+    try {
+      options.channel.send(JSON.stringify(message));
+    } catch {
+      return { ok: false, reason: "send-failed" };
+    }
+
+    stableEventsSinceSnapshot = 0;
+    lastSnapshotAtMs = nowProvider();
+    return { ok: true, message };
+  };
+
+  const maybeEmitSnapshot = () => {
+    if (!tracksSnapshots || lastPublishedSeq === null) return;
+    const now = nowProvider();
+    if (lastSnapshotAtMs === null) {
+      lastSnapshotAtMs = now;
+    }
+    const dueByEvents = stableEventsSinceSnapshot >= snapshotEventInterval;
+    const dueByTime = now - lastSnapshotAtMs >= snapshotTimeIntervalMs;
+    if (dueByEvents || dueByTime) {
+      publishSnapshot();
     }
   };
 
   return {
     publishRecordingEvent,
+    publishSnapshot,
     subscribeTo(bus, subscribeOptions = {}) {
       const publishFromSubscription = (event: RecordingEvent) => {
-        if (subscribeOptions.shouldPublishEvent?.(event) === false) return;
+        if (subscribeOptions.shouldPublishEvent?.(event) === false) {
+          // Event was already published by a prior publisher (e.g. after a
+          // DataChannel reopen). Still advance the running snapshot state so a
+          // later snapshot reflects the full published timeline.
+          advanceSnapshotState(event);
+          return;
+        }
         const result = publishRecordingEvent(event);
         subscribeOptions.onPublishResult?.(event, result);
+        if (result.ok) {
+          maybeEmitSnapshot();
+        }
       };
 
       if (subscribeOptions.includeBacklog) {
@@ -128,6 +222,9 @@ export function createInterviewSyncPublisher(
     },
   };
 }
+
+const DEFAULT_SNAPSHOT_EVENT_INTERVAL = 50;
+const DEFAULT_SNAPSHOT_TIME_INTERVAL_MS = 5000;
 
 export type SnapshotRequestNeed = {
   reason: "gap-detected";

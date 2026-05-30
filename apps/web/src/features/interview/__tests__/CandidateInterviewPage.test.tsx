@@ -237,6 +237,56 @@ describe("CandidateInterviewPage", () => {
     });
   });
 
+  it("publishes a periodic state snapshot after enough stable events", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeMediaSessionFactory(
+      {},
+      {
+        eventsDataChannelState: "open",
+      },
+    );
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await screen.findByText("room-created");
+
+    act(() => {
+      signaling.emit({
+        kind: "joined",
+        roomId: "room-created",
+        role: "interviewer",
+        status: "live",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendOffer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      for (let seq = 1; seq <= 50; seq += 1) {
+        recorderPageMock.emit(contentEvent(seq, `const v = ${seq};`));
+      }
+    });
+
+    await waitFor(() => {
+      const kinds = vi
+        .mocked(media.eventsDataChannel.send)
+        .mock.calls.map(([data]) => JSON.parse(data).kind);
+      expect(kinds.filter((kind) => kind === "state-snapshot")).toHaveLength(1);
+    });
+    const snapshotCall = vi
+      .mocked(media.eventsDataChannel.send)
+      .mock.calls.map(([data]) => JSON.parse(data))
+      .find((message) => message.kind === "state-snapshot");
+    expect(snapshotCall.snapshotSeq).toBe(50);
+    expect(snapshotCall.state.editor.code).toBe("const v = 50;");
+  });
+
   it("waits for the candidate events DataChannel to open before subscribing and backfills queued events", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();

@@ -21,6 +21,7 @@ import {
   type InterviewMediaSessionState,
 } from "./interviewMediaSession";
 import { createInterviewSyncPublisher } from "./interviewSync";
+import { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
 import {
   createInterviewRoomClient,
   type InterviewRoomClient,
@@ -178,6 +179,7 @@ function useCandidateInterviewRoomSession({
       channel: context.channel,
       roomId: context.roomId,
       sessionId: context.sessionId,
+      snapshotState: INITIAL_REMOTE_INTERVIEW_STABLE_STATE,
     }).subscribeTo(bus, {
       includeBacklog: true,
       shouldPublishEvent: (event) => !publishedRealtimeEventIdsRef.current.has(event.id),
