@@ -1,5 +1,8 @@
 import type { InterviewRoomErrorCode } from "../interview/types.js";
-import type { InterviewRoomService } from "../interview/interviewRoomService.js";
+import {
+  buildInterviewSignalingUrl,
+  type InterviewRoomService,
+} from "../interview/interviewRoomService.js";
 import type { CloudApiHandler } from "./cloudApiHandler.js";
 
 type InterviewApiError = {
@@ -73,6 +76,7 @@ export function createInterviewApiHandler(deps: {
           expiresAt: result.room.expiresAt,
           candidateConnected: Boolean(result.room.candidateConnectionId),
           interviewerConnected: Boolean(result.room.interviewerConnectionId),
+          signalingUrl: buildInterviewSignalingUrl(result.room.id),
         },
         200,
         requestId,

@@ -70,7 +70,7 @@ export function createInterviewRoomService(
       deps.rooms.save(room);
       return {
         room,
-        signalingUrl: `/api/interviews/rooms/${encodeURIComponent(room.id)}/signaling`,
+        signalingUrl: buildInterviewSignalingUrl(room.id),
       };
     },
 
@@ -170,6 +170,10 @@ export function createInterviewRoomService(
       return { ok: true, room: ended };
     },
   };
+}
+
+export function buildInterviewSignalingUrl(roomId: string): string {
+  return `/api/interviews/rooms/${encodeURIComponent(roomId)}/signaling`;
 }
 
 function loadJoinableRoom(

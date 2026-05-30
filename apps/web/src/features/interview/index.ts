@@ -79,6 +79,8 @@ export {
 export {
   RemoteInterviewWorkbenchPage,
   RemoteInterviewWorkbenchView,
+  type RemoteInterviewConnectionState,
+  type RemoteInterviewConnectionStatus,
   type RemoteInterviewWorkbenchPageProps,
   type RemoteInterviewWorkbenchViewProps,
 } from "./RemoteInterviewWorkbenchPage";

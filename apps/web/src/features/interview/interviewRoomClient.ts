@@ -14,6 +14,7 @@ export type GetInterviewRoomResponse = {
   expiresAt: string;
   candidateConnected: boolean;
   interviewerConnected: boolean;
+  signalingUrl: string;
 };
 
 export type EndInterviewRoomResponse = {
@@ -208,7 +209,14 @@ function parseGetRoomResponse(value: unknown): GetInterviewRoomResponse | null {
     expiresAt: value.expiresAt,
     candidateConnected: value.candidateConnected,
     interviewerConnected: value.interviewerConnected,
+    signalingUrl: isNonEmptyString(value.signalingUrl)
+      ? value.signalingUrl
+      : buildSignalingUrl(value.roomId),
   };
+}
+
+function buildSignalingUrl(roomId: string): string {
+  return `/api/interviews/rooms/${encodeURIComponent(roomId)}/signaling`;
 }
 
 function parseEndRoomResponse(value: unknown): EndInterviewRoomResponse | null {

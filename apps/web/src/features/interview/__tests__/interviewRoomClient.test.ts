@@ -31,6 +31,7 @@ describe("InterviewRoomClient", () => {
           expiresAt: "2026-05-29T10:00:00.000Z",
           candidateConnected: true,
           interviewerConnected: true,
+          signalingUrl: "/api/interviews/rooms/room%2F1/signaling",
         });
       }
       if (
@@ -69,6 +70,7 @@ describe("InterviewRoomClient", () => {
         expiresAt: "2026-05-29T10:00:00.000Z",
         candidateConnected: true,
         interviewerConnected: true,
+        signalingUrl: "/api/interviews/rooms/room%2F1/signaling",
       },
     });
     await expect(

@@ -57,6 +57,7 @@ test("GET /api/interviews/rooms/:roomId returns room status when join code match
   assert.equal(response.status, 200);
   assert.equal(body.status, "waiting");
   assert.equal(body.expiresAt, "2026-05-29T10:00:00.000Z");
+  assert.equal(body.signalingUrl, "/api/interviews/rooms/room-1/signaling");
 });
 
 test("POST /api/interviews/rooms/:roomId/end ends a room only for the connected candidate", async () => {
