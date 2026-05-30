@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   Activity,
@@ -14,6 +14,9 @@ import {
   VideoOff,
 } from "lucide-react";
 import { CodeEditor } from "@/features/editor/CodeEditor";
+import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
+import { RuntimeOutputPanel } from "@/features/runtime-preview/RuntimeOutputPanel";
+import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { Toggle, Tooltip } from "@/shared/ui";
 import {
   createInterviewMediaSession,
@@ -56,6 +59,8 @@ export type RemoteInterviewWorkbenchViewProps = {
   workbenchState: RemoteInterviewWorkbenchState;
   mediaState: InterviewMediaSessionState;
   connectionState: RemoteInterviewConnectionState;
+  onToggleMicrophone?: (enabled: boolean) => void;
+  onToggleCamera?: (enabled: boolean) => void;
 };
 
 export type RemoteInterviewWorkbenchPageProps = {
@@ -230,12 +235,29 @@ function RemoteInterviewWorkbenchRoom({
     }
   }, [mediaSession, roomId, workbenchState.snapshotRequestNeeded]);
 
+  const handleToggleMicrophone = useCallback(
+    (enabled: boolean) => {
+      if (!mediaSession) return;
+      setMediaState(mediaSession.setMicrophoneEnabled(enabled));
+    },
+    [mediaSession],
+  );
+  const handleToggleCamera = useCallback(
+    (enabled: boolean) => {
+      if (!mediaSession) return;
+      setMediaState(mediaSession.setCameraEnabled(enabled));
+    },
+    [mediaSession],
+  );
+
   return (
     <RemoteInterviewWorkbenchView
       roomId={roomId}
       workbenchState={workbenchState}
       mediaState={mediaState}
       connectionState={connectionState}
+      onToggleMicrophone={handleToggleMicrophone}
+      onToggleCamera={handleToggleCamera}
     />
   );
 }
@@ -557,10 +579,15 @@ export function RemoteInterviewWorkbenchView({
   workbenchState,
   mediaState,
   connectionState,
+  onToggleMicrophone,
+  onToggleCamera,
 }: RemoteInterviewWorkbenchViewProps) {
   const editor = workbenchState.stableState.editor;
+  const runtime = workbenchState.stableState.runtime;
   const sync = syncStatusView(workbenchState);
   const connection = connectionStatusView(connectionState);
+  const previewRuntime = useMemo(() => createIframeRuntime(), []);
+  const hasPreview = typeof runtime.previewHtml === "string" && runtime.previewHtml.length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -609,6 +636,16 @@ export function RemoteInterviewWorkbenchView({
               scrollLeft={editor.scrollLeft}
             />
           </div>
+          <div className="flex max-h-[45%] min-h-0 flex-col border-t border-border">
+            {hasPreview ? (
+              <PreviewPane
+                runtime={previewRuntime}
+                previewHtml={runtime.previewHtml}
+                className="min-h-0 flex-1"
+              />
+            ) : null}
+            <RuntimeOutputPanel runtime={runtime} />
+          </div>
         </section>
 
         <aside
@@ -617,7 +654,11 @@ export function RemoteInterviewWorkbenchView({
         >
           <ConnectionStatusPanel state={connectionState} view={connection} />
           <SyncDetailPanel state={workbenchState} label={sync.label} detail={sync.detail} />
-          <InterviewMediaPanel state={mediaState} />
+          <InterviewMediaPanel
+            state={mediaState}
+            onToggleMicrophone={onToggleMicrophone}
+            onToggleCamera={onToggleCamera}
+          />
         </aside>
       </div>
     </div>
@@ -672,9 +713,18 @@ function SyncDetailPanel({
   );
 }
 
-function InterviewMediaPanel({ state }: { state: InterviewMediaSessionState }) {
+function InterviewMediaPanel({
+  state,
+  onToggleMicrophone,
+  onToggleCamera,
+}: {
+  state: InterviewMediaSessionState;
+  onToggleMicrophone?: (enabled: boolean) => void;
+  onToggleCamera?: (enabled: boolean) => void;
+}) {
   const micLabel = state.microphoneEnabled ? "麦克风已开启" : "麦克风已关闭";
   const cameraLabel = state.cameraEnabled ? "摄像头已开启" : "摄像头已关闭";
+  const controlsDisabled = !state.localStream;
 
   return (
     <section className="rounded-md border border-border bg-background p-3">
@@ -702,8 +752,8 @@ function InterviewMediaPanel({ state }: { state: InterviewMediaSessionState }) {
         <Tooltip content={micLabel}>
           <Toggle
             pressed={state.microphoneEnabled}
-            onPressedChange={() => {}}
-            disabled
+            onPressedChange={(next) => onToggleMicrophone?.(next)}
+            disabled={controlsDisabled || !onToggleMicrophone}
             label={micLabel}
             icon={<MicOff size={17} />}
             iconPressed={<Mic size={17} />}
@@ -712,8 +762,8 @@ function InterviewMediaPanel({ state }: { state: InterviewMediaSessionState }) {
         <Tooltip content={cameraLabel}>
           <Toggle
             pressed={state.cameraEnabled}
-            onPressedChange={() => {}}
-            disabled
+            onPressedChange={(next) => onToggleCamera?.(next)}
+            disabled={controlsDisabled || !onToggleCamera}
             label={cameraLabel}
             icon={<VideoOff size={17} />}
             iconPressed={<Video size={17} />}

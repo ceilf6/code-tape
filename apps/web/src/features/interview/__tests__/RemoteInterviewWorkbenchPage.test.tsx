@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +38,16 @@ vi.mock("@/features/editor/CodeEditor", () => ({
       </pre>
     );
   },
+}));
+
+vi.mock("@/features/runtime-preview/PreviewPane", () => ({
+  PreviewPane: ({ previewHtml }: { previewHtml?: string | null }) => (
+    <div aria-label="Mock preview pane" data-preview-html={previewHtml ?? ""} />
+  ),
+}));
+
+vi.mock("@/features/runtime-preview/iframeRuntime", () => ({
+  createIframeRuntime: vi.fn(() => ({})),
 }));
 
 describe("RemoteInterviewWorkbenchPage", () => {
@@ -146,6 +156,88 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(screen.getByText("checking")).toBeInTheDocument();
     expect(screen.getByText("事件通道")).toBeInTheDocument();
     expect(screen.getByText("open")).toBeInTheDocument();
+  });
+
+  it("renders the synced runtime console output", () => {
+    renderWorkbenchView({
+      roomId: "room-runtime",
+      workbenchState: makeWorkbenchState({
+        stableState: makeStableState({
+          runtime: {
+            status: "success",
+            stdout: ["hello from candidate"],
+            stderr: [],
+            previewHtml: null,
+            errorMessage: null,
+          },
+        }),
+      }),
+      mediaState: makeMediaState(),
+    });
+
+    expect(screen.getByText("Console")).toBeInTheDocument();
+    expect(screen.getByText("hello from candidate")).toBeInTheDocument();
+    expect(screen.getByText("success")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Mock preview pane")).not.toBeInTheDocument();
+  });
+
+  it("renders the preview pane when the synced runtime has previewHtml", () => {
+    renderWorkbenchView({
+      roomId: "room-preview",
+      workbenchState: makeWorkbenchState({
+        stableState: makeStableState({
+          runtime: {
+            status: "success",
+            stdout: [],
+            stderr: [],
+            previewHtml: "<p>candidate preview</p>",
+            errorMessage: null,
+          },
+        }),
+      }),
+      mediaState: makeMediaState(),
+    });
+
+    const preview = screen.getByLabelText("Mock preview pane");
+    expect(preview).toHaveAttribute("data-preview-html", "<p>candidate preview</p>");
+  });
+
+  it("toggles the interviewer's own microphone and camera once local media is ready", () => {
+    const onToggleMicrophone = vi.fn();
+    const onToggleCamera = vi.fn();
+    const localStream = { id: "local" } as unknown as MediaStream;
+
+    renderWorkbenchView({
+      roomId: "room-devices",
+      workbenchState: makeWorkbenchState(),
+      mediaState: makeMediaState({ localStream }),
+      onToggleMicrophone,
+      onToggleCamera,
+    });
+
+    const micButton = screen.getByRole("button", { name: "麦克风已关闭" });
+    const cameraButton = screen.getByRole("button", { name: "摄像头已关闭" });
+    expect(micButton).toBeEnabled();
+    expect(cameraButton).toBeEnabled();
+
+    fireEvent.click(micButton);
+    fireEvent.click(cameraButton);
+
+    expect(onToggleMicrophone).toHaveBeenCalledWith(true);
+    expect(onToggleCamera).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps device controls disabled until local media is acquired", () => {
+    renderWorkbenchView({
+      roomId: "room-no-media",
+      workbenchState: makeWorkbenchState(),
+      mediaState: makeMediaState({ localStream: null }),
+      onToggleMicrophone: vi.fn(),
+      onToggleCamera: vi.fn(),
+    });
+
+    expect(screen.getByRole("button", { name: "麦克风已关闭" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "摄像头已关闭" })).toBeDisabled();
   });
 
   it("binds local and remote media streams into video elements", async () => {
