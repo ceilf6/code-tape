@@ -1201,6 +1201,7 @@ test('agent prompts rely on git hooks for commit and push quality gates', () => 
   assert.match(bootstrapScript, /git commit so the pre-commit hook runs quality:precommit/u);
   assert.match(bootstrapScript, /git push so the pre-push hook runs quality:local/u);
   assert.match(bootstrapScript, /Do not run hook-owned quality gates manually/u);
+  assert.match(bootstrapScript, /without installed hooks/u);
   assert.doesNotMatch(bootstrapScript, /Before pushing or submitting code: run npm run quality:local/u);
 });
 

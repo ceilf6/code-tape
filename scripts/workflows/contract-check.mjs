@@ -37,7 +37,9 @@ function runBootstrap() {
   console.log('- Commit with git commit so the pre-commit hook runs quality:precommit');
   console.log('- Push with git push so the pre-push hook runs quality:local');
   console.log('- For critical skeleton changes: read GitNexus detect_changes/query/context/impact output');
-  console.log('- Do not run hook-owned quality gates manually unless diagnosing a failure or bypassing hooks');
+  console.log(
+    '- Do not run hook-owned quality gates manually unless diagnosing a failure, bypassing hooks, or working without installed hooks',
+  );
   console.log('- CI remains the final contract gate.');
 }
 

@@ -163,6 +163,66 @@ describe("CandidateInterviewPage", () => {
     expect(screen.getByText("链接已复制")).toBeInTheDocument();
   });
 
+  it("keeps the interviewer room link visible and disables copy when clipboard is unavailable", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: undefined,
+    });
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    expect(screen.getByRole("button", { name: "复制面试官链接" })).toBeDisabled();
+    expect(
+      screen.getByText("http://localhost:3000/interview/interviewer/room-created?joinCode=JOIN1234"),
+    ).toBeInTheDocument();
+  });
+
+  it("resets the copied state when the interviewer room link changes", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    const props: ComponentProps<typeof CandidateInterviewView> = {
+      roomId: "room-1",
+      roomState: {
+        status: "waiting-interviewer",
+        joinCode: "JOIN1234",
+        interviewerOnline: false,
+      },
+      mediaState: makeMediaState(),
+      recordingWorkspace: <div>Recording area</div>,
+    };
+    const { rerender } = render(
+      <TooltipProvider>
+        <CandidateInterviewView {...props} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "复制面试官链接" }));
+    expect(await screen.findByRole("button", { name: "链接已复制" })).toBeInTheDocument();
+
+    rerender(
+      <TooltipProvider>
+        <CandidateInterviewView
+          {...props}
+          roomId="room-2"
+          roomState={{ ...props.roomState, joinCode: "JOIN5678" }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "复制面试官链接" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "链接已复制" })).not.toBeInTheDocument();
+  });
+
   it("starts the candidate media offer after the interviewer joins", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();

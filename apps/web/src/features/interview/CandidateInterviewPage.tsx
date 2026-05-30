@@ -741,6 +741,9 @@ export function CandidateInterviewView({
         : null,
     [roomId, roomState.joinCode],
   );
+  const clipboardAvailable =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const canCopyInterviewerUrl = Boolean(interviewerUrl && clipboardAvailable);
   const copyLabel =
     copyState === "copied"
       ? "链接已复制"
@@ -748,13 +751,19 @@ export function CandidateInterviewView({
         ? "复制失败"
         : "复制面试官链接";
   const CopyIcon = copyState === "copied" ? Check : Copy;
+  useEffect(() => {
+    setCopyState("idle");
+  }, [interviewerUrl]);
   const copyInterviewerUrl = useCallback(() => {
-    if (!interviewerUrl || !navigator.clipboard) return;
+    if (!interviewerUrl || !clipboardAvailable) {
+      setCopyState("failed");
+      return;
+    }
     void navigator.clipboard
       .writeText(interviewerUrl)
       .then(() => setCopyState("copied"))
       .catch(() => setCopyState("failed"));
-  }, [interviewerUrl]);
+  }, [clipboardAvailable, interviewerUrl]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -776,7 +785,7 @@ export function CandidateInterviewView({
         <button
           type="button"
           onClick={copyInterviewerUrl}
-          disabled={!interviewerUrl}
+          disabled={!canCopyInterviewerUrl}
           className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <CopyIcon aria-hidden size={16} />
@@ -823,6 +832,7 @@ export function CandidateInterviewView({
               {roomState.signalingUrl ? (
                 <Metric label="信令" value={roomState.signalingUrl} />
               ) : null}
+              {interviewerUrl ? <Metric label="面试官链接" value={interviewerUrl} /> : null}
               <Metric label="WebRTC" value={mediaState.connectionState} />
               <Metric label="ICE" value={mediaState.iceConnectionState} />
             </dl>
