@@ -1,9 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-30T04:04:18Z",
+  "updatedAt": "2026-05-30T04:50:14Z",
   "students": {
     "ceilf6": {
-      "activeIssue": [],
+      "activeIssue": [
+        195
+      ],
       "completedIssues": [
         11,
         10,
@@ -1050,6 +1052,21 @@
       "claimedAt": "2026-05-29T22:14:48Z",
       "closedAt": "2026-05-29T22:55:44Z",
       "mergedPr": 194
+    },
+    "195": {
+      "number": 195,
+      "title": "[P1+ WebRTC] 面试官信令加入与 SDP/ICE 应答接线",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript",
+        "node"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-30T04:50:14Z",
+      "closedAt": null,
+      "mergedPr": null
     },
     "196": {
       "number": 196,
