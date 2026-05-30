@@ -70,6 +70,7 @@ export type RemoteInterviewWorkbenchPageProps = {
 type RemoteInterviewWorkbenchRoomProps = {
   roomId: string;
   joinCode: string | null;
+  joinCodeInvalid: boolean;
   deps: NonNullable<RemoteInterviewWorkbenchPageProps["deps"]>;
 };
 
@@ -90,13 +91,15 @@ export function RemoteInterviewWorkbenchPage({
 }: RemoteInterviewWorkbenchPageProps = {}) {
   const { roomId = "unknown" } = useParams();
   const [searchParams] = useSearchParams();
-  const joinCode = normalizeJoinCode(searchParams.get("joinCode"));
+  const joinCodeResult = parseJoinCode(searchParams.get("joinCode"));
+  const joinCode = joinCodeResult.status === "valid" ? joinCodeResult.joinCode : null;
 
   return (
     <RemoteInterviewWorkbenchRoom
-      key={`${roomId}::${joinCode ?? ""}`}
+      key={`${roomId}::${joinCodeResult.key}`}
       roomId={roomId}
       joinCode={joinCode}
+      joinCodeInvalid={joinCodeResult.status === "invalid"}
       deps={deps}
     />
   );
@@ -105,6 +108,7 @@ export function RemoteInterviewWorkbenchPage({
 function RemoteInterviewWorkbenchRoom({
   roomId,
   joinCode,
+  joinCodeInvalid,
   deps,
 }: RemoteInterviewWorkbenchRoomProps) {
   const createMediaSession = deps.createMediaSession ?? createInterviewMediaSession;
@@ -127,7 +131,7 @@ function RemoteInterviewWorkbenchRoom({
     emptyInterviewMediaSessionState,
   );
   const [connectionState, setConnectionState] = useState<RemoteInterviewConnectionState>(() =>
-    initialConnectionState(joinCode),
+    initialConnectionState(joinCode, joinCodeInvalid),
   );
   const [sessionEpoch, setSessionEpoch] = useState(0);
 
@@ -180,6 +184,13 @@ function RemoteInterviewWorkbenchRoom({
     if (!mediaSession) {
       return undefined;
     }
+    if (joinCodeInvalid) {
+      setConnectionState({
+        status: "missing-join-code",
+        errorMessage: "joinCode 格式非法，无法加入面试房间",
+      });
+      return undefined;
+    }
     return connectInterviewerSignaling({
       roomId,
       joinCode,
@@ -189,7 +200,7 @@ function RemoteInterviewWorkbenchRoom({
       onConnectionState: setConnectionState,
       onCandidateLeft: () => setSessionEpoch((epoch) => epoch + 1),
     });
-  }, [createSignalingClient, joinCode, mediaSession, roomClient, roomId]);
+  }, [createSignalingClient, joinCode, joinCodeInvalid, mediaSession, roomClient, roomId]);
 
   return (
     <RemoteInterviewWorkbenchView
@@ -313,7 +324,7 @@ function connectInterviewerSignaling({
     return true;
   };
   const answerCandidateOffer = (sdp: string) => {
-    if (answerStarted) return;
+    if (closed || answerStarted) return;
     answerStarted = true;
     onConnectionState({ status: "connecting", errorMessage: null });
     void (async () => {
@@ -350,6 +361,7 @@ function connectInterviewerSignaling({
   const applyRemoteIceCandidate = (
     message: Extract<InboundSignalingMessage, { kind: "ice-candidate" }>,
   ) => {
+    if (closed) return;
     if (!shouldApplyCandidateMessage(message)) return;
     const candidate = {
       candidate: message.candidate,
@@ -363,6 +375,7 @@ function connectInterviewerSignaling({
     addRemoteIceCandidate(candidate);
   };
   const handleMessage = (message: InboundSignalingMessage) => {
+    if (closed) return;
     if ("roomId" in message && message.roomId !== roomId) return;
 
     if (message.kind === "connected") {
@@ -440,15 +453,37 @@ function connectInterviewerSignaling({
   };
 }
 
-function normalizeJoinCode(value: string | null): string | null {
+type ParsedJoinCode =
+  | { status: "missing"; key: ""; joinCode: null }
+  | { status: "invalid"; key: string; joinCode: null }
+  | { status: "valid"; key: string; joinCode: string };
+
+const JOIN_CODE_PATTERN = /^[0-9A-Za-z]{8}$/u;
+
+function parseJoinCode(value: string | null): ParsedJoinCode {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+  if (!trimmed) {
+    return { status: "missing", key: "", joinCode: null };
+  }
+  if (!JOIN_CODE_PATTERN.test(trimmed)) {
+    return { status: "invalid", key: `invalid:${trimmed}`, joinCode: null };
+  }
+  return { status: "valid", key: trimmed, joinCode: trimmed };
 }
 
-function initialConnectionState(joinCode: string | null): RemoteInterviewConnectionState {
-  return joinCode
-    ? { status: "validating-room", errorMessage: null }
-    : { status: "missing-join-code", errorMessage: "缺少 joinCode，无法加入面试房间" };
+function initialConnectionState(
+  joinCode: string | null,
+  joinCodeInvalid: boolean,
+): RemoteInterviewConnectionState {
+  if (joinCode) {
+    return { status: "validating-room", errorMessage: null };
+  }
+  return {
+    status: "missing-join-code",
+    errorMessage: joinCodeInvalid
+      ? "joinCode 格式非法，无法加入面试房间"
+      : "缺少 joinCode，无法加入面试房间",
+  };
 }
 
 function interviewerMediaErrorMessage(error: unknown): string {

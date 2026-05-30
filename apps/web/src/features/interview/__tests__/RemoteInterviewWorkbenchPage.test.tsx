@@ -771,6 +771,66 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     expect(media.session.close).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores stale signaling messages emitted after the page unmounts", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    const view = renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    view.unmount();
+    vi.mocked(signaling.client.sendJoin).mockClear();
+
+    act(() => {
+      signaling.emit({
+        kind: "connected",
+        roomId: "room-live",
+        connectionId: "interviewer-connection-1",
+      });
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-late",
+        messageId: "offer-late",
+        sentAt: 1_780_000_000_000,
+        sdp: "late-offer-sdp",
+      });
+    });
+
+    expect(signaling.client.sendJoin).not.toHaveBeenCalled();
+    expect(media.session.requestLocalMedia).not.toHaveBeenCalled();
+    expect(media.session.setRemoteDescription).not.toHaveBeenCalled();
+    expect(signaling.client.sendAnswer).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed join code locally without validating the room", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=SHORT",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+
+    expect(
+      await screen.findByText("joinCode 格式非法，无法加入面试房间"),
+    ).toBeInTheDocument();
+    expect(roomClient.getRoom).not.toHaveBeenCalled();
+    expect(signaling.create).not.toHaveBeenCalled();
+  });
+
   it("buffers candidate ICE until the remote offer description is applied", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();
