@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash";
-import { RECORDING_SCHEMA_VERSION, type RecordingPackageV1 } from "@code-tape/recording-schema";
+import {
+  RECORDING_SCHEMA_VERSION,
+  verifyRecordingPackageIntegrity,
+  type PackageLoadResult,
+  type RecordingPackageV1,
+} from "@code-tape/recording-schema";
 import { createCloudRecordingService } from "../../cloud/cloudRecordingService.js";
 import { createMemoryMetadataRepository } from "../../cloud/memoryMetadataRepository.js";
 import { createLocalDevObjectStorage } from "../../cloud/localDevObjectStorage.js";
@@ -174,6 +179,7 @@ test("cloud playback center acceptance flow stays ready through upload, playback
   assert.equal(playbackResponse.status, 200);
   const playback = (await playbackResponse.json()) as {
     title: string;
+    schemaVersion: string;
     indexesUrl: string | null;
     manifestUrl: string;
     metaUrl: string;
@@ -186,6 +192,20 @@ test("cloud playback center acceptance flow stays ready through upload, playback
   assert.deepEqual(await readJsonAsset(handler, playback.snapshotsUrl), pkg.snapshots);
   assert.deepEqual(await readJsonAsset(handler, playback.manifestUrl), pkg.manifest);
   assert.deepEqual(await readJsonAsset(handler, playback.metaUrl), pkg.meta);
+
+  // Consume the descriptor exactly like CloudPackageLoader does (assemble the
+  // package from the descriptor URLs, then run the shared integrity verifier).
+  // The descriptor exposes no indexes asset, so this proves playback still
+  // loads when `indexes` is absent — the player rebuilds the replay index from
+  // events/snapshots at runtime.
+  const loaded = await loadPackageFromDescriptor(handler, playback);
+  assert.equal(loaded.ok, true, "cloud playback descriptor should load into a playable package");
+  if (!loaded.ok) throw new Error("expected descriptor to load");
+  assert.equal(loaded.package.indexes, undefined);
+  assert.equal(loaded.package.meta.title, "Two Sum Cloud Demo");
+  assert.equal(loaded.package.events.length, pkg.events.length);
+  assert.equal(loaded.package.snapshots.length, pkg.snapshots.length);
+  assert.deepEqual(loaded.warnings, []);
 
   const renameResponse = await handler(
     new Request(`http://localhost/api/recordings/${created.recordingId}`, {
@@ -209,6 +229,31 @@ test("cloud playback center acceptance flow stays ready through upload, playback
   assert.equal(renamedPlaybackResponse.status, 200);
   assert.equal(
     ((await renamedPlaybackResponse.json()) as { title: string }).title,
+    "Two Sum Cloud Demo Renamed",
+  );
+
+  // Rename must stay consistent across list, detail, and playback (issue #174).
+  const renamedListResponse = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-main" },
+    }),
+  );
+  assert.equal(renamedListResponse.status, 200);
+  const renamedList = (await renamedListResponse.json()) as {
+    items: Array<{ id: string; title: string }>;
+  };
+  assert.equal(renamedList.items[0]?.title, "Two Sum Cloud Demo Renamed");
+
+  const detailResponse = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-main" },
+    }),
+  );
+  assert.equal(detailResponse.status, 200);
+  assert.equal(
+    ((await detailResponse.json()) as { recording: { title: string } }).recording.title,
     "Two Sum Cloud Demo Renamed",
   );
 
@@ -416,4 +461,39 @@ async function readJsonAsset(handler: (request: Request) => Promise<Response>, u
   const response = await handler(new Request(url, { method: "GET" }));
   assert.equal(response.status, 200);
   return response.json();
+}
+
+// Mirrors CloudPackageLoader.loadFromDescriptor (apps/web): assemble the package
+// from the descriptor's asset URLs and verify integrity. `indexes` stays absent
+// when the descriptor exposes no indexesUrl, matching the loader's runtime path.
+async function loadPackageFromDescriptor(
+  handler: (request: Request) => Promise<Response>,
+  descriptor: {
+    schemaVersion: string;
+    manifestUrl: string;
+    metaUrl: string;
+    eventsUrl: string;
+    snapshotsUrl: string;
+    indexesUrl: string | null;
+  },
+): Promise<PackageLoadResult> {
+  const [manifest, meta, events, snapshots, indexes] = await Promise.all([
+    readJsonAsset(handler, descriptor.manifestUrl),
+    readJsonAsset(handler, descriptor.metaUrl),
+    readJsonAsset(handler, descriptor.eventsUrl),
+    readJsonAsset(handler, descriptor.snapshotsUrl),
+    descriptor.indexesUrl
+      ? readJsonAsset(handler, descriptor.indexesUrl)
+      : Promise.resolve(undefined),
+  ]);
+  const pkg = {
+    schemaVersion: descriptor.schemaVersion,
+    manifest,
+    meta,
+    events,
+    snapshots,
+    media: null,
+    indexes,
+  };
+  return verifyRecordingPackageIntegrity(pkg, null);
 }
