@@ -610,6 +610,40 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     expect(signaling.client.sendAnswer).not.toHaveBeenCalled();
   });
 
+  it("surfaces a failed connection and skips the answer when media permission is denied", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory({
+      requestLocalMedia: vi.fn().mockRejectedValue(new Error("camera denied")),
+    });
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-1",
+        sentAt: 1_780_000_000_000,
+        sdp: "candidate-offer-sdp",
+      });
+    });
+
+    expect(await screen.findByText("camera denied")).toBeInTheDocument();
+    expect(media.session.createAnswer).not.toHaveBeenCalled();
+    expect(signaling.client.sendAnswer).not.toHaveBeenCalled();
+  });
+
   it("exposes an error and skips signaling when the join code is missing", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();
@@ -785,7 +819,7 @@ function makeSignalingFactory() {
   };
 }
 
-function makeInterviewerMediaSessionFactory() {
+function makeInterviewerMediaSessionFactory(patch: Partial<InterviewMediaSession> = {}) {
   let state = makeMediaState();
   let channel: TestEventsDataChannel | null = null;
   const listeners = new Set<(next: InterviewMediaSessionState) => void>();
@@ -832,6 +866,7 @@ function makeInterviewerMediaSessionFactory() {
         eventsDataChannelState: "closed",
       }),
     ),
+    ...patch,
   };
 
   return {
