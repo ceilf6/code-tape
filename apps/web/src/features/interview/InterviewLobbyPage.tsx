@@ -24,8 +24,8 @@ export function InterviewLobbyPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col items-center justify-center bg-background px-4 py-8 text-foreground">
-      <div className="w-full max-w-3xl">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-background px-4 py-8 text-foreground">
+      <div className="mx-auto my-auto w-full max-w-3xl">
         <div className="flex items-center gap-2">
           <Radio aria-hidden size={20} className="text-primary" />
           <h1 className="font-display text-xl font-semibold">实时面试</h1>
