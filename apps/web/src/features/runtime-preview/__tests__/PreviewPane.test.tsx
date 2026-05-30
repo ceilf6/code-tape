@@ -28,4 +28,13 @@ describe("PreviewPane", () => {
 
     expect(runtime.reset).toHaveBeenCalledTimes(1);
   });
+
+  it("hides the reset action when showReset is false", async () => {
+    const runtime = makeRuntime();
+
+    render(<PreviewPane runtime={runtime} showReset={false} />);
+    await waitFor(() => expect(runtime.mount).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: "重置预览" })).not.toBeInTheDocument();
+  });
 });

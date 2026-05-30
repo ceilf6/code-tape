@@ -636,12 +636,13 @@ export function RemoteInterviewWorkbenchView({
               scrollLeft={editor.scrollLeft}
             />
           </div>
-          <div className="flex max-h-[45%] min-h-0 flex-col border-t border-border">
+          <div className="flex flex-col border-t border-border">
             {hasPreview ? (
               <PreviewPane
                 runtime={previewRuntime}
                 previewHtml={runtime.previewHtml}
-                className="min-h-0 flex-1"
+                showReset={false}
+                className="h-64 shrink-0"
               />
             ) : null}
             <RuntimeOutputPanel runtime={runtime} />
