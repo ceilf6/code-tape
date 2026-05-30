@@ -38,7 +38,7 @@ export function AppShell() {
             录制
           </NavLink>
           <NavLink
-            to="/interview/candidate"
+            to="/interview"
             className={({ isActive }) =>
               [
                 "rounded-md px-2 py-1 transition-colors",

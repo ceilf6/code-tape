@@ -84,6 +84,8 @@ export {
   type RemoteInterviewWorkbenchPageProps,
   type RemoteInterviewWorkbenchViewProps,
 } from "./RemoteInterviewWorkbenchPage";
+export { InterviewLobbyPage } from "./InterviewLobbyPage";
+export { parseInterviewerLink, type ParsedInterviewerLink } from "./interviewerLink";
 export { INITIAL_REMOTE_INTERVIEW_STABLE_STATE } from "./remoteInterviewInitialState";
 export {
   createRemoteInterviewWorkbench,

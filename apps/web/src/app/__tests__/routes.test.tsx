@@ -13,10 +13,16 @@ describe("appRoutes", () => {
     expect(childPaths).toContain("cloud/replay/:id");
     expect(childPaths).toContain("s/:token");
   });
+
+  it("registers the interview lobby route", () => {
+    const childPaths = appRoutes[0]?.children?.map((route) => route.path) ?? [];
+
+    expect(childPaths).toContain("interview");
+  });
 });
 
 describe("AppShell", () => {
-  it("exposes the candidate interview entry in the top navigation", () => {
+  it("exposes the interview lobby entry in the top navigation", () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
@@ -25,9 +31,6 @@ describe("AppShell", () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("link", { name: "面试" })).toHaveAttribute(
-      "href",
-      "/interview/candidate",
-    );
+    expect(screen.getByRole("link", { name: "面试" })).toHaveAttribute("href", "/interview");
   });
 });
