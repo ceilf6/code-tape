@@ -246,6 +246,7 @@ function connectInterviewerSignaling({
   let remoteDescriptionSet = false;
   let activeCandidateConnectionId: string | null = null;
   let pendingRemoteIceCandidates: Array<{
+    connectionId: string;
     candidate: string;
     sdpMid?: string | null;
     sdpMLineIndex?: number | null;
@@ -255,11 +256,17 @@ function connectInterviewerSignaling({
     if (closed) return;
     onConnectionState({ status: "failed", errorMessage });
   };
-  const failAndStopMedia = (errorMessage: string) => {
-    if (closed) return;
+  const stopSession = () => {
+    closed = true;
+    unsubscribeMediaSession?.();
+    unsubscribeMediaSession = null;
     mediaSession.close();
     signalingClient?.close();
     signalingClient = null;
+  };
+  const failAndStopMedia = (errorMessage: string) => {
+    if (closed) return;
+    stopSession();
     onConnectionState({ status: "failed", errorMessage });
   };
   const resetCandidateSession = () => {
@@ -306,21 +313,15 @@ function connectInterviewerSignaling({
     const pending = pendingRemoteIceCandidates;
     pendingRemoteIceCandidates = [];
     for (const candidate of pending) {
+      if (candidate.connectionId !== activeCandidateConnectionId) continue;
       addRemoteIceCandidate(candidate);
     }
   };
-  const shouldApplyCandidateMessage = (message: {
-    role: "candidate" | "interviewer";
-    connectionId: string;
-  }) => {
-    if (message.role !== "candidate") return false;
-    if (
-      activeCandidateConnectionId &&
-      activeCandidateConnectionId !== message.connectionId
-    ) {
+  const claimCandidateConnection = (connectionId: string) => {
+    if (activeCandidateConnectionId && activeCandidateConnectionId !== connectionId) {
       return false;
     }
-    activeCandidateConnectionId = message.connectionId;
+    activeCandidateConnectionId = connectionId;
     return true;
   };
   const answerCandidateOffer = (sdp: string) => {
@@ -362,13 +363,17 @@ function connectInterviewerSignaling({
     message: Extract<InboundSignalingMessage, { kind: "ice-candidate" }>,
   ) => {
     if (closed) return;
-    if (!shouldApplyCandidateMessage(message)) return;
+    if (message.role !== "candidate") return;
+    if (activeCandidateConnectionId && activeCandidateConnectionId !== message.connectionId) {
+      return;
+    }
     const candidate = {
+      connectionId: message.connectionId,
       candidate: message.candidate,
       sdpMid: message.sdpMid ?? null,
       sdpMLineIndex: message.sdpMLineIndex ?? null,
     };
-    if (!remoteDescriptionSet) {
+    if (!activeCandidateConnectionId || !remoteDescriptionSet) {
       pendingRemoteIceCandidates = [...pendingRemoteIceCandidates, candidate];
       return;
     }
@@ -386,9 +391,7 @@ function connectInterviewerSignaling({
       return;
     }
     if (message.kind === "ended") {
-      mediaSession.close();
-      signalingClient?.close();
-      signalingClient = null;
+      stopSession();
       onConnectionState({ status: "failed", errorMessage: "面试房间已结束" });
       return;
     }
@@ -408,7 +411,8 @@ function connectInterviewerSignaling({
       return;
     }
     if (message.kind === "offer") {
-      if (!shouldApplyCandidateMessage(message)) return;
+      if (message.role !== "candidate") return;
+      if (!claimCandidateConnection(message.connectionId)) return;
       answerCandidateOffer(message.sdp);
       return;
     }
