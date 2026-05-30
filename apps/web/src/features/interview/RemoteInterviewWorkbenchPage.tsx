@@ -129,17 +129,24 @@ function RemoteInterviewWorkbenchRoom({
   const [connectionState, setConnectionState] = useState<RemoteInterviewConnectionState>(() =>
     initialConnectionState(joinCode),
   );
+  const [sessionEpoch, setSessionEpoch] = useState(0);
 
   useEffect(() => workbench.subscribe(setWorkbenchState), [workbench]);
   useEffect(() => {
     const nextMediaSession = safeCreateMediaSession(createMediaSession);
     setMediaSession(nextMediaSession);
     setMediaState(nextMediaSession?.getState() ?? emptyInterviewMediaSessionState());
+    if (!nextMediaSession && joinCode) {
+      setConnectionState({
+        status: "failed",
+        errorMessage: "当前环境不支持 WebRTC，无法建立面试音视频连接",
+      });
+    }
 
     return () => {
       nextMediaSession?.close();
     };
-  }, [createMediaSession]);
+  }, [createMediaSession, joinCode, sessionEpoch]);
   useEffect(() => {
     if (!mediaSession) {
       return undefined;
@@ -180,6 +187,7 @@ function RemoteInterviewWorkbenchRoom({
       createSignalingClient,
       mediaSession,
       onConnectionState: setConnectionState,
+      onCandidateLeft: () => setSessionEpoch((epoch) => epoch + 1),
     });
   }, [createSignalingClient, joinCode, mediaSession, roomClient, roomId]);
 
@@ -200,6 +208,7 @@ function connectInterviewerSignaling({
   createSignalingClient,
   mediaSession,
   onConnectionState,
+  onCandidateLeft,
 }: {
   roomId: string;
   joinCode: string | null;
@@ -209,6 +218,7 @@ function connectInterviewerSignaling({
   ) => InterviewSignalingClient;
   mediaSession: InterviewMediaSession;
   onConnectionState: (state: RemoteInterviewConnectionState) => void;
+  onCandidateLeft: () => void;
 }): () => void {
   if (!joinCode) {
     onConnectionState({
@@ -222,11 +232,23 @@ function connectInterviewerSignaling({
   let signalingClient: InterviewSignalingClient | null = null;
   let unsubscribeMediaSession: (() => void) | null = null;
   let answerStarted = false;
+  let remoteDescriptionSet = false;
   let activeCandidateConnectionId: string | null = null;
+  let pendingRemoteIceCandidates: Array<{
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }> = [];
 
   const fail = (errorMessage: string) => {
     if (closed) return;
     onConnectionState({ status: "failed", errorMessage });
+  };
+  const resetCandidateSession = () => {
+    answerStarted = false;
+    remoteDescriptionSet = false;
+    activeCandidateConnectionId = null;
+    pendingRemoteIceCandidates = [];
   };
   const sendPendingIceCandidates = () => {
     if (closed || !signalingClient) return;
@@ -243,6 +265,30 @@ function connectInterviewerSignaling({
         fail(`ice candidate failed: ${sendResult.reason}`);
         return;
       }
+    }
+  };
+  const addRemoteIceCandidate = (candidate: {
+    candidate: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+  }) => {
+    void (async () => {
+      try {
+        await mediaSession.addRemoteIceCandidate({
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid ?? null,
+          sdpMLineIndex: candidate.sdpMLineIndex ?? null,
+        });
+      } catch (error) {
+        fail(interviewerMediaErrorMessage(error));
+      }
+    })();
+  };
+  const flushPendingRemoteIceCandidates = () => {
+    const pending = pendingRemoteIceCandidates;
+    pendingRemoteIceCandidates = [];
+    for (const candidate of pending) {
+      addRemoteIceCandidate(candidate);
     }
   };
   const shouldApplyCandidateMessage = (message: {
@@ -269,6 +315,8 @@ function connectInterviewerSignaling({
         if (closed) return;
         await mediaSession.setRemoteDescription({ type: "offer", sdp });
         if (closed) return;
+        remoteDescriptionSet = true;
+        flushPendingRemoteIceCandidates();
         const answer = await mediaSession.createAnswer();
         if (closed) return;
         if (!answer.sdp) {
@@ -296,17 +344,16 @@ function connectInterviewerSignaling({
     message: Extract<InboundSignalingMessage, { kind: "ice-candidate" }>,
   ) => {
     if (!shouldApplyCandidateMessage(message)) return;
-    void (async () => {
-      try {
-        await mediaSession.addRemoteIceCandidate({
-          candidate: message.candidate,
-          sdpMid: message.sdpMid ?? null,
-          sdpMLineIndex: message.sdpMLineIndex ?? null,
-        });
-      } catch (error) {
-        fail(interviewerMediaErrorMessage(error));
-      }
-    })();
+    const candidate = {
+      candidate: message.candidate,
+      sdpMid: message.sdpMid ?? null,
+      sdpMLineIndex: message.sdpMLineIndex ?? null,
+    };
+    if (!remoteDescriptionSet) {
+      pendingRemoteIceCandidates = [...pendingRemoteIceCandidates, candidate];
+      return;
+    }
+    addRemoteIceCandidate(candidate);
   };
   const handleMessage = (message: InboundSignalingMessage) => {
     if ("roomId" in message && message.roomId !== roomId) return;
@@ -319,11 +366,25 @@ function connectInterviewerSignaling({
       return;
     }
     if (message.kind === "ended") {
+      mediaSession.close();
+      signalingClient?.close();
+      signalingClient = null;
       onConnectionState({ status: "failed", errorMessage: "面试房间已结束" });
       return;
     }
     if (message.kind === "error") {
       fail(message.message);
+      return;
+    }
+    if (message.kind === "leave" && message.role === "candidate") {
+      if (
+        activeCandidateConnectionId &&
+        activeCandidateConnectionId === message.connectionId
+      ) {
+        resetCandidateSession();
+        onConnectionState({ status: "connecting", errorMessage: null });
+        onCandidateLeft();
+      }
       return;
     }
     if (message.kind === "offer") {
