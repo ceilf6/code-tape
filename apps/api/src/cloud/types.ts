@@ -167,8 +167,10 @@ export type RenameRecordingResponse = {
 
 export type DeleteRecordingResponse = {
   id: string;
+  recordingId: string;
   status: "soft_deleted";
   deletedAt: string;
+  purgeAfter: string;
 };
 
 export type CreateShareLinkRequest = {

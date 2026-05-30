@@ -702,6 +702,50 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     expect(requestCount).toBe(1);
   });
 
+  it("sends a hash-mismatch snapshot-request when content validation fails", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    let channel!: TestEventsDataChannel;
+    act(() => {
+      channel = media.attachEventsDataChannel();
+      channel.emit(
+        JSON.stringify({
+          ...recordingMessage(contentEvent(1, "const corrupted = true;")),
+          contentHash: "fnv1a-deadbeef",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      const requests = vi
+        .mocked(channel.send)
+        .mock.calls.map(([data]) => JSON.parse(data))
+        .filter((message) => message.kind === "snapshot-request");
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        roomId: "room-live",
+        reason: "hash-mismatch",
+        expectedSeq: 1,
+        lastAppliedSeq: 0,
+      });
+    });
+    expect(
+      screen.getByText("事件 seq 1 内容校验失败，已保留 seq 0 的稳定状态"),
+    ).toBeInTheDocument();
+  });
+
   it("ignores cross-room and non-candidate media messages", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();
