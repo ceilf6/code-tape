@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, type ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appRoutes } from "@/app/routes";
 import type { EventBus, RecordingEvent } from "@/shared/recording-schema";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
@@ -76,6 +76,10 @@ describe("CandidateInterviewPage", () => {
     recorderPageMock.reset();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("creates a room and connects candidate signaling from the candidate entry route", async () => {
     const roomClient = makeRoomClient({
       createRoom: vi.fn().mockResolvedValue({
@@ -131,6 +135,32 @@ describe("CandidateInterviewPage", () => {
 
     expect(screen.getAllByText("面试官已加入")).toHaveLength(2);
     expect(screen.getByText("面试官在线")).toBeInTheDocument();
+  });
+
+  it("copies the interviewer room link after creating a candidate room", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+
+    renderCandidatePage({
+      initialEntry: "/interview/candidate",
+      roomClient,
+      createSignalingClient: signaling.create,
+    });
+    await screen.findByText("room-created");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制面试官链接" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        "http://localhost:3000/interview/interviewer/room-created?joinCode=JOIN1234",
+      );
+    });
+    expect(screen.getByText("链接已复制")).toBeInTheDocument();
   });
 
   it("starts the candidate media offer after the interviewer joins", async () => {

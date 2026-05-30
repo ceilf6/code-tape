@@ -1,4 +1,8 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { ThemeProvider } from "@/shared/ui/themeProvider";
+import { AppShell } from "../AppShell";
 import { appRoutes } from "../routes";
 
 describe("appRoutes", () => {
@@ -8,5 +12,22 @@ describe("appRoutes", () => {
     expect(childPaths).toContain("replays/:id");
     expect(childPaths).toContain("cloud/replay/:id");
     expect(childPaths).toContain("s/:token");
+  });
+});
+
+describe("AppShell", () => {
+  it("exposes the candidate interview entry in the top navigation", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <AppShell />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: "面试" })).toHaveAttribute(
+      "href",
+      "/interview/candidate",
+    );
   });
 });

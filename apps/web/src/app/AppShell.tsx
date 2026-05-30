@@ -37,6 +37,17 @@ export function AppShell() {
           >
             录制
           </NavLink>
+          <NavLink
+            to="/interview/candidate"
+            className={({ isActive }) =>
+              [
+                "rounded-md px-2 py-1 transition-colors",
+                isActive ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground",
+              ].join(" ")
+            }
+          >
+            面试
+          </NavLink>
         </nav>
         <span className="flex-1" />
         <button
