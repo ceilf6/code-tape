@@ -1,4 +1,5 @@
 import {
+  buildInitialReplayStateFromRecordStart,
   cloneReplayStableState,
   replayReducer,
   STABLE_EVENT_TYPES,
@@ -116,7 +117,13 @@ export function createInterviewSyncPublisher(
 
   const advanceSnapshotState = (event: RecordingEvent) => {
     if (snapshotState) {
-      snapshotState = replayReducer(snapshotState, event);
+      // record-start carries the candidate's actual initial setup (language,
+      // font, theme); replayReducer leaves it unchanged, so seed from it
+      // directly — otherwise snapshots would carry hard-coded defaults.
+      snapshotState =
+        event.type === "record-start"
+          ? buildInitialReplayStateFromRecordStart(event.payload)
+          : replayReducer(snapshotState, event);
     }
     lastPublishedSeq = event.seq;
     lastPublishedTimestampMs = event.timestampMs;
@@ -202,9 +209,11 @@ export function createInterviewSyncPublisher(
       const publishFromSubscription = (event: RecordingEvent) => {
         if (subscribeOptions.shouldPublishEvent?.(event) === false) {
           // Event was already published by a prior publisher (e.g. after a
-          // DataChannel reopen). Still advance the running snapshot state so a
-          // later snapshot reflects the full published timeline.
+          // DataChannel reopen). Still advance the running snapshot state and
+          // re-check the snapshot threshold so a reopened channel can resync
+          // from the reconstructed backlog even without new edits.
           advanceSnapshotState(event);
+          maybeEmitSnapshot();
           return;
         }
         const result = publishRecordingEvent(event);

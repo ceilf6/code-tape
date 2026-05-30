@@ -38,6 +38,30 @@ function contentEvent(seq: number, code = `code-${seq}`): RecordingEvent {
   };
 }
 
+function recordStartEvent(seq: number): RecordingEvent {
+  return {
+    id: `event-${seq}`,
+    seq,
+    timestampMs: seq * 100,
+    source: "recorder",
+    track: "main",
+    type: "record-start",
+    payload: {
+      initialLanguage: "javascript",
+      initialFontSize: 18,
+      initialTheme: "light",
+      selectedAudioDeviceId: null,
+      selectedCameraDeviceId: null,
+      mediaCapability: {
+        audio: "available",
+        camera: "available",
+        selectedAudioDeviceId: null,
+        selectedCameraDeviceId: null,
+      },
+    },
+  };
+}
+
 function createFakeChannel(initialState: InterviewRealtimeDataChannel["readyState"] = "open") {
   const sent: string[] = [];
   const channel: InterviewRealtimeDataChannel = {
@@ -258,6 +282,59 @@ describe("InterviewSyncPublisher", () => {
 
     expect(publisher.publishSnapshot()).toEqual({ ok: false, reason: "channel-not-open" });
     expect(sent).toEqual([]);
+  });
+
+  it("seeds the snapshot state from the record-start payload", () => {
+    const { channel, sent } = createFakeChannel();
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      snapshotState: initialStableState(),
+    });
+
+    publisher.publishRecordingEvent(recordStartEvent(1));
+    publisher.publishSnapshot();
+    const seededOnly = JSON.parse(sent.at(-1)!);
+    expect(seededOnly.state.editor.language).toBe("javascript");
+    expect(seededOnly.state.editor.fontSize).toBe(18);
+    expect(seededOnly.state.editor.theme).toBe("light");
+
+    publisher.publishRecordingEvent(contentEvent(2, "const seeded = true;"));
+    publisher.publishSnapshot();
+    const snapshot = JSON.parse(sent.at(-1)!);
+    // content-change carries its own language; fontSize/theme remain seeded.
+    expect(snapshot.state.editor.fontSize).toBe(18);
+    expect(snapshot.state.editor.theme).toBe("light");
+    expect(snapshot.state.editor.code).toBe("const seeded = true;");
+  });
+
+  it("emits a snapshot after rebuilding deduped backlog past the event threshold", () => {
+    const { channel, sent } = createFakeChannel();
+    const events = Array.from({ length: 3 }, (_, index) => contentEvent(index + 1, `const v = ${index + 1};`));
+    const bus = createFakeEventBus(events.slice());
+    const alreadyPublished = new Set(events.map((event) => event.id));
+    const publisher = createInterviewSyncPublisher({
+      channel,
+      roomId: "room-1",
+      sessionId: "session-1",
+      snapshotState: initialStableState(),
+      snapshotEventInterval: 3,
+      snapshotTimeIntervalMs: Number.POSITIVE_INFINITY,
+    });
+
+    const unsubscribe = publisher.subscribeTo(bus, {
+      includeBacklog: true,
+      shouldPublishEvent: (event) => !alreadyPublished.has(event.id),
+    });
+    unsubscribe();
+
+    const messages = sent.map((raw) => JSON.parse(raw));
+    expect(messages.filter((message) => message.kind === "recording-event")).toHaveLength(0);
+    const snapshots = messages.filter((message) => message.kind === "state-snapshot");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].snapshotSeq).toBe(3);
+    expect(snapshots[0].state.editor.code).toBe("const v = 3;");
   });
 });
 
