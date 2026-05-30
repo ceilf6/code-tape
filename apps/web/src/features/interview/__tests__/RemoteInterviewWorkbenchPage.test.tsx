@@ -705,6 +705,49 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     });
 
     expect(await screen.findByText("interview signaling socket closed")).toBeInTheDocument();
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes media when the signaling socket fails after answering an offer", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "candidate-connection-1",
+        messageId: "offer-1",
+        sentAt: 1_780_000_000_000,
+        sdp: "candidate-offer-sdp",
+      });
+    });
+    await waitFor(() => {
+      expect(signaling.client.sendAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emitError({
+        code: "socket-closed",
+        message: "interview signaling socket closed",
+      });
+    });
+
+    expect(await screen.findByText("interview signaling socket closed")).toBeInTheDocument();
+    expect(media.session.close).toHaveBeenCalledTimes(1);
+    expect(signaling.client.close).toHaveBeenCalledTimes(1);
   });
 
   it("closes signaling and media session when the interviewer page unmounts", async () => {

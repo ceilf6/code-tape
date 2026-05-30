@@ -244,6 +244,13 @@ function connectInterviewerSignaling({
     if (closed) return;
     onConnectionState({ status: "failed", errorMessage });
   };
+  const failAndStopMedia = (errorMessage: string) => {
+    if (closed) return;
+    mediaSession.close();
+    signalingClient?.close();
+    signalingClient = null;
+    onConnectionState({ status: "failed", errorMessage });
+  };
   const resetCandidateSession = () => {
     answerStarted = false;
     remoteDescriptionSet = false;
@@ -419,7 +426,7 @@ function connectInterviewerSignaling({
         joinCode,
         signalingUrl: result.value.signalingUrl,
         onMessage: handleMessage,
-        onError: (error) => fail(error.message),
+        onError: (error) => failAndStopMedia(error.message),
       });
     })
     .catch((error: unknown) => {
