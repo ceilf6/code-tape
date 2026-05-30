@@ -738,8 +738,8 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     expect(cache.put).toHaveBeenCalledWith("model-cache-key", expect.any(Response));
   });
 
-  it("keeps the output budget bounded for long tracks with sparse corrections", async () => {
-    const track = makeTrackWithSegments(100);
+  it("keeps the output budget bounded for a full single-window track", async () => {
+    const track = makeTrackWithSegments(60);
     const pipeline = vi.fn(
       async (
         _prompt: unknown,
@@ -763,9 +763,53 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
       expect.any(Array),
       expect.objectContaining({ max_new_tokens: expect.any(Number) }),
     );
-    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThanOrEqual(512);
+    expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeGreaterThanOrEqual(128);
     expect(pipeline.mock.calls[0]?.[1]?.max_new_tokens).toBeLessThanOrEqual(1_024);
-    expect(result.segments).toHaveLength(100);
+    expect(result.segments).toHaveLength(track.segments.length);
+  });
+
+  it("chunks medium subtitle tracks into 60 segment windows", async () => {
+    for (const [segmentCount, expectedChunkSizes] of [
+      [61, [60, 1]],
+      [120, [60, 60]],
+    ] as const) {
+      const track = makeTrackWithSegments(segmentCount);
+      const pipeline = vi.fn(async (messages: unknown) => {
+        const payload = readPostProcessorPayload(messages);
+        const firstSegment = payload.inputSegments[0];
+        const lastSegment = payload.inputSegments.at(-1);
+        if (!firstSegment || !lastSegment) throw new Error("empty chunk");
+        return [
+          {
+            generated_text: JSON.stringify({
+              segments: [{ id: firstSegment.id, text: `${firstSegment.text} corrected` }],
+              chapters: [
+                {
+                  title: `窗口 ${pipeline.mock.calls.length}`,
+                  startMs: firstSegment.startMs,
+                  endMs: lastSegment.endMs,
+                },
+              ],
+            }),
+          },
+        ];
+      });
+      const postProcessor = createHuggingFaceSubtitlePostProcessor({
+        pipelineFactory: vi.fn(async () => pipeline),
+      });
+
+      const result = await postProcessor.process({ track });
+
+      expect(pipeline.mock.calls.map((call) => readPostProcessorPayload(call[0]).inputSegments.length)).toEqual(
+        expectedChunkSizes,
+      );
+      expect(result.segments.map((segment) => segment.id)).toEqual(
+        expectedChunkSizes.map((_, index) => `subtitle-${index * 60 + 1}`),
+      );
+      expect(result.chapters?.map((chapter) => chapter.startMs)).toEqual(
+        expectedChunkSizes.map((_, index) => index * 60_000),
+      );
+    }
   });
 
   it("chunks oversized subtitle tracks before calling the local LLM", async () => {
@@ -808,6 +852,9 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
     expect(pipelineFactory).toHaveBeenCalledTimes(1);
     expect(pipeline).toHaveBeenCalledTimes(3);
+    expect(pipeline.mock.calls.map((call) => readPostProcessorPayload(call[0]).inputSegments.length)).toEqual([
+      60, 60, 1,
+    ]);
     for (const call of pipeline.mock.calls) {
       const payload = readPostProcessorPayload(call[0]);
       expect(payload.inputSegments.length).toBeLessThanOrEqual(60);

@@ -111,7 +111,7 @@ async function processSubtitleTrack({
   model: string;
   pipeline: TextGenerationPipeline;
 }): Promise<SubtitleCorrectionResult> {
-  if (input.track.segments.length <= MAX_POSTPROCESSOR_SEGMENTS) {
+  if (input.track.segments.length <= POSTPROCESSOR_CHUNK_SEGMENTS) {
     return processSubtitleTrackChunk({ input, model, pipeline });
   }
 
