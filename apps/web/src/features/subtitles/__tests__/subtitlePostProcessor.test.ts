@@ -852,6 +852,9 @@ describe("createHuggingFaceSubtitlePostProcessor", () => {
     });
     expect(pipelineFactory).toHaveBeenCalledTimes(1);
     expect(pipeline).toHaveBeenCalledTimes(3);
+    expect(pipeline.mock.calls.map((call) => readPostProcessorPayload(call[0]).inputSegments.length)).toEqual([
+      60, 60, 1,
+    ]);
     for (const call of pipeline.mock.calls) {
       const payload = readPostProcessorPayload(call[0]);
       expect(payload.inputSegments.length).toBeLessThanOrEqual(60);
