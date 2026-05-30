@@ -127,6 +127,7 @@ describe("RemoteInterviewWorkbenchPage", () => {
     });
 
     expect(screen.getByText("等待候选人状态快照")).toBeInTheDocument();
+    expect(screen.getByText("缺失事件 seq 5，已保留 seq 3 的稳定状态")).toBeInTheDocument();
     expect(latestCodeEditorProps().value).toBe("const lastStable = true;");
   });
 

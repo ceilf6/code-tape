@@ -615,11 +615,13 @@ export function RemoteInterviewWorkbenchView({
         <div
           role="status"
           aria-live="polite"
-          title={sync.detail}
-          className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${sync.toneClass}`}
+          className={`inline-flex max-w-[24rem] items-center gap-2 rounded-md border px-3 py-2 text-sm ${sync.toneClass}`}
         >
-          <sync.Icon aria-hidden size={16} />
+          <sync.Icon aria-hidden size={16} className="shrink-0" />
           <span className="font-medium">{sync.label}</span>
+          {workbenchState.syncStatus === "waiting-for-snapshot" ? (
+            <span className="truncate text-xs opacity-90">{sync.detail}</span>
+          ) : null}
         </div>
 
         <HeaderMediaControls
