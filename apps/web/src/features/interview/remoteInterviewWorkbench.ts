@@ -39,12 +39,15 @@ export function createRemoteInterviewWorkbench(
   const buffer = createRemoteTimelineBuffer({ initialExpectedSeq: options.initialExpectedSeq });
   const listeners = new Set<(state: RemoteInterviewWorkbenchState) => void>();
   let hashMismatchNeed: SnapshotRequestNeed | null = null;
+  const deferredHashMismatchSeqs = new Set<number>();
+  let deferredGapNeed: SnapshotRequestNeed | null = null;
 
   const snapshot = (): RemoteInterviewWorkbenchState => {
     const bufferState = buffer.state();
     const snapshotRequestNeeded =
       cloneSnapshotRequestNeed(hashMismatchNeed) ??
-      cloneSnapshotRequestNeed(bufferState.snapshotRequestNeeded);
+      cloneSnapshotRequestNeed(bufferState.snapshotRequestNeeded) ??
+      cloneSnapshotRequestNeed(deferredGapNeed);
     return {
       stableState: cloneReplayStableState(stableState),
       expectedSeq: bufferState.expectedSeq,
@@ -64,7 +67,7 @@ export function createRemoteInterviewWorkbench(
     getState: snapshot,
     pushRecordingEvent(message) {
       const bufferState = buffer.state();
-      if (message.event.seq >= bufferState.expectedSeq && hasMismatchedContentHash(message)) {
+      if (message.event.seq === bufferState.expectedSeq && hasMismatchedContentHash(message)) {
         hashMismatchNeed = {
           reason: "hash-mismatch",
           expectedSeq: message.event.seq,
@@ -72,12 +75,25 @@ export function createRemoteInterviewWorkbench(
         };
         return notify();
       }
+      if (message.event.seq > bufferState.expectedSeq && hasMismatchedContentHash(message)) {
+        deferredHashMismatchSeqs.add(message.event.seq);
+        deferredGapNeed = {
+          reason: "gap-detected",
+          expectedSeq: bufferState.expectedSeq,
+          lastAppliedSeq: bufferState.lastAppliedSeq,
+        };
+        return notify();
+      }
       const result = buffer.pushRecordingEvent(message);
+      reconcileDeferredHashMismatches();
       if (
         hashMismatchNeed &&
         result.appliedEvents.some((event) => event.seq >= hashMismatchNeed!.expectedSeq)
       ) {
         hashMismatchNeed = null;
+      }
+      for (const event of result.appliedEvents) {
+        deferredHashMismatchSeqs.delete(event.seq);
       }
       stableState = result.appliedEvents.reduce(replayReducer, stableState);
       return notify();
@@ -87,7 +103,14 @@ export function createRemoteInterviewWorkbench(
       if (result.snapshotAccepted) {
         stableState = cloneReplayStableState(message.state);
         hashMismatchNeed = null;
+        deferredGapNeed = null;
+        for (const seq of deferredHashMismatchSeqs) {
+          if (seq <= message.snapshotSeq) {
+            deferredHashMismatchSeqs.delete(seq);
+          }
+        }
       }
+      reconcileDeferredHashMismatches();
       stableState = result.appliedEvents.reduce(replayReducer, stableState);
       return notify();
     },
@@ -96,6 +119,25 @@ export function createRemoteInterviewWorkbench(
       return () => listeners.delete(listener);
     },
   };
+
+  function reconcileDeferredHashMismatches() {
+    const state = buffer.state();
+    deferredGapNeed =
+      deferredGapNeed && deferredGapNeed.expectedSeq === state.expectedSeq
+        ? {
+            reason: "gap-detected",
+            expectedSeq: state.expectedSeq,
+            lastAppliedSeq: state.lastAppliedSeq,
+          }
+        : null;
+    if (!hashMismatchNeed && deferredHashMismatchSeqs.has(state.expectedSeq)) {
+      hashMismatchNeed = {
+        reason: "hash-mismatch",
+        expectedSeq: state.expectedSeq,
+        lastAppliedSeq: state.lastAppliedSeq,
+      };
+    }
+  }
 }
 
 function cloneWorkbenchState(state: RemoteInterviewWorkbenchState): RemoteInterviewWorkbenchState {

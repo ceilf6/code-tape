@@ -212,6 +212,48 @@ describe("RemoteInterviewWorkbench", () => {
     expect(state.snapshotRequestNeeded).toBeNull();
   });
 
+  it("preserves the first missing gap when a future content event has a mismatched hash", () => {
+    const workbench = createRemoteInterviewWorkbench({
+      initialState: initialState(),
+      initialExpectedSeq: 2,
+    });
+
+    const state = workbench.pushRecordingEvent(
+      hashedMessageFor(contentEvent(3, "const futureCorrupted = true;"), "fnv1a-deadbeef"),
+    );
+
+    expect(state.stableState.editor.code).toBe("");
+    expect(state.lastAppliedSeq).toBe(1);
+    expect(state.syncStatus).toBe("waiting-for-snapshot");
+    expect(state.snapshotRequestNeeded).toEqual({
+      reason: "gap-detected",
+      expectedSeq: 2,
+      lastAppliedSeq: 1,
+    });
+  });
+
+  it("defers a future hash mismatch until the missing earlier event is applied", () => {
+    const workbench = createRemoteInterviewWorkbench({
+      initialState: initialState(),
+      initialExpectedSeq: 2,
+    });
+
+    workbench.pushRecordingEvent(
+      hashedMessageFor(contentEvent(3, "const futureCorrupted = true;"), "fnv1a-deadbeef"),
+    );
+    const state = workbench.pushRecordingEvent(messageFor(contentEvent(2, "const filled = true;")));
+
+    expect(state.stableState.editor.code).toBe("const filled = true;");
+    expect(state.lastAppliedSeq).toBe(2);
+    expect(state.expectedSeq).toBe(3);
+    expect(state.syncStatus).toBe("waiting-for-snapshot");
+    expect(state.snapshotRequestNeeded).toEqual({
+      reason: "hash-mismatch",
+      expectedSeq: 3,
+      lastAppliedSeq: 2,
+    });
+  });
+
   it("ignores duplicate and old events without rolling back stable state", () => {
     const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
 
