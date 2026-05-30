@@ -170,6 +170,71 @@ test("cloud playback center acceptance flow stays ready through upload, playback
   assert.equal(otherOwnerListResponse.status, 200);
   assert.deepEqual(await otherOwnerListResponse.json(), { items: [], nextCursor: null });
 
+  // Owner isolation must hold for direct-ID access too, not just the list, so a
+  // foreign owner who learns the recordingId still cannot read or mutate it
+  // (guards against IDOR — issue #174).
+  const detailAsOther = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-other" },
+    }),
+  );
+  assert.equal(detailAsOther.status, 404, "foreign owner detail must be 404");
+
+  const playbackAsOther = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}/playback`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-other" },
+    }),
+  );
+  assert.equal(playbackAsOther.status, 404, "foreign owner playback must be 404");
+
+  const renameAsOther = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-other",
+      },
+      body: JSON.stringify({ title: "Hijacked Title" }),
+    }),
+  );
+  assert.equal(renameAsOther.status, 404, "foreign owner rename must be 404");
+
+  const shareAsOther = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}/share-links`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owner-token": "owner-other",
+      },
+      body: JSON.stringify({ startTimeMs: 1000 }),
+    }),
+  );
+  assert.equal(shareAsOther.status, 404, "foreign owner share-link must be 404");
+
+  const deleteAsOther = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}`, {
+      method: "DELETE",
+      headers: { "x-owner-token": "owner-other" },
+    }),
+  );
+  assert.equal(deleteAsOther.status, 404, "foreign owner delete must be 404");
+
+  // The owner's record must survive every foreign mutation attempt above.
+  const ownerDetailAfterForeignAttempts = await handler(
+    new Request(`http://localhost/api/recordings/${created.recordingId}`, {
+      method: "GET",
+      headers: { "x-owner-token": "owner-main" },
+    }),
+  );
+  assert.equal(ownerDetailAfterForeignAttempts.status, 200);
+  const ownerDetail = (await ownerDetailAfterForeignAttempts.json()) as {
+    recording: { title: string; status: string };
+  };
+  assert.equal(ownerDetail.recording.title, "Two Sum Cloud Demo");
+  assert.equal(ownerDetail.recording.status, "ready");
+
   const playbackResponse = await handler(
     new Request(`http://localhost/api/recordings/${created.recordingId}/playback`, {
       method: "GET",
@@ -193,11 +258,12 @@ test("cloud playback center acceptance flow stays ready through upload, playback
   assert.deepEqual(await readJsonAsset(handler, playback.manifestUrl), pkg.manifest);
   assert.deepEqual(await readJsonAsset(handler, playback.metaUrl), pkg.meta);
 
-  // Consume the descriptor exactly like CloudPackageLoader does (assemble the
-  // package from the descriptor URLs, then run the shared integrity verifier).
-  // The descriptor exposes no indexes asset, so this proves playback still
-  // loads when `indexes` is absent — the player rebuilds the replay index from
-  // events/snapshots at runtime.
+  // Assemble the real API descriptor output into a package and verify it, the
+  // same way CloudPackageLoader.loadFromDescriptor consumes it. This proves the
+  // API's descriptor is consumable end-to-end; the authoritative loader behavior
+  // (incl. the indexesUrl:null rebuild path) is locked by the real loader test
+  // in apps/web (cloudPackageLoader.test.ts). The descriptor exposes no indexes
+  // asset, so this also confirms playback loads when `indexes` is absent.
   const loaded = await loadPackageFromDescriptor(handler, playback);
   assert.equal(loaded.ok, true, "cloud playback descriptor should load into a playable package");
   if (!loaded.ok) throw new Error("expected descriptor to load");

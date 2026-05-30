@@ -8,6 +8,7 @@ import {
 import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
 import type { CloudPlaybackDescriptor, CloudRecordingRepository } from "@/features/cloud/types";
 import { createCloudPackageLoader } from "../cloudPackageLoader";
+import { buildReplayIndex } from "../replayIndex";
 
 type DescriptorRepository = Pick<
   CloudRecordingRepository,
@@ -147,6 +148,31 @@ describe("createCloudPackageLoader", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.package.indexes).toBeUndefined();
+  });
+
+  it("rebuilds a playable replay index from a descriptor that has no indexes asset", async () => {
+    const parts = await makePackageParts({ includeIndexes: false });
+    const loader = createCloudPackageLoader({
+      repository: makeRepository({ ok: true, value: makeDescriptor({ indexesUrl: null, mediaUrl: null }) }),
+      fetch: makeAssetFetch({
+        "https://assets.example.com/manifest.json": jsonResponse(parts.manifest),
+        "https://assets.example.com/meta.json": jsonResponse(parts.meta),
+        "https://assets.example.com/events.json": jsonResponse(parts.events),
+        "https://assets.example.com/snapshots.json": jsonResponse(parts.snapshots),
+      }),
+    });
+
+    const result = await loader.load("rec-1");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // No indexes asset was served, yet the player can rebuild the lookup
+    // structures it needs from the package's events/snapshots at runtime.
+    expect(result.package.indexes).toBeUndefined();
+    const index = buildReplayIndex(result.package);
+    expect(index.eventsBySeq).toHaveLength(parts.events.length);
+    expect(index.snapshotsByTime).toHaveLength(parts.snapshots.length);
+    expect(index.eventsByType.get("content-change")).toHaveLength(1);
   });
 
   it("keeps JSON playback available with a media-missing warning when mediaUrl is null", async () => {
