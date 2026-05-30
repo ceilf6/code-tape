@@ -23,6 +23,20 @@ describe("parseInterviewerLink", () => {
     });
   });
 
+  it("parses a link served under a deployment basename", () => {
+    expect(
+      parseInterviewerLink(
+        "https://host.example/code-tape/interview/interviewer/room-1?joinCode=JOIN1234",
+      ),
+    ).toEqual({ ok: true, roomId: "room-1", joinCode: "JOIN1234" });
+  });
+
+  it("parses a basename-prefixed relative path", () => {
+    expect(
+      parseInterviewerLink("/code-tape/interview/interviewer/room-1?joinCode=JOIN1234"),
+    ).toEqual({ ok: true, roomId: "room-1", joinCode: "JOIN1234" });
+  });
+
   it("decodes an encoded room id", () => {
     expect(
       parseInterviewerLink("/interview/interviewer/room%2F1?joinCode=ABCD5678"),
@@ -88,6 +102,19 @@ describe("InterviewLobbyPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "加入面试" }));
 
     expect(screen.getByTestId("interviewer-stub")).toHaveTextContent("room-xyz");
+  });
+
+  it("navigates to the interviewer page from a basename-prefixed link", () => {
+    renderLobby("/interview");
+
+    fireEvent.change(screen.getByLabelText("面试官链接"), {
+      target: {
+        value: "https://host.example/code-tape/interview/interviewer/room-base?joinCode=JOIN1234",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "加入面试" }));
+
+    expect(screen.getByTestId("interviewer-stub")).toHaveTextContent("room-base");
   });
 
   it("shows an error and does not navigate for an invalid link", () => {
