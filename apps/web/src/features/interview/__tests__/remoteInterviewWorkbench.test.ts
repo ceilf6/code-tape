@@ -199,6 +199,19 @@ describe("RemoteInterviewWorkbench", () => {
     });
   });
 
+  it("applies content normally when the message hash matches the receiver contract", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+
+    const state = workbench.pushRecordingEvent(
+      hashedMessageFor(contentEvent(1, "const verified = true;"), "fnv1a-18971cb2"),
+    );
+
+    expect(state.stableState.editor.code).toBe("const verified = true;");
+    expect(state.lastAppliedSeq).toBe(1);
+    expect(state.syncStatus).toBe("live");
+    expect(state.snapshotRequestNeeded).toBeNull();
+  });
+
   it("ignores duplicate and old events without rolling back stable state", () => {
     const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
 
