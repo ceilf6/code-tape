@@ -1,19 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  Activity,
   CircleDot,
   Mic,
   MicOff,
   Monitor,
-  Radio,
   SignalHigh,
   TriangleAlert,
-  UserRound,
   Video,
   VideoOff,
 } from "lucide-react";
 import { CodeEditor } from "@/features/editor/CodeEditor";
+import { CameraPreview } from "@/features/media/CameraPreview";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { RuntimeOutputPanel } from "@/features/runtime-preview/RuntimeOutputPanel";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
@@ -602,18 +600,40 @@ export function RemoteInterviewWorkbenchView({
             <span className="max-w-[18rem] truncate font-mono text-foreground">{roomId}</span>
           </div>
         </div>
+
         <div
           role="status"
           aria-live="polite"
+          className={`inline-flex max-w-[22rem] items-center gap-2 rounded-md border px-3 py-2 text-sm ${connection.toneClass}`}
+        >
+          <TriangleAlert aria-hidden size={16} className="shrink-0" />
+          <span className="truncate font-medium">{connection.label}</span>
+          {connectionState.errorMessage ? (
+            <span className="truncate text-xs opacity-90">{connectionState.errorMessage}</span>
+          ) : null}
+        </div>
+        <div
+          role="status"
+          aria-live="polite"
+          title={sync.detail}
           className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${sync.toneClass}`}
         >
           <sync.Icon aria-hidden size={16} />
           <span className="font-medium">{sync.label}</span>
         </div>
+
+        <HeaderMediaControls
+          state={mediaState}
+          onToggleMicrophone={onToggleMicrophone}
+          onToggleCamera={onToggleCamera}
+        />
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section aria-label="候选人编辑器" className="flex min-h-0 flex-col border-r border-border">
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
+        <section
+          aria-label="候选人编辑器"
+          className="relative flex min-h-0 flex-col border-r border-border"
+        >
           <div className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-4 py-2 text-xs text-muted">
             <span className="font-mono uppercase tracking-normal text-foreground">
               {editor.language}
@@ -622,7 +642,7 @@ export function RemoteInterviewWorkbenchView({
             <span>applied seq {workbenchState.lastAppliedSeq}</span>
             <span>next seq {workbenchState.expectedSeq}</span>
           </div>
-          <div className="min-h-0 flex-1">
+          <div className="relative min-h-0 flex-1">
             <CodeEditor
               language={editor.language}
               initialValue={editor.code}
@@ -635,86 +655,34 @@ export function RemoteInterviewWorkbenchView({
               scrollTop={editor.scrollTop}
               scrollLeft={editor.scrollLeft}
             />
-          </div>
-          <div className="flex flex-col border-t border-border">
-            {hasPreview ? (
-              <PreviewPane
-                runtime={previewRuntime}
-                previewHtml={runtime.previewHtml}
-                showReset={false}
-                className="h-64 shrink-0"
-              />
-            ) : null}
-            <RuntimeOutputPanel runtime={runtime} />
+            <CameraPreview
+              stream={mediaState.remoteStream}
+              enabled={Boolean(mediaState.remoteStream)}
+              position={REMOTE_VIDEO_POSITION}
+              draggable={false}
+            />
           </div>
         </section>
 
-        <aside
-          aria-label="实时面试侧栏"
-          className="flex min-h-0 flex-col gap-4 overflow-auto bg-surface px-4 py-4"
-        >
-          <ConnectionStatusPanel state={connectionState} view={connection} />
-          <SyncDetailPanel state={workbenchState} label={sync.label} detail={sync.detail} />
-          <InterviewMediaPanel
-            state={mediaState}
-            onToggleMicrophone={onToggleMicrophone}
-            onToggleCamera={onToggleCamera}
-          />
-        </aside>
+        <section aria-label="候选人运行结果" className="flex min-h-0 flex-col">
+          {hasPreview ? (
+            <PreviewPane
+              runtime={previewRuntime}
+              previewHtml={runtime.previewHtml}
+              showReset={false}
+              className="min-h-0 flex-1"
+            />
+          ) : null}
+          <RuntimeOutputPanel runtime={runtime} />
+        </section>
       </div>
     </div>
   );
 }
 
-function ConnectionStatusPanel({
-  state,
-  view,
-}: {
-  state: RemoteInterviewConnectionState;
-  view: { label: string; detail: string; toneClass: string };
-}) {
-  return (
-    <section
-      role="status"
-      aria-live="polite"
-      className={`rounded-md border p-3 ${view.toneClass}`}
-    >
-      <div className="flex items-center gap-2">
-        <TriangleAlert aria-hidden size={16} />
-        <h2 className="text-sm font-semibold">房间连接</h2>
-      </div>
-      <p className="mt-3 text-sm font-medium">{view.label}</p>
-      <p className="mt-1 text-xs leading-5">{state.errorMessage ?? view.detail}</p>
-    </section>
-  );
-}
+const REMOTE_VIDEO_POSITION = { x: 72, y: 72 };
 
-function SyncDetailPanel({
-  state,
-  label,
-  detail,
-}: {
-  state: RemoteInterviewWorkbenchState;
-  label: string;
-  detail: string;
-}) {
-  return (
-    <section className="rounded-md border border-border bg-background p-3">
-      <div className="flex items-center gap-2">
-        <Activity aria-hidden size={16} className="text-primary" />
-        <h2 className="text-sm font-semibold">同步状态</h2>
-      </div>
-      <p className="mt-3 text-sm font-medium text-foreground">{label}</p>
-      <p className="mt-1 text-xs leading-5 text-muted">{detail}</p>
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <Metric label="已应用" value={`seq ${state.lastAppliedSeq}`} />
-        <Metric label="下一个" value={`seq ${state.expectedSeq}`} />
-      </dl>
-    </section>
-  );
-}
-
-function InterviewMediaPanel({
+function HeaderMediaControls({
   state,
   onToggleMicrophone,
   onToggleCamera,
@@ -728,117 +696,27 @@ function InterviewMediaPanel({
   const controlsDisabled = !state.localStream;
 
   return (
-    <section className="rounded-md border border-border bg-background p-3">
-      <div className="flex items-center gap-2">
-        <Radio aria-hidden size={16} className="text-primary" />
-        <h2 className="text-sm font-semibold">音视频</h2>
-      </div>
-
-      <div className="mt-3 grid gap-3">
-        <MediaStreamTile
-          title="候选人视频"
-          stream={state.remoteStream}
-          muted={false}
-          placeholder={<UserRound aria-hidden size={28} />}
+    <div className="flex items-center gap-2">
+      <Tooltip content={micLabel}>
+        <Toggle
+          pressed={state.microphoneEnabled}
+          onPressedChange={(next) => onToggleMicrophone?.(next)}
+          disabled={controlsDisabled || !onToggleMicrophone}
+          label={micLabel}
+          icon={<MicOff size={17} />}
+          iconPressed={<Mic size={17} />}
         />
-        <MediaStreamTile
-          title="本地预览"
-          stream={state.localStream}
-          muted
-          placeholder={<Monitor aria-hidden size={28} />}
+      </Tooltip>
+      <Tooltip content={cameraLabel}>
+        <Toggle
+          pressed={state.cameraEnabled}
+          onPressedChange={(next) => onToggleCamera?.(next)}
+          disabled={controlsDisabled || !onToggleCamera}
+          label={cameraLabel}
+          icon={<VideoOff size={17} />}
+          iconPressed={<Video size={17} />}
         />
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <Tooltip content={micLabel}>
-          <Toggle
-            pressed={state.microphoneEnabled}
-            onPressedChange={(next) => onToggleMicrophone?.(next)}
-            disabled={controlsDisabled || !onToggleMicrophone}
-            label={micLabel}
-            icon={<MicOff size={17} />}
-            iconPressed={<Mic size={17} />}
-          />
-        </Tooltip>
-        <Tooltip content={cameraLabel}>
-          <Toggle
-            pressed={state.cameraEnabled}
-            onPressedChange={(next) => onToggleCamera?.(next)}
-            disabled={controlsDisabled || !onToggleCamera}
-            label={cameraLabel}
-            icon={<VideoOff size={17} />}
-            iconPressed={<Video size={17} />}
-          />
-        </Tooltip>
-        <span className="ml-auto text-xs text-muted">{state.signalingState}</span>
-      </div>
-
-      <dl className="mt-3 grid gap-2 text-xs">
-        <Metric label="WebRTC" value={state.connectionState} />
-        <Metric label="ICE" value={state.iceConnectionState} />
-        <Metric label="事件通道" value={state.eventsDataChannelState} />
-      </dl>
-    </section>
-  );
-}
-
-function MediaStreamTile({
-  title,
-  stream,
-  muted,
-  placeholder,
-}: {
-  title: string;
-  stream: MediaStream | null;
-  muted: boolean;
-  placeholder: ReactNode;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return undefined;
-    video.srcObject = stream;
-    return () => {
-      video.srcObject = null;
-    };
-  }, [stream]);
-
-  return (
-    <figure className="overflow-hidden rounded-md border border-border bg-surface-raised">
-      <div className="aspect-video bg-surface">
-        {stream ? (
-          <video
-            ref={videoRef}
-            aria-label={`${title}画面`}
-            className="h-full w-full object-cover"
-            autoPlay
-            muted={muted}
-            playsInline
-          />
-        ) : (
-          <div
-            role="img"
-            aria-label={`${title}占位`}
-            className="flex h-full w-full items-center justify-center text-muted"
-          >
-            {placeholder}
-          </div>
-        )}
-      </div>
-      <figcaption className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="font-medium text-foreground">{title}</span>
-        <span className="text-muted">{stream ? "已绑定" : "等待媒体"}</span>
-      </figcaption>
-    </figure>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-surface px-2 py-1.5">
-      <dt className="text-muted">{label}</dt>
-      <dd className="truncate font-mono text-foreground">{value}</dd>
+      </Tooltip>
     </div>
   );
 }
