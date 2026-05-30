@@ -1189,7 +1189,7 @@ test('api package test script runs compiled tests without shell glob expansion',
   assert.ok(existsSync('apps/api/scripts/run-dist-tests.mjs'));
 });
 
-test('agent prompts separate commit and push quality gates', () => {
+test('agent prompts rely on git hooks for commit and push quality gates', () => {
   const agentsPrompt = readFileSync('AGENTS.md', 'utf8');
   const claudePrompt = readFileSync('CLAUDE.md', 'utf8');
   const bootstrapScript = readFileSync('scripts/workflows/contract-check.mjs', 'utf8');
@@ -1198,8 +1198,10 @@ test('agent prompts separate commit and push quality gates', () => {
     assert.match(prompt, /开始任务前.*`npm run quality:predev`/u);
   }
 
-  assert.match(bootstrapScript, /Before committing code: run npm run quality:precommit/u);
-  assert.match(bootstrapScript, /Before pushing or submitting code: run npm run quality:local/u);
+  assert.match(bootstrapScript, /git commit so the pre-commit hook runs quality:precommit/u);
+  assert.match(bootstrapScript, /git push so the pre-push hook runs quality:local/u);
+  assert.match(bootstrapScript, /Do not run hook-owned quality gates manually/u);
+  assert.doesNotMatch(bootstrapScript, /Before pushing or submitting code: run npm run quality:local/u);
 });
 
 test('pages workflow deploys the web app with the GitHub Pages contract', () => {
