@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   CircleDot,
@@ -7,11 +7,11 @@ import {
   Monitor,
   SignalHigh,
   TriangleAlert,
+  UserRound,
   Video,
   VideoOff,
 } from "lucide-react";
 import { CodeEditor } from "@/features/editor/CodeEditor";
-import { CameraPreview } from "@/features/media/CameraPreview";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
 import { RuntimeOutputPanel } from "@/features/runtime-preview/RuntimeOutputPanel";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
@@ -655,12 +655,14 @@ export function RemoteInterviewWorkbenchView({
               scrollTop={editor.scrollTop}
               scrollLeft={editor.scrollLeft}
             />
-            <CameraPreview
-              stream={mediaState.remoteStream}
-              enabled={Boolean(mediaState.remoteStream)}
-              position={REMOTE_VIDEO_POSITION}
-              draggable={false}
-            />
+            <div className="pointer-events-none absolute bottom-4 right-4 z-50 h-32 w-32 overflow-hidden rounded-full border border-border bg-surface-raised shadow-elevation-2">
+              <MediaVideo
+                stream={mediaState.remoteStream}
+                muted={false}
+                label="候选人视频"
+                placeholder={<UserRound aria-hidden size={28} />}
+              />
+            </div>
           </div>
         </section>
 
@@ -680,8 +682,6 @@ export function RemoteInterviewWorkbenchView({
   );
 }
 
-const REMOTE_VIDEO_POSITION = { x: 72, y: 72 };
-
 function HeaderMediaControls({
   state,
   onToggleMicrophone,
@@ -697,6 +697,14 @@ function HeaderMediaControls({
 
   return (
     <div className="flex items-center gap-2">
+      <div className="h-9 w-9 overflow-hidden rounded-md border border-border bg-surface-raised">
+        <MediaVideo
+          stream={state.localStream}
+          muted
+          label="本地预览"
+          placeholder={<Monitor aria-hidden size={16} />}
+        />
+      </div>
       <Tooltip content={micLabel}>
         <Toggle
           pressed={state.microphoneEnabled}
@@ -718,6 +726,52 @@ function HeaderMediaControls({
         />
       </Tooltip>
     </div>
+  );
+}
+
+function MediaVideo({
+  stream,
+  muted,
+  label,
+  placeholder,
+}: {
+  stream: MediaStream | null;
+  muted: boolean;
+  label: string;
+  placeholder: ReactNode;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+    video.srcObject = stream;
+    return () => {
+      video.srcObject = null;
+    };
+  }, [stream]);
+
+  if (!stream) {
+    return (
+      <div
+        role="img"
+        aria-label={`${label}占位`}
+        className="flex h-full w-full items-center justify-center text-muted"
+      >
+        {placeholder}
+      </div>
+    );
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      aria-label={`${label}画面`}
+      className="h-full w-full object-cover"
+      autoPlay
+      muted={muted}
+      playsInline
+    />
   );
 }
 

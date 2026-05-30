@@ -229,7 +229,7 @@ describe("RemoteInterviewWorkbenchPage", () => {
     expect(screen.getByRole("button", { name: "摄像头已关闭" })).toBeDisabled();
   });
 
-  it("binds the candidate remote stream into the camera preview video", async () => {
+  it("binds remote stream to an unmuted video and local stream to a muted preview", async () => {
     const originalSrcObjectDescriptor = Object.getOwnPropertyDescriptor(
       HTMLVideoElement.prototype,
       "srcObject",
@@ -254,8 +254,14 @@ describe("RemoteInterviewWorkbenchPage", () => {
         }),
       });
 
-      expect(screen.getByLabelText("Camera preview")).toBeInTheDocument();
+      const remoteVideo = screen.getByLabelText("候选人视频画面") as HTMLVideoElement;
+      const localVideo = screen.getByLabelText("本地预览画面") as HTMLVideoElement;
+      // Candidate audio must be audible to the interviewer.
+      expect(remoteVideo.muted).toBe(false);
+      // Local self-preview is muted to avoid echo.
+      expect(localVideo.muted).toBe(true);
       await waitFor(() => {
+        expect(setSrcObject).toHaveBeenCalledWith(localStream);
         expect(setSrcObject).toHaveBeenCalledWith(remoteStream);
       });
     } finally {
