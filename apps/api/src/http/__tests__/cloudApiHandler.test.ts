@@ -2110,12 +2110,23 @@ test("DELETE /api/recordings/:recordingId soft-deletes a ready recording", async
       headers: { "x-owner-token": "owner-1" },
     }),
   );
-  const body = (await response.json()) as { id: string; status: string; deletedAt: string };
+  const body = (await response.json()) as {
+    id: string;
+    recordingId: string;
+    status: string;
+    deletedAt: string;
+    purgeAfter: string;
+  };
 
   assert.equal(response.status, 200);
   assert.equal(body.id, "rec-ready");
+  assert.equal(body.recordingId, "rec-ready");
   assert.equal(body.status, "soft_deleted");
   assert.ok(body.deletedAt);
+  assert.equal(
+    Date.parse(body.purgeAfter) - Date.parse(body.deletedAt),
+    7 * 24 * 60 * 60 * 1000,
+  );
 
   // Verify the recording is no longer in the list
   const listResponse = await handler(

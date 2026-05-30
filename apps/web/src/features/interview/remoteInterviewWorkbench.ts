@@ -38,15 +38,19 @@ export function createRemoteInterviewWorkbench(
   let stableState = cloneReplayStableState(options.initialState);
   const buffer = createRemoteTimelineBuffer({ initialExpectedSeq: options.initialExpectedSeq });
   const listeners = new Set<(state: RemoteInterviewWorkbenchState) => void>();
+  let hashMismatchNeed: SnapshotRequestNeed | null = null;
 
   const snapshot = (): RemoteInterviewWorkbenchState => {
     const bufferState = buffer.state();
+    const snapshotRequestNeeded =
+      cloneSnapshotRequestNeed(hashMismatchNeed) ??
+      cloneSnapshotRequestNeed(bufferState.snapshotRequestNeeded);
     return {
       stableState: cloneReplayStableState(stableState),
       expectedSeq: bufferState.expectedSeq,
       lastAppliedSeq: bufferState.lastAppliedSeq,
-      syncStatus: syncStatusFor(bufferState.snapshotRequestNeeded, bufferState.lastAppliedSeq),
-      snapshotRequestNeeded: cloneSnapshotRequestNeed(bufferState.snapshotRequestNeeded),
+      syncStatus: syncStatusFor(snapshotRequestNeeded, bufferState.lastAppliedSeq),
+      snapshotRequestNeeded,
     };
   };
 
@@ -59,7 +63,22 @@ export function createRemoteInterviewWorkbench(
   return {
     getState: snapshot,
     pushRecordingEvent(message) {
+      const bufferState = buffer.state();
+      if (message.event.seq >= bufferState.expectedSeq && hasMismatchedContentHash(message)) {
+        hashMismatchNeed = {
+          reason: "hash-mismatch",
+          expectedSeq: message.event.seq,
+          lastAppliedSeq: bufferState.lastAppliedSeq,
+        };
+        return notify();
+      }
       const result = buffer.pushRecordingEvent(message);
+      if (
+        hashMismatchNeed &&
+        result.appliedEvents.some((event) => event.seq >= hashMismatchNeed!.expectedSeq)
+      ) {
+        hashMismatchNeed = null;
+      }
       stableState = result.appliedEvents.reduce(replayReducer, stableState);
       return notify();
     },
@@ -67,6 +86,7 @@ export function createRemoteInterviewWorkbench(
       const result = buffer.pushSnapshot(message);
       if (result.snapshotAccepted) {
         stableState = cloneReplayStableState(message.state);
+        hashMismatchNeed = null;
       }
       stableState = result.appliedEvents.reduce(replayReducer, stableState);
       return notify();
@@ -98,4 +118,20 @@ function syncStatusFor(
     return "waiting-for-snapshot";
   }
   return lastAppliedSeq > 0 ? "live" : "idle";
+}
+
+function hasMismatchedContentHash(message: InterviewRecordingEventMessage): boolean {
+  if (message.event.type !== "content-change" || message.contentHash === undefined) {
+    return false;
+  }
+  return hashContent(message.event.payload.code) !== message.contentHash;
+}
+
+function hashContent(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
 }

@@ -104,6 +104,10 @@ function messageFor(event: RecordingEvent) {
   };
 }
 
+function hashedMessageFor(event: RecordingEvent, contentHash: string) {
+  return { ...messageFor(event), contentHash };
+}
+
 function snapshotMessage(snapshotSeq: number, code: string) {
   return {
     kind: "state-snapshot" as const,
@@ -176,6 +180,23 @@ describe("RemoteInterviewWorkbench", () => {
     expect(state.expectedSeq).toBe(4);
     expect(state.syncStatus).toBe("live");
     expect(state.snapshotRequestNeeded).toBeNull();
+  });
+
+  it("requests a snapshot without applying content when the message hash mismatches", () => {
+    const workbench = createRemoteInterviewWorkbench({ initialState: initialState() });
+
+    const state = workbench.pushRecordingEvent(
+      hashedMessageFor(contentEvent(1, "const corrupted = true;"), "fnv1a-deadbeef"),
+    );
+
+    expect(state.stableState.editor.code).toBe("");
+    expect(state.lastAppliedSeq).toBe(0);
+    expect(state.syncStatus).toBe("waiting-for-snapshot");
+    expect(state.snapshotRequestNeeded).toEqual({
+      reason: "hash-mismatch",
+      expectedSeq: 1,
+      lastAppliedSeq: 0,
+    });
   });
 
   it("ignores duplicate and old events without rolling back stable state", () => {

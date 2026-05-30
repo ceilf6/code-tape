@@ -215,12 +215,12 @@ function RemoteInterviewWorkbenchRoom({
     }
     const channel = mediaSession.getEventsDataChannel();
     if (!channel || channel.readyState !== "open") return;
-    const gapKey = `${need.expectedSeq}:${need.lastAppliedSeq}`;
+    const gapKey = `${need.reason}:${need.expectedSeq}:${need.lastAppliedSeq}`;
     if (lastRequestedGapRef.current === gapKey) return;
     const request = buildSnapshotRequestMessage({
       roomId,
       sessionId: roomId,
-      reason: "gap-timeout",
+      reason: need.reason === "hash-mismatch" ? "hash-mismatch" : "gap-timeout",
       expectedSeq: need.expectedSeq,
       lastAppliedSeq: need.lastAppliedSeq,
     });
@@ -788,7 +788,9 @@ function syncStatusView(state: RemoteInterviewWorkbenchState): {
     return {
       label: "等待候选人状态快照",
       detail: state.snapshotRequestNeeded
-        ? `缺失事件 seq ${state.snapshotRequestNeeded.expectedSeq}，已保留 seq ${state.snapshotRequestNeeded.lastAppliedSeq} 的稳定状态`
+        ? state.snapshotRequestNeeded.reason === "hash-mismatch"
+          ? `事件 seq ${state.snapshotRequestNeeded.expectedSeq} 内容校验失败，已保留 seq ${state.snapshotRequestNeeded.lastAppliedSeq} 的稳定状态`
+          : `缺失事件 seq ${state.snapshotRequestNeeded.expectedSeq}，已保留 seq ${state.snapshotRequestNeeded.lastAppliedSeq} 的稳定状态`
         : "正在等待候选人状态，已保留最后稳定代码",
       toneClass: "border-warning/40 bg-warning/10 text-warning",
       Icon: SignalHigh,

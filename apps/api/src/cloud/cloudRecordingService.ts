@@ -49,6 +49,7 @@ const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const DEFAULT_LIST_LIMIT = 20;
 const SHARE_TOKEN_BYTES = 32;
 const MAX_SHARE_TOKEN_ATTEMPTS = 5;
+const SOFT_DELETE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type CloudRecordingService = {
   createUploadSession(input: {
@@ -327,8 +328,10 @@ export function createCloudRecordingService(deps: {
           ok: true,
           value: {
             id: recording.id,
+            recordingId: recording.id,
             status: "soft_deleted" as const,
             deletedAt,
+            purgeAfter: purgeAfterFor(deletedAt),
           },
         };
       }
@@ -357,7 +360,13 @@ export function createCloudRecordingService(deps: {
           });
           return {
             ok: true,
-            value: { id: write.recording.id, status: "soft_deleted" as const, deletedAt },
+            value: {
+              id: write.recording.id,
+              recordingId: write.recording.id,
+              status: "soft_deleted" as const,
+              deletedAt,
+              purgeAfter: purgeAfterFor(deletedAt),
+            },
           };
         }
 
@@ -381,7 +390,13 @@ export function createCloudRecordingService(deps: {
           });
           return {
             ok: true,
-            value: { id: latest.id, status: "soft_deleted" as const, deletedAt: latestDeletedAt },
+            value: {
+              id: latest.id,
+              recordingId: latest.id,
+              status: "soft_deleted" as const,
+              deletedAt: latestDeletedAt,
+              purgeAfter: purgeAfterFor(latestDeletedAt),
+            },
           };
         }
         if (!isOwnerVisibleStatus(latest.status)) {
@@ -613,6 +628,10 @@ async function ensureSoftDeleteTimestamp(input: {
     current = latest;
   }
   return current.deletedAt;
+}
+
+function purgeAfterFor(deletedAt: string): string {
+  return new Date(Date.parse(deletedAt) + SOFT_DELETE_RETENTION_MS).toISOString();
 }
 
 async function resolveExistingUploadSession(input: {

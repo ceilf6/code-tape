@@ -236,7 +236,7 @@ const DEFAULT_SNAPSHOT_EVENT_INTERVAL = 50;
 const DEFAULT_SNAPSHOT_TIME_INTERVAL_MS = 5000;
 
 export type SnapshotRequestNeed = {
-  reason: "gap-detected";
+  reason: "gap-detected" | "hash-mismatch";
   expectedSeq: number;
   lastAppliedSeq: number;
 };

@@ -720,6 +720,32 @@ for (const terminalStatus of ["purging", "deleted"] as const) {
   });
 }
 
+test("deleteRecording returns purgeAfter for the seven-day soft-delete retention window", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createMemoryObjectStorage();
+  const service = createCloudRecordingService({
+    metadata,
+    objectStorage,
+    now: () => new Date("2026-05-27T00:00:00.000Z"),
+  });
+  const pkg = await makePackage();
+  const request = await makeCreateSessionRequest(pkg);
+  const created = await service.createUploadSession({ ownerId: "owner-1", input: request });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const deleted = await service.deleteRecording({
+    ownerId: "owner-1",
+    recordingId: created.value.recordingId,
+  });
+
+  assert.equal(deleted.ok, true);
+  if (!deleted.ok) return;
+  assert.equal(deleted.value.recordingId, created.value.recordingId);
+  assert.equal(deleted.value.deletedAt, "2026-05-27T00:00:00.000Z");
+  assert.equal(deleted.value.purgeAfter, "2026-06-03T00:00:00.000Z");
+});
+
 test("delete returns the persisted deletedAt when dirty soft-delete repair loses the conditional write race", async () => {
   const metadata = createMemoryMetadataRepository();
   const objectStorage = createMemoryObjectStorage();
