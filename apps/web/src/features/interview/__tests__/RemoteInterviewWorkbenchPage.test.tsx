@@ -1011,6 +1011,110 @@ describe("RemoteInterviewWorkbenchPage interviewer signaling", () => {
     expect(signaling.client.close).toHaveBeenCalledTimes(1);
   });
 
+  it("does not let an orphan candidate ICE claim the connection and block a real offer", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({
+        kind: "ice-candidate",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "stale-candidate",
+        messageId: "stale-ice",
+        sentAt: 1_780_000_000_000,
+        candidate: "candidate:stale",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      });
+    });
+    expect(media.session.addRemoteIceCandidate).not.toHaveBeenCalled();
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "real-candidate",
+        messageId: "real-offer",
+        sentAt: 1_780_000_000_001,
+        sdp: "real-offer-sdp",
+      });
+    });
+
+    await waitFor(() => {
+      expect(media.session.setRemoteDescription).toHaveBeenCalledWith({
+        type: "offer",
+        sdp: "real-offer-sdp",
+      });
+      expect(signaling.client.sendAnswer).toHaveBeenCalledTimes(1);
+    });
+    expect(media.session.addRemoteIceCandidate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ candidate: "candidate:stale" }),
+    );
+  });
+
+  it("ignores stale offer and ICE after the room has ended", async () => {
+    const roomClient = makeRoomClient();
+    const signaling = makeSignalingFactory();
+    const media = makeInterviewerMediaSessionFactory();
+
+    renderInterviewerPage({
+      initialEntry: "/interview/interviewer/room-live?joinCode=JOIN1234",
+      roomClient,
+      createSignalingClient: signaling.create,
+      createMediaSession: media.create,
+    });
+    await waitFor(() => {
+      expect(signaling.create).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      signaling.emit({ kind: "ended", roomId: "room-live" });
+    });
+    await screen.findByText("面试房间已结束");
+
+    act(() => {
+      signaling.emit({
+        kind: "offer",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "late-candidate",
+        messageId: "late-offer",
+        sentAt: 1_780_000_000_002,
+        sdp: "late-offer-sdp",
+      });
+      signaling.emit({
+        kind: "ice-candidate",
+        roomId: "room-live",
+        role: "candidate",
+        connectionId: "late-candidate",
+        messageId: "late-ice",
+        sentAt: 1_780_000_000_003,
+        candidate: "candidate:late",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      });
+    });
+
+    expect(media.session.requestLocalMedia).not.toHaveBeenCalled();
+    expect(media.session.setRemoteDescription).not.toHaveBeenCalled();
+    expect(media.session.addRemoteIceCandidate).not.toHaveBeenCalled();
+    expect(signaling.client.sendAnswer).not.toHaveBeenCalled();
+    expect(screen.getByText("面试房间已结束")).toBeInTheDocument();
+  });
+
   it("surfaces a failed connection when WebRTC media session creation throws", async () => {
     const roomClient = makeRoomClient();
     const signaling = makeSignalingFactory();
