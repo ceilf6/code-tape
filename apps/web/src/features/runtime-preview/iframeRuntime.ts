@@ -34,7 +34,9 @@ export type RuntimePreviewTheme = "light" | "dark";
  * Theme-aware default styling injected into preview/runtime srcdoc so the empty
  * and rendered sandbox follows the host theme (opaque-origin iframes can't
  * inherit the host's CSS variables). Placed in <head> before user content so a
- * user's own background/color rules still win.
+ * user's own background/color rules still win. Tagged with id="ct-theme" so
+ * the runtime boot script can swap it in-place on theme change without losing
+ * run state.
  */
 const THEME_DEFAULT_STYLE: Record<RuntimePreviewTheme, string> = {
   light: "color-scheme:light;background:#f5f5f4;color:#24272d;",
@@ -42,7 +44,7 @@ const THEME_DEFAULT_STYLE: Record<RuntimePreviewTheme, string> = {
 };
 
 function themeStyleTag(theme: RuntimePreviewTheme): string {
-  return `<style>html,body{margin:0;${THEME_DEFAULT_STYLE[theme]}}</style>`;
+  return `<style id="ct-theme">html,body{${THEME_DEFAULT_STYLE[theme]}}</style>`;
 }
 
 type SanitizedPreviewHtml = {
@@ -213,11 +215,14 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
     setTheme(nextTheme: RuntimePreviewTheme) {
       if (nextTheme === theme) return;
       theme = nextTheme;
-      // Re-render the current static preview so the empty / replay preview
-      // background tracks the host theme. Skip while a JS run iframe is mounted
-      // (currentPreviewHtml === null) — its theme is fixed for that run.
-      if (host && currentPreviewHtml !== null) {
+      // For a static preview, re-render with the new theme; for a JS run iframe
+      // (currentPreviewHtml === null), postMessage so the boot script swaps the
+      // injected #ct-theme style in place — preserves run state and DOM mutations.
+      if (!host) return;
+      if (currentPreviewHtml !== null) {
         void createIframe("", buildPreviewSrcDoc(currentPreviewHtml, theme));
+      } else if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "set-theme", theme }, "*");
       }
     },
     async run(input: IframeRunInput): Promise<IframeRunResult> {

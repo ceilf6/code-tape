@@ -278,6 +278,45 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("does not reset body margin in the theme default style", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // Theme tag is identifiable, but it must not modify layout (no margin reset).
+    expect(srcdoc).toContain('id="ct-theme"');
+    expect(srcdoc).not.toMatch(/margin\s*:\s*0/);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("posts a set-theme message to the JS run iframe instead of recreating it", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    // Start a long-running JS run so the iframe stays mounted.
+    const run = runtime.run({ runId: "run-theme", compiledCode: "", timeoutMs: 200 });
+    const frame = host.querySelector("iframe");
+    expect(frame).toBeTruthy();
+    const postSpy = vi.spyOn(frame!.contentWindow!, "postMessage");
+
+    runtime.setTheme("light");
+    // setTheme should NOT replace the run iframe; it should postMessage instead.
+    expect(host.querySelector("iframe")).toBe(frame);
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "set-theme", theme: "light" }),
+      "*",
+    );
+
+    await run;
+    runtime.destroy();
+    host.remove();
+  });
+
   it("renders replay preview in a no-script sandbox", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

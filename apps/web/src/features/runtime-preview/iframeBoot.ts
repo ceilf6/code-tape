@@ -70,6 +70,27 @@ export const IFRAME_BOOT_SCRIPT = `
     post("error", { message: limit(reason.message || String(reason), CONSOLE_ARG_MAX_CHARS), stack: reason.stack ? limit(reason.stack, CONSOLE_ARG_MAX_CHARS) : undefined });
   });
 
+  // Allowed theme bodies (must match host themeStyleTag in iframeRuntime.ts).
+  // Hard-coded here so a hostile parent can't inject arbitrary CSS via setTheme.
+  var THEME_BODIES = {
+    light: "color-scheme:light;background:#f5f5f4;color:#24272d;",
+    dark: "color-scheme:dark;background:#1c1f26;color:#e7e9ee;",
+  };
+
+  window.addEventListener("message", function (event) {
+    var msg = event.data;
+    if (!msg || msg.type !== "set-theme") return;
+    var body = THEME_BODIES[msg.theme];
+    if (!body) return;
+    var styleEl = document.getElementById("ct-theme");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "ct-theme";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = "html,body{" + body + "}";
+  });
+
   window.addEventListener("message", async function (event) {
     const msg = event.data;
     if (!msg || msg.type !== "init") return;
