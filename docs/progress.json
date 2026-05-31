@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T07:53:16Z",
+  "updatedAt": "2026-05-31T09:21:37Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        227
       ],
       "completedIssues": [
         11,
@@ -1186,6 +1187,20 @@
       "claimedAt": "2026-05-31T07:15:58Z",
       "closedAt": "2026-05-31T07:53:16Z",
       "mergedPr": 225
+    },
+    "227": {
+      "number": 227,
+      "title": "字幕 LLM 后处理：支持外部大模型接入 + 本地模型兜底",
+      "score": 5,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T09:21:37Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
