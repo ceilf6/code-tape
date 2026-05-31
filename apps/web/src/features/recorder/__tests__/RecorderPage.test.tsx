@@ -144,6 +144,7 @@ const recorderPageMock = vi.hoisted(() => {
     commit: vi.fn<RecordingRepository["commit"]>(async (id: string) => ({ ok: true, recordingId: id })),
     list: vi.fn(),
     load: vi.fn(),
+    loadThumbnail: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
     exportZip: vi.fn(),

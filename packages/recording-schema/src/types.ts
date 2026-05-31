@@ -380,6 +380,7 @@ export type RecordingRepository = {
   commit(recordingId: string): Promise<SaveResult>;
   list(): Promise<RecordingListItem[]>;
   load(recordingId: string): Promise<PackageLoadResult>;
+  loadThumbnail(thumbnailBlobId: string): Promise<Blob | null>;
   rename(recordingId: string, title: string): Promise<void>;
   remove(recordingId: string): Promise<void>;
   exportZip(recordingId: string): Promise<Blob>;

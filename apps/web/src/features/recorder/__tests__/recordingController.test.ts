@@ -43,6 +43,7 @@ function makeRepository(): RecordingRepository & {
     }),
     list: vi.fn(async () => []),
     load: vi.fn(async () => ({ ok: false as const, error: { code: "incomplete-package" as const, packageId: "x" } })),
+    loadThumbnail: vi.fn(async () => null),
     rename: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
     exportZip: vi.fn(async () => new Blob()),

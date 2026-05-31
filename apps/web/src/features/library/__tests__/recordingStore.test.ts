@@ -169,6 +169,49 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(new TextDecoder().decode(buffer)).toBe("binary");
   });
 
+  it("generates and lists a thumbnail for saved video media", async () => {
+    const thumbnailBlob = new Blob(["thumbnail"], { type: "image/webp" });
+    const thumbnailGenerator = vi.fn(async () => thumbnailBlob);
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator,
+    });
+    const input = makeInput("rec-thumbnail");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+
+    await store.saveDraft(input);
+    await store.commit("rec-thumbnail");
+
+    expect(thumbnailGenerator).toHaveBeenCalledWith(
+      input.mediaBlob,
+      expect.objectContaining({ width: 320, height: 180, mimeType: "image/webp" }),
+    );
+    const list = await store.list();
+    expect(list[0].thumbnailBlobId).toMatch(/^thumbnail-/);
+    const thumbnail = await store.loadThumbnail(list[0].thumbnailBlobId!);
+    expect(thumbnail).toBeInstanceOf(Blob);
+    expect(thumbnail?.type).toBe("image/webp");
+    expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("thumbnail");
+  });
+
+  it("continues saving video media when thumbnail generation fails", async () => {
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator: vi.fn(async () => {
+        throw new Error("decode failed");
+      }),
+    });
+    const input = makeInput("rec-thumbnail-failure");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+
+    await store.saveDraft(input);
+    await store.commit("rec-thumbnail-failure");
+
+    const list = await store.list();
+    expect(list).toHaveLength(1);
+    expect(list[0].thumbnailBlobId).toBeNull();
+  });
+
   it("returns media-write-failed when media blob cannot be prepared", async () => {
     const store = createRecordingStore({ databaseName: uniqueDbName() });
     const input = makeInput("rec-media-fail");
@@ -226,6 +269,22 @@ describe("createRecordingStore — two-phase commit", () => {
     await store.remove("rec-1");
     const list = await store.list();
     expect(list.length).toBe(0);
+  });
+
+  it("remove deletes the generated thumbnail blob", async () => {
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator: vi.fn(async () => new Blob(["thumbnail"], { type: "image/webp" })),
+    });
+    const input = makeInput("rec-remove-thumbnail");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+    await store.saveDraft(input);
+    await store.commit("rec-remove-thumbnail");
+    const thumbnailBlobId = (await store.list())[0].thumbnailBlobId!;
+
+    await store.remove("rec-remove-thumbnail");
+
+    expect(await store.loadThumbnail(thumbnailBlobId)).toBeNull();
   });
 
   it("sweep removes drafts older than max age and frees their blobs", async () => {

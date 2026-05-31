@@ -38,6 +38,7 @@ export function RecordingLibraryPage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [quota, setQuota] = useState<{ usageBytes: number; quotaBytes: number } | null>(null);
+  const [localThumbnailUrls, setLocalThumbnailUrls] = useState<Record<string, string>>({});
   const [uploadProgress, setUploadProgress] = useState<{ recordingId: string; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -113,6 +114,42 @@ export function RecordingLibraryPage() {
       // Sweep failure should not block library rendering.
     });
   }, [refreshQuota, localRepository]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const createdUrls: string[] = [];
+    if (view !== "local" || localItems.length === 0) {
+      setLocalThumbnailUrls({});
+      return () => {};
+    }
+
+    void Promise.all(
+      localItems.map(async (item) => {
+        if (!item.thumbnailBlobId) return null;
+        try {
+          const thumbnail = await localRepository.loadThumbnail(item.thumbnailBlobId);
+          if (!thumbnail) return null;
+          const url = URL.createObjectURL(thumbnail);
+          createdUrls.push(url);
+          return [item.id, url] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      const nextUrls = Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null));
+      if (cancelled) {
+        Object.values(nextUrls).forEach((url) => URL.revokeObjectURL(url));
+        return;
+      }
+      setLocalThumbnailUrls(nextUrls);
+    });
+
+    return () => {
+      cancelled = true;
+      createdUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [localItems, localRepository, view]);
 
   const handleDelete = async (item: LibraryItem) => {
     setBusyKey(`delete-${item.id}`);
@@ -373,7 +410,8 @@ export function RecordingLibraryPage() {
         <div className="overflow-x-auto rounded-md border border-border bg-surface/60">
           <table className="w-full table-fixed border-collapse text-sm">
             <colgroup>
-              <col className="w-[18rem]" />
+              <col className="w-[9rem]" />
+              <col className="w-[16rem]" />
               <col className="w-[13rem]" />
               <col className="w-[12rem]" />
               <col className="w-[8rem]" />
@@ -382,7 +420,8 @@ export function RecordingLibraryPage() {
             </colgroup>
             <thead className="bg-surface-raised text-xs uppercase tracking-wide text-muted">
               <tr>
-                <th className="px-4 py-3 text-center font-medium">标题</th>
+                <th className="px-4 py-3 text-left font-medium">封面</th>
+                <th className="px-4 py-3 text-left font-medium">标题</th>
                 <th className="px-4 py-3 text-left font-medium">创建时间</th>
                 <th className="px-4 py-3 text-left font-medium">时长</th>
                 <th className="px-4 py-3 text-left font-medium">语言</th>
@@ -393,12 +432,17 @@ export function RecordingLibraryPage() {
             <tbody className="divide-y divide-border">
               {items.map((item) => (
                 <tr key={item.id} className="align-top">
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3">
+                    <RecordingThumbnail
+                      title={item.title}
+                      src={thumbnailSrcForItem(view, item, localThumbnailUrls)}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
                     <EllipsisLink
                       to={replayPath(view, item.id)}
                       text={item.title}
                       className="font-medium text-foreground hover:underline"
-                      align="center"
                     />
                   </td>
                   <td className="px-4 py-3 text-muted">
@@ -622,6 +666,25 @@ type EllipsisTextProps = {
   className?: string;
 };
 
+function RecordingThumbnail({ title, src }: { title: string; src: string | null }) {
+  const label = `${title} 封面`;
+  return (
+    <div className="h-16 w-28 overflow-hidden rounded-md border border-border bg-background shadow-sm">
+      {src ? (
+        <img src={src} alt={label} className="h-full w-full object-cover" />
+      ) : (
+        <div
+          role="img"
+          aria-label={`${label}占位`}
+          className="flex h-full w-full items-center justify-center bg-surface-raised text-[10px] font-semibold uppercase tracking-widest text-muted"
+        >
+          CT
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EllipsisText({ text, align = "left", className = "" }: EllipsisTextProps) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [overflowing, setOverflowing] = useState(false);
@@ -735,6 +798,15 @@ function buildSaveResultError(result: Extract<SaveResult, { ok: false }>): strin
 
 function replayPath(view: "local" | "cloud", recordingId: string): string {
   return view === "cloud" ? `/replays/${recordingId}` : `/replay/${recordingId}`;
+}
+
+function thumbnailSrcForItem(
+  view: "local" | "cloud",
+  item: LibraryItem,
+  localThumbnailUrls: Record<string, string>,
+): string | null {
+  if (view === "cloud") return (item as CloudRecordingListItem).thumbnailUrl;
+  return localThumbnailUrls[item.id] ?? null;
 }
 
 function buildAbsoluteShareUrl(url: string): string {

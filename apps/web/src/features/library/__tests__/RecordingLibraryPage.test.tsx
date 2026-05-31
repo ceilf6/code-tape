@@ -17,6 +17,7 @@ const repositoryMocks = {
   remove: vi.fn(),
   exportZip: vi.fn(),
   importZip: vi.fn(),
+  loadThumbnail: vi.fn(),
   sweep: vi.fn(),
   estimateQuota: vi.fn(),
 };
@@ -98,6 +99,7 @@ describe("RecordingLibraryPage", () => {
     repositoryMocks.remove.mockResolvedValue(undefined);
     repositoryMocks.exportZip.mockResolvedValue(new Blob(["zip"], { type: "application/zip" }));
     repositoryMocks.importZip.mockResolvedValue({ ok: true, recordingId: "rec-new" });
+    repositoryMocks.loadThumbnail.mockResolvedValue(null);
     repositoryMocks.load.mockResolvedValue({
       ok: true,
       package: LOCAL_PACKAGE,
@@ -180,6 +182,18 @@ describe("RecordingLibraryPage", () => {
     expect(screen.getByText(/TypeScript/)).toBeInTheDocument();
     expect(screen.getByText(/\u97f3\u9891/)).toBeInTheDocument();
     expect(screen.getByText(/\u65e0\u6444\u50cf\u5934/)).toBeInTheDocument();
+  });
+
+  it("renders a local recording thumbnail when a thumbnail blob is available", async () => {
+    repositoryMocks.list.mockResolvedValue([{ ...BASE_ITEM, thumbnailBlobId: "thumbnail-1" }]);
+    repositoryMocks.loadThumbnail.mockResolvedValueOnce(new Blob(["thumbnail"], { type: "image/webp" }));
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    const image = await screen.findByRole("img", { name: `${BASE_TITLE} \u5c01\u9762` });
+
+    expect(repositoryMocks.loadThumbnail).toHaveBeenCalledWith("thumbnail-1");
+    expect(image).toHaveAttribute("src", "blob:mock");
   });
 
   it("renames a recording and refreshes list", async () => {
@@ -464,6 +478,26 @@ describe("RecordingLibraryPage", () => {
     expect(screen.getByText(/JavaScript/)).toBeInTheDocument();
     expect(screen.getByText(/\u65e0\u97f3\u9891/)).toBeInTheDocument();
     expect(screen.getByText(/\u6444\u50cf\u5934/)).toBeInTheDocument();
+  });
+
+  it("renders a cloud recording thumbnail URL when present", async () => {
+    cloudRepositoryMocks.list.mockResolvedValue({
+      ok: true,
+      value: {
+        items: [{ ...CLOUD_ITEM, thumbnailUrl: "https://cdn.example.test/thumb.webp" }],
+        nextCursor: null,
+      },
+    });
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    fireEvent.click(screen.getByRole("tab", { name: "云端录制" }));
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    expect(screen.getByRole("img", { name: "Cloud Two Sum \u5c01\u9762" })).toHaveAttribute(
+      "src",
+      "https://cdn.example.test/thumb.webp",
+    );
   });
 
   it("copies a cloud recording share link", async () => {
