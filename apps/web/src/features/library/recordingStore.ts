@@ -206,10 +206,7 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
         }
         await awaitTransaction(tx);
         if (thumbnailBlobId && input.mediaBlob) {
-          const thumbnailPayload = await prepareThumbnailPayload(input.mediaBlob, thumbnailGenerator);
-          if (thumbnailPayload) {
-            await persistThumbnail(db, stored, thumbnailBlobId, thumbnailPayload);
-          }
+          void generateAndPersistThumbnail(getDb, recordingId, thumbnailBlobId, input.mediaBlob, thumbnailGenerator);
         }
         return { ok: true, recordingId };
       } catch (err) {
@@ -227,18 +224,27 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
     async commit(recordingId: string): Promise<SaveResult> {
       const db = await getDb();
       try {
-        const existing = await readRecording(recordingId);
-        if (!existing) {
-          return { ok: false, reason: "validation-failed", message: "draft not found" };
-        }
-        const updated: StoredRecording = {
-          ...existing,
-          manifest: { ...existing.manifest, status: "complete", completedAt: new Date().toISOString() },
-        };
-        const tx = db.transaction(STORE_RECORDINGS, "readwrite");
-        tx.objectStore(STORE_RECORDINGS).put(updated);
-        await awaitTransaction(tx);
-        return { ok: true, recordingId };
+        return await new Promise<SaveResult>((resolve) => {
+          const tx = db.transaction(STORE_RECORDINGS, "readwrite");
+          const recordings = tx.objectStore(STORE_RECORDINGS);
+          const request = recordings.get(recordingId);
+          let result: SaveResult | null = null;
+          request.onsuccess = () => {
+            const existing = request.result as StoredRecording | undefined;
+            if (!existing) {
+              result = { ok: false, reason: "validation-failed", message: "draft not found" };
+              return;
+            }
+            recordings.put({
+              ...existing,
+              manifest: { ...existing.manifest, status: "complete", completedAt: new Date().toISOString() },
+            });
+            result = { ok: true, recordingId };
+          };
+          tx.oncomplete = () => resolve(result ?? { ok: false, reason: "unknown", message: "commit did not complete" });
+          tx.onerror = () => resolve({ ok: false, reason: "unknown", message: tx.error?.message ?? "unknown" });
+          tx.onabort = () => resolve({ ok: false, reason: "unknown", message: tx.error?.message ?? "unknown" });
+        });
       } catch (err) {
         return { ok: false, reason: "unknown", message: (err as Error).message };
       }
@@ -457,19 +463,47 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
   };
 }
 
-async function persistThumbnail(
+function persistThumbnail(
   db: IDBDatabase,
-  stored: StoredRecording,
+  recordingId: string,
   thumbnailBlobId: string,
   thumbnailPayload: StoredBlob,
 ): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction([STORE_RECORDINGS, STORE_THUMBNAILS], "readwrite");
+      const recordings = tx.objectStore(STORE_RECORDINGS);
+      const request = recordings.get(recordingId);
+      request.onsuccess = () => {
+        const existing = request.result as StoredRecording | undefined;
+        if (!existing) return;
+        tx.objectStore(STORE_THUMBNAILS).put(thumbnailPayload, thumbnailBlobId);
+        recordings.put({ ...existing, thumbnailBlobId });
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      // Thumbnail storage is best-effort; the recording and media are already durable.
+      resolve();
+    }
+  });
+}
+
+async function generateAndPersistThumbnail(
+  getDb: () => Promise<IDBDatabase>,
+  recordingId: string,
+  thumbnailBlobId: string,
+  mediaBlob: Blob,
+  thumbnailGenerator: ThumbnailGenerator,
+): Promise<void> {
+  const thumbnailPayload = await prepareThumbnailPayload(mediaBlob, thumbnailGenerator);
+  if (!thumbnailPayload) return;
   try {
-    const tx = db.transaction([STORE_RECORDINGS, STORE_THUMBNAILS], "readwrite");
-    tx.objectStore(STORE_THUMBNAILS).put(thumbnailPayload, thumbnailBlobId);
-    tx.objectStore(STORE_RECORDINGS).put({ ...stored, thumbnailBlobId });
-    await awaitTransaction(tx);
+    const db = await getDb();
+    await persistThumbnail(db, recordingId, thumbnailBlobId, thumbnailPayload);
   } catch {
-    // Thumbnail storage is best-effort; the recording and media are already durable.
+    // Reopening the DB can fail after a blocked upgrade; thumbnails remain optional.
   }
 }
 

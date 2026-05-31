@@ -5,8 +5,10 @@ import { createRecordingStore } from "../recordingStore";
 import type {
   RecordingEvent,
   RecordingIndexes,
+  RecordingListItem,
   RecordingMeta,
   RecordingSnapshot,
+  RecordingRepository,
   SaveDraftInput,
 } from "@/shared/recording-schema";
 
@@ -186,15 +188,15 @@ describe("createRecordingStore — two-phase commit", () => {
       input.mediaBlob,
       expect.objectContaining({ width: 320, height: 180, mimeType: "image/webp" }),
     );
-    const list = await store.list();
-    expect(list[0].thumbnailBlobId).toMatch(/^thumbnail-/);
-    const thumbnail = await store.loadThumbnail(list[0].thumbnailBlobId!);
+    const item = await waitForListedRecordingWithThumbnail(store, "rec-thumbnail");
+    expect(item?.thumbnailBlobId).toMatch(/^thumbnail-/);
+    const thumbnail = await store.loadThumbnail(item!.thumbnailBlobId!);
     expect(thumbnail).toBeInstanceOf(Blob);
     expect(thumbnail?.type).toBe("image/webp");
     expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("thumbnail");
   });
 
-  it("writes the draft before optional video thumbnail generation settles", async () => {
+  it("returns after writing the draft before optional video thumbnail generation settles", async () => {
     let resolveThumbnail!: (thumbnail: Blob | null) => void;
     const thumbnailPromise = new Promise<Blob | null>((resolve) => {
       resolveThumbnail = resolve;
@@ -213,13 +215,24 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(draft?.manifest.status).toBe("draft");
     expect(draft?.thumbnailBlobId).toBeNull();
 
-    resolveThumbnail(new Blob(["thumbnail"], { type: "image/webp" }));
-    const saved = await saving;
-    if (!saved.ok) throw new Error(saved.message);
+    const earlySaveResult = await Promise.race([
+      saving.then((result) => result),
+      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 10)),
+    ]);
+    if (earlySaveResult === "pending") {
+      resolveThumbnail(null);
+      await saving;
+    }
+    expect(earlySaveResult).not.toBe("pending");
+    if (earlySaveResult !== "pending" && !earlySaveResult.ok) {
+      throw new Error(earlySaveResult.message);
+    }
     await store.commit("rec-thumbnail-background");
 
-    const list = await store.list();
-    expect(list[0].thumbnailBlobId).toMatch(/^thumbnail-/);
+    resolveThumbnail(new Blob(["thumbnail"], { type: "image/webp" }));
+
+    const item = await waitForListedRecordingWithThumbnail(store, "rec-thumbnail-background");
+    expect(item?.thumbnailBlobId).toMatch(/^thumbnail-/);
   });
 
   it("continues saving video media when thumbnail generation fails", async () => {
@@ -341,7 +354,7 @@ describe("createRecordingStore — two-phase commit", () => {
     input.mediaBlob = new Blob(["video"], { type: "video/webm" });
     await store.saveDraft(input);
     await store.commit("rec-remove-thumbnail");
-    const thumbnailBlobId = (await store.list())[0].thumbnailBlobId!;
+    const thumbnailBlobId = (await waitForListedRecordingWithThumbnail(store, "rec-remove-thumbnail"))!.thumbnailBlobId!;
 
     await store.remove("rec-remove-thumbnail");
 
@@ -380,6 +393,27 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(imported.ok).toBe(true);
     const list = await sink.list();
     expect(list[0].id).toBe("rec-export");
+  });
+
+  it("importZip generates a thumbnail for imported video media", async () => {
+    const source = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-import-thumbnail");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+    await source.saveDraft(input);
+    await source.commit("rec-import-thumbnail");
+    const zipBlob = await source.exportZip("rec-import-thumbnail");
+    const thumbnailGenerator = vi.fn(async () => new Blob(["thumbnail"], { type: "image/webp" }));
+    const sink = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator,
+    });
+
+    const imported = await sink.importZip(zipBlob);
+
+    if (!imported.ok) throw new Error(imported.message);
+    expect(thumbnailGenerator).toHaveBeenCalled();
+    const item = await waitForListedRecordingWithThumbnail(sink, "rec-import-thumbnail");
+    expect(item?.thumbnailBlobId).toMatch(/^thumbnail-/);
   });
 
   it("importZip accepts packages with unsupported media-warning events", async () => {
@@ -431,6 +465,20 @@ async function waitForRawRecording(dbName: string, id: string): Promise<{ manife
   while (Date.now() < deadline) {
     lastValue = await readRawRecording(dbName, id);
     if (lastValue) return lastValue;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return lastValue;
+}
+
+async function waitForListedRecordingWithThumbnail(
+  store: RecordingRepository,
+  id: string,
+): Promise<RecordingListItem | undefined> {
+  const deadline = Date.now() + 250;
+  let lastValue: RecordingListItem | undefined;
+  while (Date.now() < deadline) {
+    lastValue = (await store.list()).find((item) => item.id === id);
+    if (lastValue?.thumbnailBlobId) return lastValue;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   return lastValue;
