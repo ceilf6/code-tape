@@ -14,10 +14,11 @@ import type { SubtitleCorrectionResult, SubtitlePostProcessor, SubtitleTrack } f
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS = 2_048;
 const ABORT_MESSAGE = "字幕纠错已取消";
-// External request gets its own budget, shorter than the panel's global 60s
-// post-process timeout, so a slow/hung endpoint trips THIS timeout first and
-// leaves time for the local fallback to still run under the global budget.
-const DEFAULT_EXTERNAL_REQUEST_TIMEOUT_MS = 45_000;
+// External request gets its own fail-fast budget via its own AbortController.
+// The panel ADDS this on top of the local model's full budget (see
+// resolvePostProcessTimeoutMs) so that when the external endpoint hangs, the
+// local fallback still gets its complete original budget — never a leftover sliver.
+export const DEFAULT_EXTERNAL_REQUEST_TIMEOUT_MS = 30_000;
 
 // Thrown when the external request exceeds its own timeout (not a user cancel).
 // The fallback wrapper treats this as a recoverable failure and runs the local

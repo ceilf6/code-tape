@@ -5,6 +5,7 @@ import { SubtitleLlmConfigButton } from "./SubtitleLlmConfigButton";
 import { applySubtitleCorrection } from "./subtitleCorrection";
 import { createExternalLlmSubtitlePostProcessor } from "./externalLlmSubtitlePostProcessor";
 import { createFallbackSubtitlePostProcessor } from "./fallbackSubtitlePostProcessor";
+import { resolveEffectivePostProcessTimeoutMs } from "./subtitlePostProcessTimeout";
 import { isExternalLlmConfigured, loadExternalLlmConfig } from "./subtitleLlmConfig";
 import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
 import { createWorkerBackedHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessorWorkerClient";
@@ -264,7 +265,7 @@ export function SubtitlePanel({
         }),
         {
           abortController,
-          timeoutMs: postProcessTimeoutMs,
+          timeoutMs: resolveEffectivePostProcessTimeoutMs(postProcessTimeoutMs, externalLlmConfigured),
         },
       );
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
