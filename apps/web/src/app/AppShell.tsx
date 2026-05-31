@@ -1,7 +1,18 @@
 import { Outlet, NavLink } from "react-router-dom";
 import { Monitor, Moon, Sun } from "lucide-react";
-import type { ThemePreference } from "@/shared/ui";
+import type { ThemeMode, ThemePreference } from "@/shared/ui";
 import { useTheme } from "@/shared/ui/useTheme";
+
+const THEME_PREFERENCE_LABEL: Record<ThemePreference, string> = {
+  system: "跟随系统",
+  light: "浅色",
+  dark: "深色",
+};
+
+const THEME_MODE_LABEL: Record<ThemeMode, string> = {
+  light: "浅色",
+  dark: "深色",
+};
 
 /**
  * AppShell — top-level chrome that hosts page outlets.
@@ -11,6 +22,7 @@ import { useTheme } from "@/shared/ui/useTheme";
  */
 export function AppShell() {
   const theme = useTheme();
+  const themeStatusLabel = `主题偏好，当前偏好：${THEME_PREFERENCE_LABEL[theme.preference]}，当前生效：${THEME_MODE_LABEL[theme.resolved]}`;
   const themeOptions: Array<{
     preference: ThemePreference;
     label: string;
@@ -64,7 +76,7 @@ export function AppShell() {
         </nav>
         <span className="flex-1" />
         <div
-          aria-label="主题偏好"
+          aria-label={themeStatusLabel}
           className="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-surface p-0.5"
           role="group"
         >

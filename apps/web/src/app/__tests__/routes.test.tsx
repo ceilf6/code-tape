@@ -78,20 +78,24 @@ describe("AppShell", () => {
     const lightButton = screen.getByRole("button", { name: "切换到浅色主题" });
     const darkButton = screen.getByRole("button", { name: "切换到深色主题" });
 
+    expect(screen.getByRole("group", { name: "主题偏好，当前偏好：跟随系统，当前生效：深色" })).toBeInTheDocument();
     expect(systemButton).toHaveAttribute("aria-pressed", "true");
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     fireEvent.click(lightButton);
+    expect(screen.getByRole("group", { name: "主题偏好，当前偏好：浅色，当前生效：浅色" })).toBeInTheDocument();
     expect(lightButton).toHaveAttribute("aria-pressed", "true");
     expect(window.localStorage.getItem("code-tape:theme")).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
 
     fireEvent.click(darkButton);
+    expect(screen.getByRole("group", { name: "主题偏好，当前偏好：深色，当前生效：深色" })).toBeInTheDocument();
     expect(darkButton).toHaveAttribute("aria-pressed", "true");
     expect(window.localStorage.getItem("code-tape:theme")).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     fireEvent.click(systemButton);
+    expect(screen.getByRole("group", { name: "主题偏好，当前偏好：跟随系统，当前生效：深色" })).toBeInTheDocument();
     expect(systemButton).toHaveAttribute("aria-pressed", "true");
     expect(window.localStorage.getItem("code-tape:theme")).toBe("system");
     expect(document.documentElement.dataset.theme).toBe("dark");
