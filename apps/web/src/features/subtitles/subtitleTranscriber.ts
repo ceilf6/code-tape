@@ -32,7 +32,7 @@ const TRANSCRIPTION_OPTIONS = {
 
 type AsrPipelineOptions = {
   device: "wasm";
-  dtype: "fp32";
+  dtype: "q8";
 };
 
 type PipelineFactory = (
@@ -66,7 +66,7 @@ export function createHuggingFaceSubtitleTranscriber(
   options: HuggingFaceSubtitleTranscriberOptions = {},
 ): SubtitleTranscriber {
   const model = options.model ?? DEFAULT_TRANSCRIPTION_MODEL;
-  const pipelineOptions: AsrPipelineOptions = { device: "wasm", dtype: "fp32" };
+  const pipelineOptions: AsrPipelineOptions = { device: "wasm", dtype: "q8" };
   let pipelinePromise: Promise<AsrPipeline> | null = null;
   const getPipeline = () => {
     if (!pipelinePromise) {

@@ -1,0 +1,2 @@
+apps/web/public/models/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+apps/web/public/ort/*.wasm filter=lfs diff=lfs merge=lfs -text

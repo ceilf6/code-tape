@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  configureModelSource,
   configureQuietBrowserCache,
   loadTransformersModule,
   loadTransformersPipeline,
@@ -157,6 +158,95 @@ describe("transformersLoader", () => {
       env.customCache?.put("model-cache-key", new Response("weights")),
     ).resolves.toBeUndefined();
     expect(open).toHaveBeenCalledWith("transformers-cache");
+  });
+});
+
+describe("configureModelSource", () => {
+  it("serves vendored same-origin assets and disables remote by default", () => {
+    const env: TransformersEnvironment = {};
+
+    configureModelSource(env, { baseUrl: "/code-tape/" });
+
+    expect(env.allowLocalModels).toBe(true);
+    expect(env.allowRemoteModels).toBe(false);
+    expect(env.localModelPath).toBe("/code-tape/models/");
+    expect(env.remoteHost).toBeUndefined();
+  });
+
+  it("defaults the base path to root when baseUrl is empty", () => {
+    const env: TransformersEnvironment = {};
+
+    configureModelSource(env, { baseUrl: "" });
+
+    expect(env.localModelPath).toBe("/models/");
+  });
+
+  it("switches to a remote mirror when VITE_HF_REMOTE_HOST is configured", () => {
+    const env: TransformersEnvironment = {};
+
+    configureModelSource(env, { baseUrl: "/", remoteHost: "https://hf-mirror.com" });
+
+    expect(env.allowRemoteModels).toBe(true);
+    expect(env.allowLocalModels).toBe(false);
+    expect(env.remoteHost).toBe("https://hf-mirror.com/");
+    expect(env.localModelPath).toBeUndefined();
+  });
+
+  it("rebases existing per-browser wasm paths onto the self-hosted ort directory", () => {
+    const env: TransformersEnvironment = {
+      backends: {
+        onnx: {
+          wasm: {
+            wasmPaths: {
+              mjs: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.0/dist/ort-wasm-simd-threaded.asyncify.mjs",
+              wasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.0/dist/ort-wasm-simd-threaded.asyncify.wasm",
+            },
+          },
+        },
+      },
+    };
+
+    configureModelSource(env, { baseUrl: "/code-tape/" });
+
+    expect(env.backends?.onnx?.wasm?.wasmPaths).toEqual({
+      mjs: "/code-tape/ort/ort-wasm-simd-threaded.asyncify.mjs",
+      wasm: "/code-tape/ort/ort-wasm-simd-threaded.asyncify.wasm",
+    });
+  });
+
+  it("uses an ort directory prefix when wasm paths are not yet initialized", () => {
+    const env: TransformersEnvironment = {
+      backends: { onnx: { wasm: {} } },
+    };
+
+    configureModelSource(env, { baseUrl: "/" });
+
+    expect(env.backends?.onnx?.wasm?.wasmPaths).toBe("/ort/");
+  });
+
+  it("ignores a missing environment", () => {
+    expect(() => configureModelSource(undefined, { baseUrl: "/" })).not.toThrow();
+  });
+
+  it("leaves transformers defaults untouched when there is no http origin (Node SSR)", () => {
+    const env: TransformersEnvironment = {};
+    const originalLocation = globalThis.location;
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { protocol: "file:" },
+    });
+    try {
+      configureModelSource(env, { baseUrl: "/" });
+    } finally {
+      Object.defineProperty(globalThis, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+
+    expect(env.allowLocalModels).toBeUndefined();
+    expect(env.allowRemoteModels).toBeUndefined();
+    expect(env.localModelPath).toBeUndefined();
   });
 });
 

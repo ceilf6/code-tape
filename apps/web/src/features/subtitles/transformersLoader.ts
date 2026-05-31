@@ -1,8 +1,31 @@
+export type TransformersWasmPaths = string | { mjs?: string; wasm?: string };
+
 export type TransformersEnvironment = {
   useBrowserCache?: boolean;
   useCustomCache?: boolean;
   customCache?: QuietBrowserCache | null;
   cacheKey?: string;
+  allowLocalModels?: boolean;
+  allowRemoteModels?: boolean;
+  remoteHost?: string;
+  localModelPath?: string;
+  backends?: {
+    onnx?: {
+      wasm?: {
+        wasmPaths?: TransformersWasmPaths;
+      };
+    };
+  };
+};
+
+export type ModelSourceConfig = {
+  baseUrl?: string;
+  remoteHost?: string;
+};
+
+type ModelSourceEnv = {
+  BASE_URL?: unknown;
+  VITE_HF_REMOTE_HOST?: unknown;
 };
 
 type QuietBrowserCache = {
@@ -55,6 +78,7 @@ export async function loadTransformersPipeline<TPipeline>(
 ): Promise<TPipeline> {
   const module = await loadTransformersModule(loaderOptions);
   configureQuietBrowserCache(module.env);
+  configureModelSource(module.env);
   const pipe = await module.pipeline(task, model, options);
   return pipe as TPipeline;
 }
@@ -85,6 +109,86 @@ export function configureQuietBrowserCache(env: TransformersEnvironment | undefi
       }
     },
   };
+}
+
+export function configureModelSource(
+  env: TransformersEnvironment | undefined,
+  config: ModelSourceConfig = readModelSourceConfig(),
+): void {
+  if (!env) return;
+  const remoteHost = config.remoteHost?.trim();
+  if (remoteHost) {
+    // Mirror fallback: fetch model assets from a configured Hugging Face mirror
+    // instead of the bundled same-origin copy. Used when assets are not vendored.
+    env.allowRemoteModels = true;
+    env.allowLocalModels = false;
+    env.remoteHost = remoteHost.endsWith("/") ? remoteHost : `${remoteHost}/`;
+    return;
+  }
+  if (!hasSameOriginAssetHost()) {
+    // No HTTP origin to serve vendored assets from (e.g. Node SSR in the manual
+    // real-model smoke tool). Leave transformers.js defaults so it can still
+    // reach the Hub on networks that allow it; same-origin hosting is browser-only.
+    return;
+  }
+  // Default: serve vendored assets from the same origin as the app
+  // (apps/web/public/models). Disable remote so missing files fail loudly
+  // instead of silently timing out against huggingface.co.
+  env.allowLocalModels = true;
+  env.allowRemoteModels = false;
+  env.localModelPath = joinBaseUrl(config.baseUrl, "models/");
+  configureSelfHostedWasmPaths(env, config.baseUrl);
+}
+
+function hasSameOriginAssetHost(): boolean {
+  // True in a browser window and a Web Worker (both expose an http(s) origin);
+  // false under Node SSR, where there is no origin to fetch public/ assets from.
+  const origin = (globalThis as { location?: { protocol?: string } }).location?.protocol;
+  return origin === "http:" || origin === "https:";
+}
+
+function configureSelfHostedWasmPaths(
+  env: TransformersEnvironment,
+  baseUrl: string | undefined,
+): void {
+  const wasm = env.backends?.onnx?.wasm;
+  if (!wasm) return;
+  const ortBase = joinBaseUrl(baseUrl, "ort/");
+  // Preserve the per-browser file names transformers.js already selected
+  // (Safari uses the non-asyncify build); only redirect the host to our copy.
+  const current = wasm.wasmPaths;
+  if (typeof current === "object" && current) {
+    wasm.wasmPaths = {
+      ...(current.mjs ? { mjs: rebaseOrtFile(current.mjs, ortBase) } : {}),
+      ...(current.wasm ? { wasm: rebaseOrtFile(current.wasm, ortBase) } : {}),
+    };
+    return;
+  }
+  // No object form yet (paths not initialized): use a prefix so onnxruntime-web
+  // appends its own file names under our directory.
+  wasm.wasmPaths = ortBase;
+}
+
+function rebaseOrtFile(originalPath: string, ortBase: string): string {
+  const fileName = originalPath.split("/").pop() ?? originalPath;
+  return `${ortBase}${fileName}`;
+}
+
+function joinBaseUrl(baseUrl: string | undefined, suffix: string): string {
+  const base = baseUrl && baseUrl.length > 0 ? baseUrl : "/";
+  const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+  return `${normalizedBase}${suffix}`;
+}
+
+function readModelSourceConfig(): ModelSourceConfig {
+  const env: ModelSourceEnv =
+    typeof import.meta !== "undefined" && import.meta.env
+      ? (import.meta.env as ModelSourceEnv)
+      : {};
+  const baseUrl = typeof env.BASE_URL === "string" ? env.BASE_URL : "/";
+  const remoteHost =
+    typeof env.VITE_HF_REMOTE_HOST === "string" ? env.VITE_HF_REMOTE_HOST : undefined;
+  return { baseUrl, remoteHost };
 }
 
 export function requestStaleTransformersImportRecovery(error: unknown): boolean {

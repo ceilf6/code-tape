@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# This repo sets core.hooksPath=.githooks, which bypasses the pre-push hook that
+# git-lfs installs at .git/hooks/pre-push. Chain it here so LFS objects (subtitle
+# model .onnx / ort .wasm under apps/web/public) actually upload on push.
+if command -v git-lfs >/dev/null 2>&1; then
+  git lfs pre-push "$@"
+fi
+
 if [ "${SKIP_QUALITY_HOOKS:-}" = "1" ]; then
   echo "Skipping pre-push quality gate because SKIP_QUALITY_HOOKS=1."
   exit 0

@@ -109,7 +109,7 @@ describe("normalizeTranscriptionResult", () => {
     expect(pipelineFactory).toHaveBeenCalledTimes(2);
   });
 
-  it("loads the browser ASR pipeline with stable fp32 WASM weights", async () => {
+  it("loads the browser ASR pipeline with vendored q8 WASM weights", async () => {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       value: vi.fn(() => "blob:subtitle-source"),
@@ -130,7 +130,7 @@ describe("normalizeTranscriptionResult", () => {
     expect(pipelineFactory).toHaveBeenCalledWith(
       "automatic-speech-recognition",
       "onnx-community/whisper-tiny",
-      { device: "wasm", dtype: "fp32" },
+      { device: "wasm", dtype: "q8" },
     );
   });
 

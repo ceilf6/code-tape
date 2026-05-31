@@ -228,7 +228,7 @@ async function loadPipelineWithFallback({
 function buildModelLoadError(error: unknown, options: TextGenerationPipelineOptions): Error {
   const detail = error instanceof Error ? error.message : String(error);
   const wrapped = new Error(
-    `当前浏览器无法加载本地字幕 LLM 模型（${options.device}/${options.dtype}）。请关闭其他占用内存的页面、升级浏览器后重试，或稍后再运行字幕纠错。原始错误：${detail}`,
+    `当前浏览器无法加载本地字幕 LLM 模型（${options.device}/${options.dtype}）。请确认已运行 npm run subtitle:vendor 拉取模型资产，关闭其他占用内存的页面、升级浏览器后重试，或稍后再运行字幕纠错。原始错误：${detail}`,
   );
   if (error instanceof Error) {
     (wrapped as Error & { cause?: unknown }).cause = error;
