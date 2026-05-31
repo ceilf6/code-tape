@@ -1,4 +1,12 @@
 export { createCloudRecordingService } from "./cloud/cloudRecordingService.js";
+export {
+  createAuthTokenService,
+  DEFAULT_ACCESS_TOKEN_TTL_MS,
+  type AuthTokenService,
+  type AuthTokenServiceOptions,
+  type AccessTokenPayload,
+  type IssuedAccessToken,
+} from "./cloud/authTokenService.js";
 export { createMemoryMetadataRepository } from "./cloud/memoryMetadataRepository.js";
 export { createMemoryObjectStorage } from "./cloud/memoryObjectStorage.js";
 export {

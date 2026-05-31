@@ -257,18 +257,47 @@ function makePlaybackDescriptor(
 // fetch mock 工具
 // ─────────────────────────────────────────────────────────────
 
+// 业务响应队列（FIFO）；access token 刷新端点不入队，由默认实现透明应答。
+const businessResponseQueue: Array<() => Promise<Response> | Response> = [];
+
+function authTokenResponse(): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => ({
+      accessToken: "test.access.token",
+      expiresAt: Date.now() + 15 * 60 * 1000,
+      tokenType: "Bearer",
+    }),
+  } as Response;
+}
+
+function installFetchRouter() {
+  vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("/api/auth/token")) return authTokenResponse();
+    const next = businessResponseQueue.shift();
+    if (!next) throw new Error(`unexpected fetch to ${url} (no mockFetch queued)`);
+    return next();
+  });
+}
+
 function mockFetch(status: number, body: unknown, headers: Record<string, string> = {}) {
-  vi.mocked(fetch).mockResolvedValueOnce({
+  businessResponseQueue.push(() => ({
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? "OK" : "Error",
     headers: new Headers({ "content-type": "application/json", ...headers }),
     json: async () => body,
-  } as Response);
+  } as Response));
 }
 
 function mockFetchReject(error: Error) {
-  vi.mocked(fetch).mockRejectedValueOnce(error);
+  businessResponseQueue.push(() => {
+    throw error;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -332,7 +361,19 @@ function setupRepo(): CloudRecordingRepository {
   if (!vi.isMockFunction(globalThis.fetch)) {
     vi.stubGlobal("fetch", vi.fn());
   }
+  businessResponseQueue.length = 0;
+  installFetchRouter();
   return createCloudRecordingRepository();
+}
+
+/** 取出业务请求（过滤掉 dual-token 的 /api/auth/token 调用）的第 index 次调用参数。 */
+function businessFetchCall(index = 0): [RequestInfo | URL, RequestInit | undefined] {
+  const calls = vi.mocked(fetch).mock.calls.filter((call) => {
+    const input = call[0];
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    return !url.includes("/api/auth/token");
+  });
+  return calls[index] as [RequestInfo | URL, RequestInit | undefined];
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -413,16 +454,27 @@ describe("CloudRecordingRepository", () => {
       expect(result.value.uploadTargets[0].method).toBe("PUT");
     });
 
-    it("在请求中携带 x-owner-token 头", async () => {
+    it("在业务请求中携带 Bearer access token，refresh token 仅发往 /api/auth/token", async () => {
       const repo = setupRepo();
       mockFetch(201, makeSessionResponse());
 
       await repo.createUploadSession(makeCreateSessionRequest());
-      const callArgs = vi.mocked(fetch).mock.calls[0];
-      const reqInit = callArgs[1] as RequestInit;
-      expect(reqInit.headers).toBeDefined();
-      const headers = reqInit.headers as Record<string, string>;
-      expect(headers["x-owner-token"]).toBe(repo.getOwnerToken());
+      const [, reqInit] = businessFetchCall(0);
+      expect(reqInit?.headers).toBeDefined();
+      const headers = reqInit?.headers as Record<string, string>;
+      expect(headers.authorization).toBe("Bearer test.access.token");
+      // refresh token（设备 token）不得随业务请求裸传
+      expect(headers["x-owner-token"]).toBeUndefined();
+
+      // refresh token 只出现在 /api/auth/token 请求体中
+      const authCall = vi.mocked(fetch).mock.calls.find((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        return url.includes("/api/auth/token");
+      });
+      expect(authCall).toBeDefined();
+      const authBody = JSON.parse((authCall?.[1]?.body as string) ?? "{}") as { refreshToken?: string };
+      expect(authBody.refreshToken).toBe(repo.getOwnerToken());
     });
 
     it("API 返回错误时返回 ok: false 及结构化错误", async () => {
@@ -450,8 +502,12 @@ describe("CloudRecordingRepository", () => {
       expect(result.error.message).toContain("Failed to fetch");
     });
 
-    it("缺少 owner token 时返回 unauthorized", async () => {
+    it("刷新后仍 401 时返回 unauthorized（不无限重试）", async () => {
       const repo = setupRepo();
+      // 首次业务请求 401 → authorizedFetch 强制刷新后重试 → 仍 401。
+      mockFetch(401, {
+        error: { code: "unauthorized", message: "missing owner token" },
+      });
       mockFetch(401, {
         error: { code: "unauthorized", message: "missing owner token" },
       });
@@ -460,6 +516,23 @@ describe("CloudRecordingRepository", () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
       expect(result.error.code).toBe("unauthorized");
+    });
+
+    it("业务请求 401 时刷新 access token 并重试成功", async () => {
+      const repo = setupRepo();
+      // 首次业务请求 401（token 过期）→ 刷新后重试 → 201 成功。
+      mockFetch(401, { error: { code: "unauthorized", message: "expired" } });
+      mockFetch(201, makeSessionResponse());
+
+      const result = await repo.createUploadSession(makeCreateSessionRequest());
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.value.sessionId).toBe("upl_1");
+      // 业务请求发生两次（首次 401 + 重试成功），都带 Bearer 头。
+      const [, retryInit] = businessFetchCall(1);
+      expect((retryInit?.headers as Record<string, string>).authorization).toBe(
+        "Bearer test.access.token",
+      );
     });
   });
 
@@ -667,7 +740,7 @@ describe("CloudRecordingRepository", () => {
         "/api/recordings/rec_1/playback",
         expect.objectContaining({
           method: "GET",
-          headers: { "x-owner-token": repo.getOwnerToken() },
+          headers: { authorization: "Bearer test.access.token" },
         }),
       );
     });
@@ -709,7 +782,7 @@ describe("CloudRecordingRepository", () => {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-owner-token": repo.getOwnerToken(),
+            authorization: "Bearer test.access.token",
           },
           body: JSON.stringify({ startTimeMs: 4_200 }),
         }),
@@ -731,7 +804,8 @@ describe("CloudRecordingRepository", () => {
           method: "GET",
         }),
       );
-      const [, init] = vi.mocked(fetch).mock.calls[0];
+      // 分享读取是公开端点，不应带任何鉴权头（不触发 token 刷新）。
+      const [, init] = businessFetchCall(0);
       expect((init as RequestInit).headers).toBeUndefined();
     });
 
@@ -775,7 +849,7 @@ describe("CloudRecordingRepository", () => {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
-            "x-owner-token": repo.getOwnerToken(),
+            authorization: "Bearer test.access.token",
           },
           body: JSON.stringify({ title: "  New Title  " }),
         }),
@@ -820,7 +894,7 @@ describe("CloudRecordingRepository", () => {
         "/api/recordings/rec_1",
         expect.objectContaining({
           method: "DELETE",
-          headers: { "x-owner-token": repo.getOwnerToken() },
+          headers: { authorization: "Bearer test.access.token" },
         }),
       );
     });
@@ -1076,14 +1150,14 @@ describe("CloudRecordingRepository", () => {
 
       expect(result.ok).toBe(true);
       const createSessionBody = JSON.parse(
-        vi.mocked(fetch).mock.calls[0]?.[1]?.body as string,
+        businessFetchCall(0)?.[1]?.body as string,
       ) as CreateUploadSessionRequest;
       expect(createSessionBody.assets.find((asset) => asset.kind === "media")?.sha256).toBe(
         expectedMediaSha256,
       );
 
       const completeBody = JSON.parse(
-        vi.mocked(fetch).mock.calls[1]?.[1]?.body as string,
+        businessFetchCall(1)?.[1]?.body as string,
       ) as { uploadedAssets: CreateUploadSessionRequest["assets"] };
       expect(completeBody.uploadedAssets.find((asset) => asset.kind === "media")?.sha256).toBe(
         expectedMediaSha256,

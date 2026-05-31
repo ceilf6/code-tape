@@ -1,4 +1,5 @@
 import type { CloudRecordingService } from "../cloud/cloudRecordingService.js";
+import type { AuthTokenService } from "../cloud/authTokenService.js";
 import { parseIsoUtcInstantMs } from "../cloud/isoDate.js";
 import { RECORDING_ASSET_KINDS } from "../cloud/types.js";
 import type {
@@ -38,15 +39,40 @@ const SHARE_TOP_KEYS = new Set(["expiresAt", "startTimeMs"]);
 
 export function createCloudApiHandler(deps: {
   service: CloudRecordingService;
+  auth?: AuthTokenService;
   createRequestId?: () => string;
 }): CloudApiHandler {
   const createRequestId = deps.createRequestId ?? (() => crypto.randomUUID());
+  const auth = deps.auth;
+  const resolveOwnerId = (request: Request): string | null => readOwnerId(request, auth);
 
   return async (request: Request): Promise<Response> => {
     const requestId = createRequestId();
     const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/api/auth/token") {
+      if (!auth) {
+        return jsonError(
+          { code: "not-found", message: "route not found", requestId },
+          requestId,
+        );
+      }
+      const parsed = await readJsonObject(request);
+      if (!parsed.ok) return jsonError({ ...parsed.error, requestId }, requestId);
+      const refreshToken = parsed.value.refreshToken;
+      if (typeof refreshToken !== "string") {
+        return jsonError(
+          { code: "bad-request", message: "refreshToken must be a string", requestId },
+          requestId,
+        );
+      }
+      const issued = auth.issueFromRefreshToken(refreshToken);
+      if (!issued.ok) return jsonError({ ...issued.error, requestId }, requestId);
+      return jsonResponse(issued.value, 200, requestId);
+    }
+
     if (request.method === "GET" && url.pathname === "/api/recordings") {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -62,7 +88,7 @@ export function createCloudApiHandler(deps: {
 
     const playbackMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/playback$/);
     if (request.method === "GET" && playbackMatch) {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -97,7 +123,7 @@ export function createCloudApiHandler(deps: {
 
     const shareLinkMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/share-links$/);
     if (request.method === "POST" && shareLinkMatch) {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -123,7 +149,7 @@ export function createCloudApiHandler(deps: {
 
     const recordingDetailMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
     if (request.method === "GET" && recordingDetailMatch) {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -143,7 +169,7 @@ export function createCloudApiHandler(deps: {
     }
 
     if (request.method === "PATCH" && recordingDetailMatch) {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -168,7 +194,7 @@ export function createCloudApiHandler(deps: {
     }
 
     if (request.method === "DELETE" && recordingDetailMatch) {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -188,7 +214,7 @@ export function createCloudApiHandler(deps: {
     }
 
     if (request.method === "POST" && url.pathname === "/api/recordings/upload-sessions") {
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -210,7 +236,7 @@ export function createCloudApiHandler(deps: {
     );
     if (request.method === "POST" && completeMatch) {
       const sessionId = completeMatch[1]!;
-      const ownerId = readOwnerToken(request);
+      const ownerId = resolveOwnerId(request);
       if (!ownerId) {
         return jsonError(
           { code: "unauthorized", message: "missing owner token", requestId },
@@ -453,7 +479,19 @@ function isPositiveOrZeroSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function readOwnerToken(request: Request): string | null {
+function readOwnerId(request: Request, auth: AuthTokenService | undefined): string | null {
+  // 优先 Authorization: Bearer <accessToken>，验签 + 过期校验后取 ownerId。
+  if (auth) {
+    const authorization = request.headers.get("authorization")?.trim();
+    if (authorization) {
+      const match = /^Bearer\s+(.+)$/iu.exec(authorization);
+      if (match) {
+        const verified = auth.verifyAccessToken(match[1]!.trim());
+        return verified.ok ? verified.value.ownerId : null;
+      }
+    }
+  }
+  // 向后兼容：保留旧的 x-owner-token 直传路径（原样作为 ownerId）。
   const token = request.headers.get("x-owner-token")?.trim();
   return token ? token : null;
 }

@@ -53,6 +53,9 @@ const OWNER_TOKEN_BYTES = 32;
 
 const OWNER_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
 
+/** access token 到期前的提前刷新余量（毫秒），避免边界请求带过期 token */
+const ACCESS_TOKEN_REFRESH_SKEW_MS = 30_000;
+
 /** 默认 API 基础路径（空串表示同源） */
 const DEFAULT_API_BASE = "";
 
@@ -76,17 +79,80 @@ export function createCloudRecordingRepository(
 ): CloudRecordingRepository {
   const apiBase = options.apiBase ?? DEFAULT_API_BASE;
   let inMemoryOwnerToken: string | null = null;
+  // 短期 access token 内存缓存；长期 refresh token（设备 token）仅发往 /api/auth/token。
+  let accessToken: { value: string; expiresAt: number } | null = null;
+  let refreshInFlight: Promise<string | null> | null = null;
+
+  const refreshAccessToken = async (): Promise<string | null> => {
+    const refreshToken = repo.getOwnerToken();
+    try {
+      const response = await fetch(`${apiBase}/api/auth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { accessToken?: unknown; expiresAt?: unknown };
+      if (typeof body.accessToken !== "string" || typeof body.expiresAt !== "number") {
+        return null;
+      }
+      accessToken = { value: body.accessToken, expiresAt: body.expiresAt };
+      return accessToken.value;
+    } catch {
+      return null;
+    }
+  };
+
+  const ensureAccessToken = async (forceRefresh = false): Promise<string | null> => {
+    if (
+      !forceRefresh &&
+      accessToken &&
+      Date.now() < accessToken.expiresAt - ACCESS_TOKEN_REFRESH_SKEW_MS
+    ) {
+      return accessToken.value;
+    }
+    if (forceRefresh) accessToken = null;
+    if (!refreshInFlight) {
+      refreshInFlight = refreshAccessToken().finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  };
+
+  /**
+   * 带 Bearer access token 发起业务请求；token 过期前自动刷新，遇 401 强制刷新重试一次。
+   * 刷新失败时回退到旧的 x-owner-token 头，保证离线/降级场景仍可用。
+   */
+  const authorizedFetch = async (
+    url: string,
+    init: RequestInit & { headers?: Record<string, string> } = {},
+  ): Promise<Response> => {
+    const baseHeaders = init.headers ?? {};
+    const send = async (token: string | null): Promise<Response> => {
+      const headers: Record<string, string> = { ...baseHeaders };
+      if (token) headers.authorization = `Bearer ${token}`;
+      else headers["x-owner-token"] = repo.getOwnerToken();
+      return fetch(url, { ...init, headers });
+    };
+
+    const token = await ensureAccessToken();
+    const response = await send(token);
+    if (response.status === 401 && token) {
+      const refreshed = await ensureAccessToken(true);
+      if (refreshed) return send(refreshed);
+    }
+    return response;
+  };
 
   const repo: CloudRecordingRepository = {
     // ── 创建上传会话 ──────────────────────────────────────
     async createUploadSession(input: CreateUploadSessionRequest) {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(`${apiBase}/api/recordings/upload-sessions`, {
+        const response = await authorizedFetch(`${apiBase}/api/recordings/upload-sessions`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-owner-token": token,
           },
           body: JSON.stringify(input),
         });
@@ -133,15 +199,13 @@ export function createCloudRecordingRepository(
       sessionId: string,
       input: CompleteUploadSessionRequest,
     ): Promise<CloudResult<CompleteUploadSessionResponse>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/upload-sessions/${encodeURIComponent(sessionId)}/complete`,
           {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-owner-token": token,
             },
             body: JSON.stringify(input),
           },
@@ -154,13 +218,11 @@ export function createCloudRecordingRepository(
 
     // ── 查询录制详情 ──────────────────────────────────────
     async get(recordingId: string): Promise<CloudResult<CloudRecordingDetailResponse>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}`,
           {
             method: "GET",
-            headers: { "x-owner-token": token },
           },
         );
         return handleJsonResponse<CloudRecordingDetailResponse>(response);
@@ -171,14 +233,12 @@ export function createCloudRecordingRepository(
 
     // ── 查询录制列表 ──────────────────────────────────────
     async list(input: ListRecordingsInput = {}): Promise<CloudResult<ListRecordingsResponse>> {
-      const token = repo.getOwnerToken();
       const query = buildListQuery(input);
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings${query}`,
           {
             method: "GET",
-            headers: { "x-owner-token": token },
           },
         );
         return handleJsonResponse<ListRecordingsResponse>(response);
@@ -191,13 +251,11 @@ export function createCloudRecordingRepository(
     async getPlaybackDescriptor(
       recordingId: string,
     ): Promise<CloudResult<CloudPlaybackDescriptor>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}/playback`,
           {
             method: "GET",
-            headers: { "x-owner-token": token },
           },
         );
         return handleJsonResponse<CloudPlaybackDescriptor>(response);
@@ -211,15 +269,13 @@ export function createCloudRecordingRepository(
       recordingId: string,
       input: CreateShareLinkRequest,
     ): Promise<CloudResult<CreateShareLinkResponse>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}/share-links`,
           {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "x-owner-token": token,
             },
             body: JSON.stringify(input),
           },
@@ -247,15 +303,13 @@ export function createCloudRecordingRepository(
 
     // ── 重命名云端录制 ────────────────────────────────────
     async rename(recordingId: string, title: string): Promise<CloudResult<void>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}`,
           {
             method: "PATCH",
             headers: {
               "content-type": "application/json",
-              "x-owner-token": token,
             },
             body: JSON.stringify({ title }),
           },
@@ -268,13 +322,11 @@ export function createCloudRecordingRepository(
 
     // ── 软删除云端录制 ────────────────────────────────────
     async remove(recordingId: string): Promise<CloudResult<void>> {
-      const token = repo.getOwnerToken();
       try {
-        const response = await fetch(
+        const response = await authorizedFetch(
           `${apiBase}/api/recordings/${encodeURIComponent(recordingId)}`,
           {
             method: "DELETE",
-            headers: { "x-owner-token": token },
           },
         );
         return handleVoidResponse(response);

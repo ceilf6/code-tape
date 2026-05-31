@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { createCloudRecordingService } from "../cloud/cloudRecordingService.js";
+import { createAuthTokenService } from "../cloud/authTokenService.js";
 import { createLocalDevObjectStorage } from "../cloud/localDevObjectStorage.js";
 import { createMemoryMetadataRepository } from "../cloud/memoryMetadataRepository.js";
 import { processNextRecordingValidationJob } from "../cloud/validationWorker.js";
@@ -38,6 +39,7 @@ export function createDemoRuntime(options: DemoRequestHandlerOptions): DemoRunti
   });
   const cloud = createCloudApiHandler({
     service: createCloudRecordingService({ metadata, objectStorage }),
+    auth: createAuthTokenService({ secret: process.env.CODE_TAPE_AUTH_SECRET }),
     createRequestId: options.createRequestId,
   });
   const rooms = createInterviewRoomService({

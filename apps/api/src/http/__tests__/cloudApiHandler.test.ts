@@ -3,6 +3,7 @@ import test from "node:test";
 import { canonicalStringify, sha256Hex } from "@code-tape/recording-schema/hash";
 import { RECORDING_SCHEMA_VERSION, type RecordingPackageV1 } from "@code-tape/recording-schema";
 import { createCloudRecordingService } from "../../cloud/cloudRecordingService.js";
+import { createAuthTokenService } from "../../cloud/authTokenService.js";
 import { createMemoryMetadataRepository } from "../../cloud/memoryMetadataRepository.js";
 import { buildLocalDevObjectUrl, createLocalDevObjectStorage } from "../../cloud/localDevObjectStorage.js";
 import { createMemoryObjectStorage } from "../../cloud/memoryObjectStorage.js";
@@ -2421,6 +2422,92 @@ test("DELETE uploading recording then POST complete returns 404 and does not rev
   const recording = await metadata.getRecording(createBody.recordingId);
   assert.equal(recording?.status, "soft_deleted");
 });
+
+test("POST /api/auth/token issues a Bearer access token from a refresh token", async () => {
+  const handler = createAuthEnabledHandler(() => "req-auth-1");
+  const response = await handler(
+    new Request("http://localhost/api/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken: "device-token-aaaaaaaa" }),
+    }),
+  );
+  const body = (await response.json()) as {
+    accessToken: string;
+    expiresAt: number;
+    tokenType: string;
+  };
+  assert.equal(response.status, 200);
+  assert.equal(body.tokenType, "Bearer");
+  assert.ok(body.accessToken.includes("."));
+  assert.ok(body.expiresAt > Date.now());
+});
+
+test("POST /api/auth/token rejects a missing refresh token", async () => {
+  const handler = createAuthEnabledHandler(() => "req-auth-2");
+  const response = await handler(
+    new Request("http://localhost/api/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+  );
+  assert.equal(response.status, 400);
+});
+
+test("GET /api/recordings accepts a valid Bearer access token", async () => {
+  const handler = createAuthEnabledHandler(() => "req-auth-3");
+  const tokenResp = await handler(
+    new Request("http://localhost/api/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken: "device-token-aaaaaaaa" }),
+    }),
+  );
+  const { accessToken } = (await tokenResp.json()) as { accessToken: string };
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.equal(response.status, 200);
+});
+
+test("GET /api/recordings rejects a tampered Bearer token", async () => {
+  const handler = createAuthEnabledHandler(() => "req-auth-4");
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { authorization: "Bearer not.a.validtoken" },
+    }),
+  );
+  assert.equal(response.status, 401);
+});
+
+test("GET /api/recordings still accepts the legacy x-owner-token header", async () => {
+  const handler = createAuthEnabledHandler(() => "req-auth-5");
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  assert.equal(response.status, 200);
+});
+
+function createAuthEnabledHandler(createRequestId: () => string) {
+  const service = createCloudRecordingService({
+    metadata: createMemoryMetadataRepository(),
+    objectStorage: createMemoryObjectStorage(),
+  });
+  return createCloudApiHandler({
+    service,
+    auth: createAuthTokenService({ secret: "test-secret" }),
+    createRequestId,
+  });
+}
 
 async function makeCompleteBody(pkg: RecordingPackageV1): Promise<string> {
   const req = await makeCreateSessionRequest(pkg);
