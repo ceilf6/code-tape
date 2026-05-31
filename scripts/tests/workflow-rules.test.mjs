@@ -48,6 +48,16 @@ const validGitNexusSummary = [
   '- 验证结果: npm test passed',
 ].join('\n');
 
+function checkoutStepBlock(workflow) {
+  const match = workflow.match(/^ {6}- uses: actions\/checkout@v4\n(?:^ {8,}.+\n?)*/m);
+  assert.ok(match, 'workflow must include an actions/checkout@v4 step');
+  return match[0];
+}
+
+function checkoutStepFetchesLfs(workflow) {
+  return /^ {10}lfs:\s*true\s*$/m.test(checkoutStepBlock(workflow));
+}
+
 test('parseScore requires exactly one score label', () => {
   assert.equal(parseScore(['score:5', 'stack:react', 'status:open']), 5);
   assert.throws(() => parseScore(['stack:react']), /exactly one score/);
@@ -1274,12 +1284,38 @@ test('training PR workflows use the bot token for checkout and API reads when av
   assert.match(autoMergeWorkflow, /token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*github\.token\s*\}\}/);
 });
 
-test('web-building workflows check out Git LFS so vendored model assets are real binaries', () => {
+test('pages workflow checks out Git LFS so deployed model assets are real binaries', () => {
   // The subtitle ASR/LLM model weights and ONNX runtime live in Git LFS under
   // apps/web/public. A checkout without lfs:true leaves pointer text files, so
-  // `npm run build` would copy pointers into dist/ and ship broken models.
-  for (const path of ['.github/workflows/pages.yml', '.github/workflows/workflow-tests.yml']) {
-    const workflow = readFileSync(path, 'utf8');
-    assert.match(workflow, /actions\/checkout@v4\s*\n\s*with:\s*\n\s*lfs:\s*true/, `${path} must checkout with lfs: true`);
-  }
+  // the deployment workflow must keep fetching real binaries before build.
+  const workflow = readFileSync('.github/workflows/pages.yml', 'utf8');
+  assert.equal(checkoutStepFetchesLfs(workflow), true);
+});
+
+test('checkout LFS detection covers non-leading checkout options', () => {
+  const workflow = [
+    'jobs:',
+    '  quality:',
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '        with:',
+    '          token: ${{ github.token }}',
+    '          lfs: true',
+  ].join('\n');
+
+  assert.equal(checkoutStepFetchesLfs(workflow), true);
+});
+
+test('workflow tests do not fetch Git LFS assets during quality checks', () => {
+  const workflow = readFileSync('.github/workflows/workflow-tests.yml', 'utf8');
+
+  assert.match(workflow, /name:\s*Workflow Tests/);
+  assert.match(workflow, /npm run quality:ci/);
+  assert.equal(checkoutStepFetchesLfs(workflow), false);
+});
+
+test('workflow tests restore vendored subtitle assets without Git LFS checkout', () => {
+  const workflow = readFileSync('.github/workflows/workflow-tests.yml', 'utf8');
+
+  assert.match(workflow, /- run:\s*npm ci\s*\n\s*- run:\s*npm run subtitle:vendor\s*\n\s*- run:\s*npx playwright install --with-deps chromium/u);
 });

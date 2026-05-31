@@ -1,12 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T15:54:11Z",
+  "updatedAt": "2026-05-31T16:07:17Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        241,
         243
       ],
       "completedIssues": [
@@ -68,7 +67,8 @@
         231,
         233,
         235,
-        237
+        237,
+        241
       ],
       "reviewedIssues": [
         4,
@@ -89,10 +89,10 @@
           "delta": -1.5
         }
       ],
-      "developmentScore": 112.5,
+      "developmentScore": 113.25,
       "reviewScore": 5.75,
       "penaltyScore": -1.5,
-      "totalScore": 116.75
+      "totalScore": 117.5
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -1298,11 +1298,11 @@
       "stack": [
         "github-actions"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T15:30:10Z",
-      "closedAt": null,
-      "mergedPr": null
+      "closedAt": "2026-05-31T16:07:17Z",
+      "mergedPr": 242
     },
     "243": {
       "number": 243,
@@ -2314,6 +2314,18 @@
       "developerDelta": 1.5,
       "reviewerDelta": 0,
       "createdAt": "2026-05-31T15:00:47Z"
+    },
+    {
+      "id": "pr-242-merge",
+      "type": "feature_merge",
+      "issue": 241,
+      "pr": 242,
+      "score": 1,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 0.75,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-31T16:07:17Z"
     }
   ]
 }
