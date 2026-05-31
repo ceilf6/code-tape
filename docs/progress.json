@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T06:23:15Z",
+  "updatedAt": "2026-05-31T07:15:58Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        226
       ],
       "completedIssues": [
         11,
@@ -1171,6 +1172,20 @@
       "claimedAt": "2026-05-31T05:24:27Z",
       "closedAt": "2026-05-31T05:47:07Z",
       "mergedPr": 223
+    },
+    "226": {
+      "number": 226,
+      "title": "AI 字幕生成报错：huggingface.co 模型下载连接超时",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T07:15:58Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
