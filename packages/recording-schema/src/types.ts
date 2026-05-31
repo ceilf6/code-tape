@@ -289,6 +289,17 @@ export type RecordingIndexes = {
   eventsByType: Record<RecordingEventType, number[]>;
   snapshotSeqsByTime: number[];
   markers: Array<{ timestampMs: number; eventSeq: number; type: RecordingEventType }>;
+  activityDensity?: ActivityDensityBucket[];
+};
+
+export type ActivityDensityKind = "edit" | "run" | "error" | "shortcut" | "silence";
+
+export type ActivityDensityBucket = {
+  kind: ActivityDensityKind;
+  startMs: number;
+  endMs: number;
+  count: number;
+  eventSeqs: number[];
 };
 
 export type RecordingPackageV1 = {
@@ -399,6 +410,7 @@ export type ReplayIndex = {
   snapshotsByTime: RecordingSnapshot[];
   stableEventsByTime: RecordingEvent[];
   markersByTime: RecordingEvent[];
+  activityDensity: ActivityDensityBucket[];
 };
 
 export type ReplayPlaybackRate = 0.5 | 1 | 1.5 | 2;

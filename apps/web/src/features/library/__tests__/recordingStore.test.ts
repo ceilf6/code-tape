@@ -158,6 +158,27 @@ describe("createRecordingStore — two-phase commit", () => {
     }
   });
 
+  it("load preserves generated activity density indexes", async () => {
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-activity-density");
+    input.indexes = {
+      ...input.indexes,
+      activityDensity: [
+        { kind: "silence", startMs: 0, endMs: 1_000, count: 0, eventSeqs: [] },
+      ],
+    };
+
+    await store.saveDraft(input);
+    await store.commit("rec-activity-density");
+
+    const result = await store.load("rec-activity-density");
+
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    expect(result.package.indexes?.activityDensity).toEqual([
+      { kind: "silence", startMs: 0, endMs: 1_000, count: 0, eventSeqs: [] },
+    ]);
+  });
+
   it("load returns the verified media blob for replay", async () => {
     const store = createRecordingStore({ databaseName: uniqueDbName() });
     await store.saveDraft(makeInput("rec-media"));

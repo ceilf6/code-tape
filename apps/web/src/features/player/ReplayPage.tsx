@@ -12,6 +12,7 @@ import {
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Camera, Captions, CircleAlert, Keyboard, MousePointer2, Share2, TerminalSquare } from "lucide-react";
 import { createReplayScheduler, defaultTickStrategy } from "./replayScheduler";
+import { buildReplayActivityDensity } from "./replayIndex";
 import { createTimelineClock } from "./timelineClock";
 import { ReplayControls } from "./ReplayControls";
 import { createMediaClockAdapter } from "./mediaClockAdapter";
@@ -156,6 +157,10 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
   const pointerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentMedia = pkg?.media ?? null;
+  const activityDensity = useMemo(
+    () => (pkg ? buildReplayActivityDensity(pkg) : []),
+    [pkg],
+  );
   const createRecordedMediaAdapter = useCallback((media: RecordedMedia) => {
     const segment = recordedMediaSegment(media);
     return createMediaClockAdapter({
@@ -434,6 +439,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
       <ReplayControls
         state={schedulerState}
         durationMs={pkg?.meta.durationMs ?? 0}
+        activityDensity={activityDensity}
         onPlayPause={() =>
           schedulerState.status === "playing" || schedulerState.status === "buffering"
             ? pauseReplay()

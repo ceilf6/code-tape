@@ -147,6 +147,9 @@ const replayPageMock = vi.hoisted(() => {
       cloudLoader.load.mockClear();
       createCloudRecordingRepository.mockClear();
       createCloudPackageLoader.mockClear();
+      packageData.events = [];
+      packageData.snapshots = [];
+      packageData.indexes = undefined;
       this.routeId = "recording-1";
       this.routeToken = "share-token";
       this.search = "";
@@ -366,6 +369,46 @@ describe("ReplayPage", () => {
       play.mockRestore();
       pause.mockRestore();
     }
+  });
+
+  it("rebuilds malformed activity density indexes before rendering controls", async () => {
+    replayPageMock.packageData.events = [
+      {
+        id: "activity-1",
+        seq: 1,
+        timestampMs: 12_000,
+        source: "editor",
+        track: "main",
+        type: "content-change",
+        payload: {
+          fileId: "main",
+          version: 1,
+          code: "console.log('activity')",
+          contentHash: "activity",
+          language: "javascript",
+          changeReason: "input",
+          changeCount: 1,
+          flushedBy: "debounce",
+        },
+      },
+    ];
+    replayPageMock.packageData.indexes = {
+      generatedAt: "2026-05-26T00:00:00.000Z",
+      eventsByType: {} as NonNullable<RecordingPackageV1["indexes"]>["eventsByType"],
+      snapshotSeqsByTime: [],
+      markers: [],
+      activityDensity: "not-an-array" as never,
+    };
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(replayPageMock.controlsProps).not.toBeNull());
+    expect(replayPageMock.controlsProps?.activityDensity).toEqual(
+      expect.arrayContaining([
+        { kind: "edit", startMs: 10_000, endMs: 20_000, count: 1, eventSeqs: [1] },
+      ]),
+    );
   });
 
   it("renders scheduler stable state into the read-only editor and runtime panel", async () => {

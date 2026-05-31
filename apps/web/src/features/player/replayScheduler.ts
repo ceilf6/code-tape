@@ -497,6 +497,7 @@ function emptyIndex() {
     snapshotsByTime: [],
     stableEventsByTime: [],
     markersByTime: [],
+    activityDensity: [],
   } as const as ReturnType<typeof buildReplayIndex>;
 }
 

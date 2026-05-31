@@ -1,6 +1,7 @@
 import { canonicalStringify, sha256Hex } from "@/shared/util/hash";
 import { generateId } from "@/shared/util/ids";
 import {
+  buildActivityDensity,
   RECORDING_SCHEMA_VERSION,
   type PackageBuildInput,
   type PackageBuilder,
@@ -50,7 +51,11 @@ function dedupeSnapshots(snapshots: RecordingSnapshot[]): RecordingSnapshot[] {
   return Array.from(seen.values()).sort((a, b) => a.timestampMs - b.timestampMs);
 }
 
-function buildIndexes(events: RecordingEvent[], snapshots: RecordingSnapshot[]): RecordingIndexes {
+function buildIndexes(
+  events: RecordingEvent[],
+  snapshots: RecordingSnapshot[],
+  durationMs: number,
+): RecordingIndexes {
   const eventsByType: Record<RecordingEventType, number[]> = Object.fromEntries(
     ALL_EVENT_TYPES.map((t) => [t, [] as number[]]),
   ) as Record<RecordingEventType, number[]>;
@@ -70,6 +75,7 @@ function buildIndexes(events: RecordingEvent[], snapshots: RecordingSnapshot[]):
     eventsByType,
     snapshotSeqsByTime,
     markers,
+    activityDensity: buildActivityDensity(events, durationMs),
   };
 }
 
@@ -111,7 +117,7 @@ export function createPackageBuilder(): PackageBuilder {
       }
 
       const completedAt = new Date().toISOString();
-      const indexes = buildIndexes(events, snapshots);
+      const indexes = buildIndexes(events, snapshots, input.meta.durationMs);
 
       const pkg: RecordingPackageV1 = {
         schemaVersion: RECORDING_SCHEMA_VERSION,

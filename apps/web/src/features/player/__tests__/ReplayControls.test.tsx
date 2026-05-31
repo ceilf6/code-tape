@@ -144,6 +144,34 @@ describe("ReplayControls", () => {
     expect(screen.getAllByText("00:00")).toHaveLength(2);
   });
 
+  it("renders activity density markers on the progress timeline", () => {
+    renderControls({
+      durationMs: 60_000,
+      activityDensity: [
+        { kind: "edit", startMs: 0, endMs: 10_000, count: 3, eventSeqs: [1, 2, 3] },
+        { kind: "run", startMs: 20_000, endMs: 30_000, count: 1, eventSeqs: [4] },
+        { kind: "error", startMs: 40_000, endMs: 50_000, count: 1, eventSeqs: [5] },
+        { kind: "silence", startMs: 50_000, endMs: 60_000, count: 0, eventSeqs: [] },
+      ],
+    });
+
+    expect(screen.getByLabelText("活动：编辑 00:00-00:10")).toBeInTheDocument();
+    expect(screen.getByLabelText("活动：运行 00:20-00:30")).toBeInTheDocument();
+    expect(screen.getByLabelText("活动：错误 00:40-00:50")).toBeInTheDocument();
+    expect(screen.getByLabelText("活动：静默 00:50-01:00")).toBeInTheDocument();
+  });
+
+  it("renders short full-duration silence markers", () => {
+    renderControls({
+      durationMs: 5_000,
+      activityDensity: [
+        { kind: "silence", startMs: 0, endMs: 5_000, count: 0, eventSeqs: [] },
+      ],
+    });
+
+    expect(screen.getByLabelText("活动：静默 00:00-00:05")).toBeInTheDocument();
+  });
+
   it.each(["loading", "seeking", "error"] as const)(
     "disables progress seeking while status is %s",
     (status) => {

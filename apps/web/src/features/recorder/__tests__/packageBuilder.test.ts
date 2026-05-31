@@ -61,6 +61,37 @@ function makeMarker(seq: number, ts: number, title: string): RecordingEvent {
   };
 }
 
+function makeRunStart(seq: number, ts: number): RecordingEvent {
+  return {
+    id: `run-${seq}`,
+    seq,
+    timestampMs: ts,
+    source: "runtime",
+    track: "runtime",
+    type: "run-start",
+    payload: { language: "javascript", runtime: "iframe", runId: `run-${seq}` },
+  };
+}
+
+function makeRunError(seq: number, ts: number): RecordingEvent {
+  return {
+    id: `error-${seq}`,
+    seq,
+    timestampMs: ts,
+    source: "runtime",
+    track: "runtime",
+    type: "run-error",
+    payload: {
+      runId: `run-${seq}`,
+      phase: "runtime",
+      message: "boom",
+      stdout: [],
+      stderr: ["boom"],
+      previewHtml: null,
+    },
+  };
+}
+
 function makeSnapshot(id: string, ts: number, eventSeq: number): RecordingSnapshot {
   return {
     id,
@@ -120,6 +151,30 @@ describe("createPackageBuilder", () => {
     expect(pkg.indexes?.eventsByType["content-change"]).toEqual([1, 3]);
     expect(pkg.indexes?.markers.map((m) => m.timestampMs)).toEqual([500, 1500]);
     expect(pkg.indexes?.markers.map((m) => m.eventSeq)).toEqual([2, 4]);
+  });
+
+  it("includes activity density buckets in generated indexes", async () => {
+    const builder = createPackageBuilder();
+    const events: RecordingEvent[] = [
+      makeContentEvent(1, "a"),
+      makeRunStart(2, 12_000),
+      makeRunError(3, 13_000),
+    ];
+
+    const { pkg } = await builder.build({
+      meta: { ...makeMeta(), durationMs: 30_000 },
+      events,
+      snapshots: [],
+      media: null,
+    });
+
+    expect(pkg.indexes?.activityDensity).toEqual(
+      expect.arrayContaining([
+        { kind: "edit", startMs: 0, endMs: 10_000, count: 1, eventSeqs: [1] },
+        { kind: "run", startMs: 10_000, endMs: 20_000, count: 1, eventSeqs: [2] },
+        { kind: "error", startMs: 10_000, endMs: 20_000, count: 1, eventSeqs: [3] },
+      ]),
+    );
   });
 
   it("includes media metadata + media checksum when media is provided", async () => {

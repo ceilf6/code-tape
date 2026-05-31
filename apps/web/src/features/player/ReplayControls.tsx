@@ -1,4 +1,9 @@
-import type { ReplayPlaybackRate, ReplaySchedulerState } from "@/shared/recording-schema";
+import type {
+  ActivityDensityBucket,
+  ActivityDensityKind,
+  ReplayPlaybackRate,
+  ReplaySchedulerState,
+} from "@/shared/recording-schema";
 import { formatDurationMs } from "@/shared/time/duration";
 import { IconButton, Slider, Toggle, Toolbar, ToolbarSeparator, cn } from "@/shared/ui";
 import { Pause, Play, Volume2, VolumeX, Gauge } from "lucide-react";
@@ -16,6 +21,7 @@ export type ReplayControlsProps = {
   muted: boolean;
   onVolume(volume: number): void;
   onMuted(muted: boolean): void;
+  activityDensity?: ActivityDensityBucket[];
 };
 
 const PLAYBACK_RATES: ReplayPlaybackRate[] = [2, 1.5, 1, 0.5];
@@ -30,6 +36,7 @@ export function ReplayControls({
   muted,
   onVolume,
   onMuted,
+  activityDensity = [],
 }: ReplayControlsProps) {
   const [ratePopoverOpen, setRatePopoverOpen] = useState(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
@@ -124,7 +131,8 @@ export function ReplayControls({
         </span>
       </div>
 
-      <div className="flex-1 min-w-[120px]" data-replay-progress-control>
+      <div className="relative flex-1 min-w-[120px]" data-replay-progress-control>
+        <ReplayActivityMarkers activityDensity={activityDensity} durationMs={safeDuration} />
         <Slider
           value={currentProgressPercent}
           min={0}
@@ -240,4 +248,70 @@ export function ReplayControls({
       </div>
     </Toolbar>
   );
+}
+
+function ReplayActivityMarkers({
+  activityDensity,
+  durationMs,
+}: {
+  activityDensity: ActivityDensityBucket[];
+  durationMs: number;
+}) {
+  if (durationMs <= 0 || activityDensity.length === 0) return null;
+  return (
+    <div className="pointer-events-none absolute inset-x-2 top-1/2 z-10 h-2 -translate-y-1/2">
+      {activityDensity.map((bucket, index) => {
+        const left = clampPercent((bucket.startMs / durationMs) * 100);
+        const width = Math.max(
+          0.8,
+          clampPercent(((bucket.endMs - bucket.startMs) / durationMs) * 100),
+        );
+        return (
+          <span
+            key={`${bucket.kind}-${bucket.startMs}-${bucket.endMs}-${index}`}
+            aria-label={`活动：${activityKindLabel(bucket.kind)} ${formatDurationMs(bucket.startMs)}-${formatDurationMs(bucket.endMs)}`}
+            className={cn(
+              "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full border border-background/80",
+              activityKindClassName(bucket.kind),
+            )}
+            style={{ left: `${left}%`, width: `${width}%` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+function activityKindLabel(kind: ActivityDensityKind): string {
+  switch (kind) {
+    case "edit":
+      return "编辑";
+    case "run":
+      return "运行";
+    case "error":
+      return "错误";
+    case "shortcut":
+      return "快捷键";
+    case "silence":
+      return "静默";
+  }
+}
+
+function activityKindClassName(kind: ActivityDensityKind): string {
+  switch (kind) {
+    case "error":
+      return "bg-danger shadow-[0_0_10px_var(--ct-color-danger)]";
+    case "run":
+      return "bg-primary";
+    case "shortcut":
+      return "bg-warning";
+    case "edit":
+      return "bg-foreground/70";
+    case "silence":
+      return "bg-border";
+  }
 }
