@@ -1096,7 +1096,7 @@ test('auto merge defers fork pull request review events to workflow_run', () => 
 
 test('auto merge waits only for truly blocked mergeable states', () => {
   assert.equal(shouldWaitForMergeableState('clean'), false);
-  assert.equal(shouldWaitForMergeableState('unstable'), true);
+  assert.equal(shouldWaitForMergeableState('unstable'), false);
   assert.equal(shouldWaitForMergeableState(null), false);
   assert.equal(shouldWaitForMergeableState('unknown'), false);
   assert.equal(shouldWaitForMergeableState('dirty'), true);
