@@ -564,6 +564,14 @@ test('authority docs keep IndexedDB save failure export fallback mandatory', () 
   assert.match(technicalPlan, /当 IndexedDB 写入失败或 quota 不足时，文件导出是 P0 兜底路径/u);
 });
 
+test('authority docs keep RecordingRepository thumbnail contract aligned with shared type', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+  const sharedTypes = readFileSync('packages/recording-schema/src/types.ts', 'utf8');
+
+  assert.match(technicalPlan, /loadThumbnail\(thumbnailBlobId: string\): Promise<Blob \| null>;/u);
+  assert.match(sharedTypes, /loadThumbnail\(thumbnailBlobId: string\): Promise<Blob \| null>;/u);
+});
+
 test('technical plan owns P1 cloud contract without standalone cloud plan', () => {
   const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
 
