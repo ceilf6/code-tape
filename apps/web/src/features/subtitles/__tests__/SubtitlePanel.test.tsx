@@ -412,6 +412,66 @@ describe("SubtitlePanel", () => {
     expect(postProcessor.process).toHaveBeenCalledTimes(2);
   });
 
+  it("clears persisted chapters after regenerating ASR subtitles when local LLM post-processing fails", async () => {
+    const previousTrack: SubtitleTrack = {
+      recordingId: "recording-1",
+      generatedAt: "2026-05-28T00:00:00.000Z",
+      model: "onnx-community/whisper-tiny",
+      source: "huggingface-local",
+      segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "old subtitle" }],
+    };
+    const store = createMemorySubtitleStore();
+    await store.saveWithChapters(previousTrack, [
+      { id: "chapter-1", title: "旧章节", startMs: 0, endMs: 1_000 },
+    ]);
+    const transcriber: SubtitleTranscriber = {
+      transcribe: vi.fn(async () => ({
+        model: "onnx-community/whisper-tiny",
+        source: "huggingface-local" as const,
+        segments: [{ id: "subtitle-1", startMs: 0, endMs: 1_000, text: "new ASR subtitle" }],
+      })),
+    };
+    const postProcessor: SubtitlePostProcessor = {
+      process: vi.fn(async () => {
+        throw new Error("LLM JSON parse failed");
+      }),
+    };
+    const panelProps = {
+      recordingId: "recording-1",
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      hasAudio: true,
+      durationMs: 1_000,
+      currentTimeMs: 0,
+      onSeek: vi.fn(),
+      store,
+      transcriber,
+      postProcessor,
+    } satisfies Parameters<typeof SubtitlePanel>[0];
+
+    const { unmount } = render(<SubtitlePanel {...panelProps} />);
+
+    await waitFor(() => expect(screen.getByText("old subtitle")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /旧章节/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
+
+    await waitFor(() => expect(screen.getByText("new ASR subtitle")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"));
+    expect(screen.queryByRole("button", { name: /旧章节/ })).not.toBeInTheDocument();
+    await expect(store.loadChapters("recording-1")).resolves.toEqual([]);
+    await expect(store.load("recording-1")).resolves.toEqual(
+      expect.objectContaining({
+        segments: [expect.objectContaining({ text: "new ASR subtitle" })],
+      }),
+    );
+
+    unmount();
+    render(<SubtitlePanel {...panelProps} mediaBlob={null} />);
+
+    await waitFor(() => expect(screen.getByText("new ASR subtitle")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /旧章节/ })).not.toBeInTheDocument();
+  });
+
   it("recovers from stale Transformers chunks during local LLM post-processing without showing the raw import error", async () => {
     const originalTrack: SubtitleTrack = {
       recordingId: "recording-1",
