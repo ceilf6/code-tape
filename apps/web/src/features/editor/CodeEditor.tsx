@@ -409,7 +409,17 @@ async function formatEditorDocument(
   try {
     const formatter = await loadPrettierFormatter();
     const formatted = await formatter.format(originalValue, language);
-    if (!formatted || formatted === originalValue || isReadOnly() || editor.getValue() !== originalValue) return;
+    const currentModel = editor.getModel();
+    if (
+      !formatted ||
+      formatted === originalValue ||
+      isReadOnly() ||
+      editor.getValue() !== originalValue ||
+      currentModel !== model ||
+      currentModel.getLanguageId() !== language
+    ) {
+      return;
+    }
     const cancelFormatSignal = onBeforeFormatApply();
     const currentSelection = editor.getSelection();
     const endCursorState = currentSelection ? [currentSelection] : undefined;

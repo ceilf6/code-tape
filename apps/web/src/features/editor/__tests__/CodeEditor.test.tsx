@@ -692,6 +692,54 @@ describe("CodeEditor", () => {
     expect(onBeforeFormatApply).not.toHaveBeenCalled();
   });
 
+  it("does not apply pending formatter fallback after the editor language changes", async () => {
+    let resolveFormat: (formatted: string) => void = () => {
+      throw new Error("format promise was not created");
+    };
+    prettierMock.format.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFormat = resolve;
+        }),
+    );
+    const { CodeEditor } = await import("../CodeEditor");
+    const onBeforeFormatApply = vi.fn();
+    const { rerender } = render(
+      <CodeEditor
+        language="typescript"
+        initialValue="const value:number=1;"
+        fontSize={14}
+        theme="dark"
+        onBeforeFormatApply={onBeforeFormatApply}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+    await waitFor(() => expect(prettierMock.format).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <CodeEditor
+        language="javascript"
+        initialValue="const value:number=1;"
+        fontSize={14}
+        theme="dark"
+        onBeforeFormatApply={onBeforeFormatApply}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.setModelLanguage).toHaveBeenCalledWith(monacoMock.models[0], "javascript"));
+    await act(async () => {
+      resolveFormat("const value: number = 1;\n");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(editor.getValue()).toBe("const value:number=1;");
+    expect(editor.executeEdits).not.toHaveBeenCalled();
+    expect(onBeforeFormatApply).not.toHaveBeenCalled();
+  });
+
   it("does not run formatter fallback for read-only replay editors", async () => {
     const { CodeEditor } = await import("../CodeEditor");
     render(
