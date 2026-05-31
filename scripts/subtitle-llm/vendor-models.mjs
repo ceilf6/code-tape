@@ -4,12 +4,16 @@
 // Downloads via a mirror (HF_ENDPOINT, default hf-mirror.com) because
 // huggingface.co is unreachable on the target network. *.onnx files are
 // committed through Git LFS (see .gitattributes).
-import { mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, writeFile, stat, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const HF_ENDPOINT = (process.env.HF_ENDPOINT ?? "https://hf-mirror.com").replace(/\/+$/, "");
 const REVISION = "main";
 const OUTPUT_ROOT = "apps/web/public/models";
+const LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
+// A real model file (json/onnx/txt) is always larger than this; smaller means a
+// truncated download or an unsmudged Git LFS pointer that must be re-fetched.
+const MIN_VALID_BYTES = 200;
 
 // Only the files transformers.js actually loads for each pipeline.
 // Whisper is Seq2Seq -> encoder_model + decoder_model_merged (session_config.js).
@@ -57,7 +61,7 @@ async function main() {
     for (const file of model.files) {
       const destPath = join(OUTPUT_ROOT, model.repo, file);
       const url = `${HF_ENDPOINT}/${model.repo}/resolve/${REVISION}/${file}`;
-      if (await isNonEmptyFile(destPath)) {
+      if (await isValidExistingFile(destPath)) {
         console.log(`  skip (exists) ${model.repo}/${file}`);
         skipped += 1;
         continue;
@@ -82,12 +86,22 @@ async function downloadTo(url, destPath) {
   console.log(`${formatBytes(buffer.byteLength)} -> ${destPath}`);
 }
 
-async function isNonEmptyFile(path) {
+async function isValidExistingFile(path) {
   try {
     const info = await stat(path);
-    return info.isFile() && info.size > 0;
+    if (!info.isFile() || info.size < MIN_VALID_BYTES) return false;
   } catch {
     return false;
+  }
+  // Reject unsmudged Git LFS pointers left by a checkout without LFS: re-download
+  // the real content instead of skipping and shipping a pointer to the browser.
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(LFS_POINTER_PREFIX.length);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8") !== LFS_POINTER_PREFIX;
+  } finally {
+    await handle.close();
   }
 }
 

@@ -1273,3 +1273,13 @@ test('training PR workflows use the bot token for checkout and API reads when av
   assert.match(guardWorkflow, /GITHUB_TOKEN:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*secrets\.GITHUB_TOKEN\s*\}\}/);
   assert.match(autoMergeWorkflow, /token:\s*\$\{\{\s*secrets\.TRAINING_BOT_TOKEN\s*\|\|\s*github\.token\s*\}\}/);
 });
+
+test('web-building workflows check out Git LFS so vendored model assets are real binaries', () => {
+  // The subtitle ASR/LLM model weights and ONNX runtime live in Git LFS under
+  // apps/web/public. A checkout without lfs:true leaves pointer text files, so
+  // `npm run build` would copy pointers into dist/ and ship broken models.
+  for (const path of ['.github/workflows/pages.yml', '.github/workflows/workflow-tests.yml']) {
+    const workflow = readFileSync(path, 'utf8');
+    assert.match(workflow, /actions\/checkout@v4\s*\n\s*with:\s*\n\s*lfs:\s*true/, `${path} must checkout with lfs: true`);
+  }
+});

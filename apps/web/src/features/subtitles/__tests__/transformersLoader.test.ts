@@ -182,7 +182,9 @@ describe("configureModelSource", () => {
   });
 
   it("switches to a remote mirror when VITE_HF_REMOTE_HOST is configured", () => {
-    const env: TransformersEnvironment = {};
+    const env: TransformersEnvironment = {
+      backends: { onnx: { wasm: { wasmPaths: { mjs: "https://cdn/x.mjs", wasm: "https://cdn/x.wasm" } } } },
+    };
 
     configureModelSource(env, { baseUrl: "/", remoteHost: "https://hf-mirror.com" });
 
@@ -190,6 +192,11 @@ describe("configureModelSource", () => {
     expect(env.allowLocalModels).toBe(false);
     expect(env.remoteHost).toBe("https://hf-mirror.com/");
     expect(env.localModelPath).toBeUndefined();
+    // ORT runtime stays self-hosted even in mirror mode.
+    expect(env.backends?.onnx?.wasm?.wasmPaths).toEqual({
+      mjs: "/ort/x.mjs",
+      wasm: "/ort/x.wasm",
+    });
   });
 
   it("rebases existing per-browser wasm paths onto the self-hosted ort directory", () => {

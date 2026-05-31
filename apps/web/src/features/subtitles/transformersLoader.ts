@@ -116,9 +116,15 @@ export function configureModelSource(
   config: ModelSourceConfig = readModelSourceConfig(),
 ): void {
   if (!env) return;
+  // ORT WASM runtime is always self-hosted from public/ort, independent of
+  // whether model weights come from the same-origin copy or a remote mirror —
+  // otherwise mirror mode would still fetch the runtime from jsdelivr.
+  if (hasSameOriginAssetHost()) {
+    configureSelfHostedWasmPaths(env, config.baseUrl);
+  }
   const remoteHost = config.remoteHost?.trim();
   if (remoteHost) {
-    // Mirror fallback: fetch model assets from a configured Hugging Face mirror
+    // Mirror fallback: fetch model weights from a configured Hugging Face mirror
     // instead of the bundled same-origin copy. Used when assets are not vendored.
     env.allowRemoteModels = true;
     env.allowLocalModels = false;
@@ -131,13 +137,12 @@ export function configureModelSource(
     // reach the Hub on networks that allow it; same-origin hosting is browser-only.
     return;
   }
-  // Default: serve vendored assets from the same origin as the app
+  // Default: serve vendored weights from the same origin as the app
   // (apps/web/public/models). Disable remote so missing files fail loudly
   // instead of silently timing out against huggingface.co.
   env.allowLocalModels = true;
   env.allowRemoteModels = false;
   env.localModelPath = joinBaseUrl(config.baseUrl, "models/");
-  configureSelfHostedWasmPaths(env, config.baseUrl);
 }
 
 function hasSameOriginAssetHost(): boolean {
