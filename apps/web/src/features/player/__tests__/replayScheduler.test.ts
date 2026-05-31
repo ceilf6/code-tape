@@ -35,6 +35,26 @@ function content(seq: number, t: number, code: string): RecordingEvent {
   };
 }
 
+function countedContent(
+  seq: number,
+  t: number,
+  code: string,
+  counter: { reads: number },
+): RecordingEvent {
+  const event = content(seq, t, code);
+  return {
+    ...event,
+    get seq() {
+      counter.reads += 1;
+      return seq;
+    },
+    get timestampMs() {
+      counter.reads += 1;
+      return t;
+    },
+  };
+}
+
 function shortcut(seq: number, t: number): RecordingEvent {
   return {
     id: `s-${seq}`,
@@ -292,6 +312,33 @@ describe("createReplayScheduler", () => {
     scheduler.tick();
     expect(scheduler.getStableState().editor.code).toBe("a");
     expect(seen).toContain("ended");
+  });
+
+  it("does not rescan already-applied events on later playback ticks", async () => {
+    const counter = { reads: 0 };
+    const events = Array.from({ length: 1_000 }, (_, index) =>
+      countedContent(index + 1, index + 1, `line ${index + 1}`, counter),
+    );
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg(events, [], 2_000));
+
+    scheduler.play();
+    wall = 1_000;
+    scheduler.tick();
+    expect(latest().lastAppliedSeq).toBe(1_000);
+
+    counter.reads = 0;
+    wall = 1_001;
+    scheduler.tick();
+
+    expect(latest().lastAppliedSeq).toBe(1_000);
+    expect(counter.reads).toBeLessThan(20);
   });
 
   it("uses ready media currentTime as the main replay clock", async () => {

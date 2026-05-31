@@ -109,6 +109,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
   let mediaAdapter = options.mediaAdapter ?? null;
   let mediaBlockedSinceMs: number | null = null;
   let mediaFallbackNotified = false;
+  let nextEventIndex = 0;
 
   let schedulerState: ReplaySchedulerState = {
     status: "loading",
@@ -150,6 +151,17 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       lastSeq = Math.max(lastSeq, event.seq);
     }
     return { state, lastSeq };
+  };
+
+  const findFirstEventIndexAfterSeq = (lastSeq: number): number => {
+    let lo = 0;
+    let hi = index.eventsBySeq.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (index.eventsBySeq[mid].seq <= lastSeq) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   };
 
   const currentMediaStatus = (): ReplaySchedulerState["mediaStatus"] => {
@@ -258,7 +270,9 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
   ): { transientEvents: RecordingEvent[]; lastSeq: number } => {
     const transientEvents: RecordingEvent[] = [];
     let lastSeq = schedulerState.lastAppliedSeq;
-    for (const event of index.eventsBySeq) {
+    let cursor = nextEventIndex;
+    for (; cursor < index.eventsBySeq.length; cursor += 1) {
+      const event = index.eventsBySeq[cursor];
       if (event.seq <= lastSeq) continue;
       if (event.timestampMs > targetMs) break;
       if (
@@ -273,6 +287,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       }
       lastSeq = event.seq;
     }
+    nextEventIndex = cursor;
     return { transientEvents, lastSeq };
   };
 
@@ -324,6 +339,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
     if (frame.shouldAdvanceEvents && now < schedulerState.timelineTimeMs) {
       const { state, lastSeq } = recomputeFromTime(now);
       stableState = state;
+      nextEventIndex = findFirstEventIndexAfterSeq(lastSeq);
       updateState({
         timelineTimeMs: Math.max(0, now),
         lastAppliedSeq: lastSeq,
@@ -384,6 +400,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       index = buildReplayIndex(input);
       initial = buildInitialState(input);
       stableState = cloneState(initial);
+      nextEventIndex = 0;
       tickStrategy.stop();
       driving = false;
       resetMediaBlock();
@@ -417,6 +434,7 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
       const clamped = Math.max(0, Math.min(targetMs, pkg.meta.durationMs));
       const { state, lastSeq } = recomputeFromTime(clamped);
       stableState = state;
+      nextEventIndex = findFirstEventIndexAfterSeq(lastSeq);
       clock.setBase(clamped);
       if (mediaAdapter) await mediaAdapter.seek(clamped);
       updateState({
