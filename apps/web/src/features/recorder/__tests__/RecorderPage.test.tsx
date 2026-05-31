@@ -373,6 +373,7 @@ async function flushAsyncWork(turns = 6): Promise<void> {
 
 describe("RecorderPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     recorderPageMock.reset();
   });
 
@@ -442,6 +443,25 @@ describe("RecorderPage", () => {
     const output = await screen.findByRole("region", { name: "Runtime output" });
     expect(output).toHaveTextContent("success");
     expect(output).toHaveTextContent("1");
+  });
+
+  it("lets users resize and persist the recorder workspace from the keyboard", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
+
+    const separator = screen.getByRole("separator", { name: "调整录制工作区宽度" });
+    expect(separator).toHaveAttribute("aria-valuemin", "52");
+    expect(separator).toHaveAttribute("aria-valuemax", "78");
+    expect(separator).toHaveAttribute("aria-valuenow", "68");
+
+    act(() => {
+      fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    });
+
+    expect(separator).toHaveAttribute("aria-valuenow", "64");
+    expect(window.localStorage.getItem("code-tape:workspace:recorder:left-percent")).toBe("64");
   });
 
   it("runs code from the editor run command shortcut", async () => {

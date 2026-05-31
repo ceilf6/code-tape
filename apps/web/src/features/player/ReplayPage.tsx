@@ -21,7 +21,7 @@ import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createRecordingStore } from "@/features/library/recordingStore";
 import { createCloudRecordingRepository } from "@/features/cloud/cloudRecordingRepository";
 import { SubtitlePanel } from "@/features/subtitles";
-import { Toggle } from "@/shared/ui";
+import { ResizableWorkspace, Toggle } from "@/shared/ui";
 import type {
   PackageWarning,
   MediaTimelineSegment,
@@ -308,6 +308,39 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
     );
   }
 
+  const replayStage = (
+    <div className="relative h-full min-h-0">
+      <CodeEditor
+        language={stableState.editor.language}
+        initialValue={stableState.editor.code}
+        value={stableState.editor.code}
+        fontSize={stableState.editor.fontSize}
+        theme={stableState.editor.theme}
+        readOnly
+        cursor={stableState.editor.cursor}
+        selection={stableState.editor.selection}
+        scrollTop={stableState.editor.scrollTop}
+        scrollLeft={stableState.editor.scrollLeft}
+      />
+      <ReplayVisualOverlays
+        state={overlayState}
+        showPointer={displayOptions.pointer}
+        showShortcut={displayOptions.shortcuts}
+      />
+      <RecordedMediaOverlay
+        videoRef={recordedMediaVideoRef}
+        media={currentMedia}
+        mediaBlob={mediaBlob}
+        mediaState={stableState.media}
+        schedulerState={schedulerState}
+        volume={volume}
+        muted={muted}
+        showCameraLayer={displayOptions.camera}
+        onStatusChange={syncSchedulerMediaStatus}
+      />
+    </div>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {eventOnlyNotice ? (
@@ -344,51 +377,26 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
           {shareFeedback.message}
         </div>
       ) : null}
-      <div
-        aria-label="回放工作区"
-        className={
-          displayOptions.runtime
-            ? "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]"
-            : "grid min-h-0 flex-1 grid-cols-1"
-        }
-      >
-        <div className="relative min-h-0 border-r border-border">
-          <CodeEditor
-            language={stableState.editor.language}
-            initialValue={stableState.editor.code}
-            value={stableState.editor.code}
-            fontSize={stableState.editor.fontSize}
-            theme={stableState.editor.theme}
-            readOnly
-            cursor={stableState.editor.cursor}
-            selection={stableState.editor.selection}
-            scrollTop={stableState.editor.scrollTop}
-            scrollLeft={stableState.editor.scrollLeft}
-          />
-          <ReplayVisualOverlays
-            state={overlayState}
-            showPointer={displayOptions.pointer}
-            showShortcut={displayOptions.shortcuts}
-          />
-          <RecordedMediaOverlay
-            videoRef={recordedMediaVideoRef}
-            media={currentMedia}
-            mediaBlob={mediaBlob}
-            mediaState={stableState.media}
-            schedulerState={schedulerState}
-            volume={volume}
-            muted={muted}
-            showCameraLayer={displayOptions.camera}
-            onStatusChange={syncSchedulerMediaStatus}
-          />
+      {displayOptions.runtime ? (
+        <ResizableWorkspace
+          ariaLabel="回放工作区"
+          separatorLabel="调整回放工作区宽度"
+          storageKey="code-tape:workspace:replay:left-percent"
+          leftClassName="min-h-[24rem] border-b border-border md:min-h-0 md:border-b-0"
+          rightClassName="flex flex-col"
+          left={replayStage}
+          right={
+            <>
+              <PreviewPane runtime={runtime} previewHtml={stableState.runtime.previewHtml} className="min-h-0 flex-1" />
+              <RuntimeOutputPanel runtime={stableState.runtime} />
+            </>
+          }
+        />
+      ) : (
+        <div aria-label="回放工作区" className="grid min-h-0 flex-1 grid-cols-1">
+          {replayStage}
         </div>
-        {displayOptions.runtime ? (
-          <div className="flex min-h-0 flex-col">
-            <PreviewPane runtime={runtime} previewHtml={stableState.runtime.previewHtml} className="min-h-0 flex-1" />
-            <RuntimeOutputPanel runtime={stableState.runtime} />
-          </div>
-        ) : null}
-      </div>
+      )}
       {displayOptions.subtitles ? (
         <SubtitlePanel
           recordingId={pkg?.meta.id ?? null}
@@ -769,4 +777,3 @@ function formatError(err: unknown): string {
   if (typeof err === "string") return err;
   return "unknown error";
 }
-

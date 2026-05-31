@@ -23,7 +23,7 @@ import {
   createRuntimeProducer,
   createShortcutProducer,
 } from "@/features/capture";
-import { IconButton, useTheme } from "@/shared/ui";
+import { IconButton, ResizableWorkspace, useTheme } from "@/shared/ui";
 import type {
   CameraPositionPayload,
   DeviceInfo,
@@ -666,42 +666,51 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
         onCameraDeviceChange={handleCameraDeviceChange}
         onRequestMediaPermission={handleRequestMediaPermission}
       />
-      <div className="grid flex-1 grid-cols-1 md:grid-cols-[1fr_minmax(320px,420px)]">
-        <div className="relative border-r border-border">
-          <CodeEditor
-            ref={editorRef}
-            language={editorLanguage}
-            initialValue=""
-            fontSize={editorFontSize}
-            theme={theme.resolved}
-            readOnly={controllerState.status === "paused"}
-            onChange={scheduleAutoRun}
-            onCommand={(command) => {
-              if (command === "run") void handleRun();
-            }}
-            onBeforeFormatApply={() => stack.editorProducer.markNextChangeAsFormat()}
-          />
-          <CameraPreview
-            stream={mediaStream}
-            enabled={cameraEnabled}
-            position={cameraPosition}
-            draggable={controllerState.status !== "paused"}
-            onPositionChange={(next) => {
-              if (stack.controller.state.status === "paused") return;
-              setCameraPosition(next);
-              stack.mediaProducer.reportCameraPosition(next);
-            }}
-          />
-        </div>
-        <div className="flex min-h-0 flex-col">
-          <PreviewPane
-            runtime={stack.runtime}
-            className="min-h-0 flex-1"
-            onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
-          />
-          <RecorderRuntimeOutputPanel runtime={runtimeState} />
-        </div>
-      </div>
+      <ResizableWorkspace
+        ariaLabel="录制工作区"
+        separatorLabel="调整录制工作区宽度"
+        storageKey="code-tape:workspace:recorder:left-percent"
+        leftClassName="relative min-h-[24rem] border-b border-border md:min-h-0 md:border-b-0"
+        rightClassName="flex flex-col"
+        left={
+          <>
+            <CodeEditor
+              ref={editorRef}
+              language={editorLanguage}
+              initialValue=""
+              fontSize={editorFontSize}
+              theme={theme.resolved}
+              readOnly={controllerState.status === "paused"}
+              onChange={scheduleAutoRun}
+              onCommand={(command) => {
+                if (command === "run") void handleRun();
+              }}
+              onBeforeFormatApply={() => stack.editorProducer.markNextChangeAsFormat()}
+            />
+            <CameraPreview
+              stream={mediaStream}
+              enabled={cameraEnabled}
+              position={cameraPosition}
+              draggable={controllerState.status !== "paused"}
+              onPositionChange={(next) => {
+                if (stack.controller.state.status === "paused") return;
+                setCameraPosition(next);
+                stack.mediaProducer.reportCameraPosition(next);
+              }}
+            />
+          </>
+        }
+        right={
+          <>
+            <PreviewPane
+              runtime={stack.runtime}
+              className="min-h-0 flex-1"
+              onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
+            />
+            <RecorderRuntimeOutputPanel runtime={runtimeState} />
+          </>
+        }
+      />
     </div>
   );
 }

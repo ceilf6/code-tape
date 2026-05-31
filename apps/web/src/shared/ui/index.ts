@@ -8,4 +8,5 @@ export { Slider, type SliderProps } from "./Slider";
 export { Toggle, type ToggleProps } from "./Toggle";
 export { Tooltip, TooltipProvider, type TooltipProps } from "./Tooltip";
 export { Popover, type PopoverProps } from "./Popover";
+export { ResizableWorkspace, type ResizableWorkspaceProps } from "./ResizableWorkspace";
 export { cn } from "./utils/cn";

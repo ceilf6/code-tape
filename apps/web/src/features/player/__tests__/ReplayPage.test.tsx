@@ -222,6 +222,7 @@ vi.mock("../ReplayControls", () => ({
 
 describe("ReplayPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     replayPageMock.reset();
   });
 
@@ -490,6 +491,36 @@ describe("ReplayPage", () => {
     await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
 
     expect(screen.getByLabelText("回放工作区")).toHaveClass("min-h-0");
+  });
+
+  it("lets users resize and persist the replay workspace from the keyboard", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    const separator = screen.getByRole("separator", { name: "调整回放工作区宽度" });
+    expect(separator).toHaveAttribute("aria-valuemin", "52");
+    expect(separator).toHaveAttribute("aria-valuemax", "78");
+    expect(separator).toHaveAttribute("aria-valuenow", "68");
+
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+
+    expect(separator).toHaveAttribute("aria-valuenow", "72");
+    expect(window.localStorage.getItem("code-tape:workspace:replay:left-percent")).toBe("72");
+  });
+
+  it("hides the replay workspace separator when the runtime panel is hidden", async () => {
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+
+    expect(screen.getByRole("separator", { name: "调整回放工作区宽度" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "显示运行面板" }));
+
+    expect(screen.queryByRole("separator", { name: "调整回放工作区宽度" })).not.toBeInTheDocument();
   });
 
   it("renders transient pointer and shortcut overlays from scheduler ticks", async () => {
