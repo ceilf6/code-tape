@@ -184,6 +184,42 @@ describe("CandidateInterviewPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps long room status values inside shrinkable metric rows", () => {
+    const longSignalingUrl = `/api/interviews/rooms/${"room-".repeat(40)}/signaling`;
+    const longRoomId = `room-${"candidate-".repeat(24)}`;
+    const longJoinCode = `JOIN${"1234567890".repeat(10)}`;
+
+    render(
+      <TooltipProvider>
+        <CandidateInterviewView
+          roomId={longRoomId}
+          roomState={{
+            status: "waiting-interviewer",
+            joinCode: longJoinCode,
+            interviewerOnline: false,
+            signalingUrl: longSignalingUrl,
+          }}
+          mediaState={makeMediaState()}
+          recordingWorkspace={<div>Recording area</div>}
+        />
+      </TooltipProvider>,
+    );
+
+    const signalingValue = screen.getByText(longSignalingUrl);
+    expect(signalingValue.closest("dd")).toHaveClass("min-w-0");
+    expect(signalingValue).toHaveClass("block", "truncate");
+    expect(signalingValue).toHaveAttribute("title", longSignalingUrl);
+
+    const interviewerUrl = screen.getByText(
+      `http://localhost:3000/interview/interviewer/${encodeURIComponent(
+        longRoomId,
+      )}?joinCode=${encodeURIComponent(longJoinCode)}`,
+    );
+    expect(interviewerUrl.closest("dd")).toHaveClass("min-w-0");
+    expect(interviewerUrl).toHaveClass("block", "truncate");
+    expect(interviewerUrl).toHaveAttribute("title", interviewerUrl.textContent);
+  });
+
   it("resets the copied state when the interviewer room link changes", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", {

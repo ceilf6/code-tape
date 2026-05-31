@@ -519,6 +519,29 @@ describe("CodeEditor", () => {
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
   });
 
+  it("comments from the physical slash key when the reported key is layout-specific", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="const commented = true;"
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, {
+      key: "÷",
+      code: "Slash",
+      browserEvent: { code: "Slash", key: "÷", isComposing: false, repeat: false },
+      metaKey: true,
+    });
+
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.commentLine", null);
+  });
+
   it("uses a JS formatter fallback when Monaco format action leaves the document unchanged", async () => {
     const { CodeEditor } = await import("../CodeEditor");
     render(
