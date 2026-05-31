@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   RUNTIME_CONSOLE_ARG_LIMIT,
   RUNTIME_CONSOLE_ARG_MAX_CHARS,
+  RUNTIME_OUTPUT_LINE_LIMIT,
+  RUNTIME_OUTPUT_TRUNCATED_NOTICE,
   RUNTIME_PREVIEW_HTML_MAX_CHARS,
   acceptRuntimeMessage,
   createIframeRuntime,
@@ -167,10 +169,12 @@ describe("IframeRuntime sandbox lifecycle", () => {
 
     await runtime.mount(host);
     const mountedFrame = host.querySelector("iframe");
-    await runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
+    const firstRun = runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
     const firstRunFrame = host.querySelector("iframe");
-    await runtime.run({ runId: "run-2", compiledCode: "", timeoutMs: 1 });
+    await firstRun;
+    const secondRun = runtime.run({ runId: "run-2", compiledCode: "", timeoutMs: 1 });
     const secondRunFrame = host.querySelector("iframe");
+    await secondRun;
 
     expect(firstRunFrame).not.toBe(mountedFrame);
     expect(secondRunFrame).not.toBe(firstRunFrame);
@@ -184,12 +188,29 @@ describe("IframeRuntime sandbox lifecycle", () => {
     const runtime = createIframeRuntime();
 
     await runtime.mount(host);
-    await runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
+    const run = runtime.run({ runId: "run-1", compiledCode: "", timeoutMs: 1 });
     const frame = host.querySelector("iframe");
+    await run;
 
     expect(frame?.srcdoc).toContain("Content-Security-Policy");
     expect(frame?.srcdoc).toContain("default-src 'none'");
     expect(frame?.srcdoc).toContain("connect-src 'none'");
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("destroys the run iframe on timeout so runaway async tasks stop", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const run = runtime.run({ runId: "run-timeout", compiledCode: "", timeoutMs: 1 });
+    expect(host.querySelector("iframe")).not.toBeNull();
+    const result = await run;
+
+    expect(result.status).toBe("timeout");
+    expect(host.querySelector("iframe")).toBeNull();
     runtime.destroy();
     host.remove();
   });
@@ -259,9 +280,45 @@ describe("IframeRuntime sandbox lifecycle", () => {
     expect(host.querySelector("iframe")?.srcdoc).toContain("second");
 
     runtime.reset();
-    await runtime.run({ runId: "run-after-reset", compiledCode: "", timeoutMs: 1 });
+    const runAfterReset = runtime.run({ runId: "run-after-reset", compiledCode: "", timeoutMs: 1 });
     expect(host.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+    await runAfterReset;
 
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("caps stdout/stderr to the per-run line limit and flags truncation", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const run = runtime.run({ runId: "run-flood", compiledCode: "", timeoutMs: 200 });
+    const frame = host.querySelector("iframe");
+    const source = frame?.contentWindow;
+    expect(source).toBeTruthy();
+    // The message handler is registered after the iframe load event fires inside
+    // run(); wait a macrotask so dispatched console messages are observed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let i = 0; i < RUNTIME_OUTPUT_LINE_LIMIT + 25; i += 1) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source,
+          data: {
+            source: "code-tape-runtime",
+            runId: "run-flood",
+            type: "console",
+            payload: { level: "log", args: [`line-${i}`] },
+          },
+        }),
+      );
+    }
+    const result = await run;
+
+    expect(result.status).toBe("timeout");
+    expect(result.stdout).toHaveLength(RUNTIME_OUTPUT_LINE_LIMIT);
+    expect(result.stderr).toContain(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
     runtime.destroy();
     host.remove();
   });
