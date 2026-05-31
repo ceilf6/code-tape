@@ -48,6 +48,9 @@ let themesDefined = false;
 let workersConfigured = false;
 const COLLAPSED_SELECTION_PULSE_MS = 420;
 const FORMAT_ACTION_ID = "editor.action.formatDocument";
+const PHYSICAL_CODE_BY_KEY: Record<string, string> = {
+  "/": "slash",
+};
 
 type PrettierFormatter = {
   format(source: string, language: RecordingLanguage): Promise<string | null>;
@@ -496,7 +499,7 @@ function isFormatShortcut(event: Monaco.IKeyboardEvent): boolean {
 function matchesKey(event: Monaco.IKeyboardEvent, key: string): boolean {
   const expected = key.toLowerCase();
   const actualKey = event.browserEvent.key.toLowerCase();
-  const expectedCode = `key${expected}`;
+  const expectedCode = PHYSICAL_CODE_BY_KEY[expected] ?? `key${expected}`;
   return (
     actualKey === expected
     || event.code.toLowerCase() === expectedCode
