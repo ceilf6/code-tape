@@ -1130,6 +1130,55 @@ describe("ReplayPage", () => {
     },
   );
 
+  it("starts offset recorded media from the beginning when replaying after ended", async () => {
+    const originalMedia = replayPageMock.packageData.media;
+    replayPageMock.packageData.media = {
+      ...originalMedia!,
+      durationMs: 6_000,
+      timelineOffsetMs: 5_000,
+    };
+    replayPageMock.schedulerState.status = "ended";
+    replayPageMock.schedulerState.timelineTimeMs = replayPageMock.packageData.meta.durationMs;
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    if (typeof URL.createObjectURL !== "function") {
+      Object.defineProperty(URL, "createObjectURL", {
+        writable: true,
+        value: vi.fn(() => "blob:replay-media"),
+      });
+    }
+    if (typeof URL.revokeObjectURL !== "function") {
+      Object.defineProperty(URL, "revokeObjectURL", {
+        writable: true,
+        value: vi.fn(),
+      });
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:offset-media");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const { ReplayPage } = await import("../ReplayPage");
+
+    try {
+      render(<ReplayPage />);
+      await waitFor(() => expect(screen.getByLabelText("录制摄像头视频")).toBeInTheDocument());
+      play.mockClear();
+      pause.mockClear();
+
+      act(() => {
+        replayPageMock.controlsProps?.onPlayPause();
+      });
+
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(pause).not.toHaveBeenCalled();
+      expect(replayPageMock.scheduler.play).toHaveBeenCalledTimes(1);
+    } finally {
+      replayPageMock.packageData.media = originalMedia;
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+      play.mockRestore();
+      pause.mockRestore();
+    }
+  });
+
   it("starts recorded media when the video becomes ready after scheduler playback has begun", async () => {
     replayPageMock.schedulerState.status = "playing";
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);

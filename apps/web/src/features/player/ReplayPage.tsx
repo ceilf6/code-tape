@@ -194,26 +194,27 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
   const syncSchedulerMediaStatus = useCallback(() => {
     scheduler.setMediaAdapter(mediaAdapter);
   }, [mediaAdapter, scheduler]);
-  const playRecordedMedia = useCallback(() => {
+  const playRecordedMedia = useCallback((timelineTimeMs: number) => {
     const video = recordedMediaVideoRef.current;
     if (!video) return;
-    const targetMs = mediaAdapter?.timelineToMediaTime(schedulerState.timelineTimeMs) ?? null;
+    const targetMs = mediaAdapter?.timelineToMediaTime(timelineTimeMs) ?? null;
     if (targetMs === null) {
       video.pause();
       return;
     }
-    void mediaAdapter?.seek(schedulerState.timelineTimeMs);
+    void mediaAdapter?.seek(timelineTimeMs);
     void video.play().catch((err) => {
       console.warn("[replay-page] recorded media play failed:", err);
     });
-  }, [mediaAdapter, schedulerState.timelineTimeMs]);
+  }, [mediaAdapter]);
   const pauseRecordedMedia = useCallback(() => {
     recordedMediaVideoRef.current?.pause();
   }, []);
   const playReplay = useCallback(() => {
-    playRecordedMedia();
+    const timelineTimeMs = schedulerState.status === "ended" ? 0 : schedulerState.timelineTimeMs;
+    playRecordedMedia(timelineTimeMs);
     scheduler.play();
-  }, [playRecordedMedia, scheduler]);
+  }, [playRecordedMedia, scheduler, schedulerState.status, schedulerState.timelineTimeMs]);
   const pauseReplay = useCallback(() => {
     pauseRecordedMedia();
     scheduler.pause();
