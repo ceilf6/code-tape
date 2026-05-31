@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T15:04:10Z",
+  "updatedAt": "2026-05-31T15:30:10Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        239
+        239,
+        241
       ],
       "completedIssues": [
         11,
@@ -1286,6 +1287,19 @@
       "status": "claimed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T15:04:10Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "241": {
+      "number": 241,
+      "title": "修复 Workflow Tests 因强制拉取 LFS 资产导致 checkout 失败",
+      "score": 1,
+      "stack": [
+        "github-actions"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T15:30:10Z",
       "closedAt": null,
       "mergedPr": null
     }
