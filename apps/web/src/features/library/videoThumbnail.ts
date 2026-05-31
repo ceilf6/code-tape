@@ -4,6 +4,7 @@ export type VideoThumbnailOptions = {
   mimeType: string;
   quality: number;
   seekBackMs: number;
+  timeoutMs: number;
 };
 
 export const DEFAULT_VIDEO_THUMBNAIL_OPTIONS: VideoThumbnailOptions = {
@@ -12,6 +13,7 @@ export const DEFAULT_VIDEO_THUMBNAIL_OPTIONS: VideoThumbnailOptions = {
   mimeType: "image/webp",
   quality: 0.82,
   seekBackMs: 100,
+  timeoutMs: 2_500,
 };
 
 export async function createVideoThumbnail(
@@ -28,17 +30,17 @@ export async function createVideoThumbnail(
     video.playsInline = true;
     video.src = objectUrl;
 
-    await waitForMediaEvent(video, "loadedmetadata");
+    await waitForMediaEvent(video, "loadedmetadata", options.timeoutMs);
     if (Number.isFinite(video.duration) && video.duration > 0) {
       const targetTimeSec = Math.max(0, video.duration - options.seekBackMs / 1000);
       if (targetTimeSec > 0) {
         video.currentTime = targetTimeSec;
-        await waitForMediaEvent(video, "seeked");
+        await waitForMediaEvent(video, "seeked", options.timeoutMs);
       } else {
-        await waitForMediaEvent(video, "loadeddata");
+        await waitForMediaEvent(video, "loadeddata", options.timeoutMs);
       }
     } else {
-      await waitForMediaEvent(video, "loadeddata");
+      await waitForMediaEvent(video, "loadeddata", options.timeoutMs);
     }
 
     const canvas = document.createElement("canvas");
@@ -59,11 +61,20 @@ export async function createVideoThumbnail(
   }
 }
 
-function waitForMediaEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked") {
+function waitForMediaEvent(
+  video: HTMLVideoElement,
+  eventName: "loadedmetadata" | "loadeddata" | "seeked",
+  timeoutMs: number,
+) {
   if (eventName === "loadedmetadata" && video.readyState >= 1) return Promise.resolve();
   if (eventName === "loadeddata" && video.readyState >= 2) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`video ${eventName} timed out`));
+    }, timeoutMs);
     const cleanup = () => {
+      window.clearTimeout(timeout);
       video.removeEventListener(eventName, handleEvent);
       video.removeEventListener("error", handleError);
     };
