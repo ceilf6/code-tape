@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T18:03:24Z",
+  "updatedAt": "2026-05-31T18:05:26Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        239
+        239,
+        245
       ],
       "completedIssues": [
         11,
@@ -1316,6 +1317,20 @@
       "claimedAt": "2026-05-31T15:54:11Z",
       "closedAt": "2026-05-31T18:03:24Z",
       "mergedPr": 244
+    },
+    "245": {
+      "number": 245,
+      "title": "修复候选人房间状态长链接横向溢出",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T18:05:26Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
