@@ -161,6 +161,9 @@ const prettierMock = vi.hoisted(() => ({
     if (source === "function demo(){\n\t\treturn 1;\n}" && options.parser === "babel") {
       return "function demo() {\n  return 1;\n}\n";
     }
+    if (source === "const value:number=1;" && options.parser === "typescript") {
+      return "const value: number = 1;\n";
+    }
     return source;
   }),
 }));
@@ -502,6 +505,28 @@ describe("CodeEditor", () => {
     expect(prettierMock.format).toHaveBeenCalledWith(
       "function demo(){\n\t\treturn 1;\n}",
       expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
+    );
+  });
+
+  it("uses a TypeScript formatter fallback when Monaco format action leaves the document unchanged", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="typescript"
+        initialValue="const value:number=1;"
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+
+    await waitFor(() => expect(editor.getValue()).toBe("const value: number = 1;\n"));
+    expect(prettierMock.format).toHaveBeenCalledWith(
+      "const value:number=1;",
+      expect.objectContaining({ parser: "typescript", tabWidth: 2, useTabs: false }),
     );
   });
 
