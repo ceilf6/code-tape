@@ -1,11 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T18:21:34Z",
+  "updatedAt": "2026-05-31T18:25:58Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        239
+        239,
+        247,
+        248
       ],
       "completedIssues": [
         11,
@@ -1331,6 +1333,33 @@
       "claimedAt": "2026-05-31T18:05:26Z",
       "closedAt": "2026-05-31T18:21:34Z",
       "mergedPr": 246
+    },
+    "247": {
+      "number": 247,
+      "title": "移除已处理的候选人房间状态 Todo",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T18:23:20Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "248": {
+      "number": 248,
+      "title": "修复回放结束后再次播放不从头开始",
+      "score": 1,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T18:25:58Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
