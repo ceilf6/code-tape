@@ -1202,6 +1202,37 @@ test('GitHub check run listing requests all duplicate runs for required check de
   ]);
 });
 
+test('GitHub check run listing paginates all duplicate runs before de-duplication', async () => {
+  const client = new GitHubClient({ token: 'token', owner: 'ceilf6', repo: 'code-tape' });
+  const requests = [];
+  client.request = async (method, path) => {
+    requests.push({ method, path });
+    const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? '1');
+    return {
+      total_count: 101,
+      check_runs:
+        page === 1
+          ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1, name: `optional-${index}` }))
+          : [{ id: 101, name: 'Contract Guard / gitnexus-contract' }],
+    };
+  };
+
+  const checkRuns = await client.listCheckRunsForRef('head/sha');
+
+  assert.equal(checkRuns.length, 101);
+  assert.equal(checkRuns.at(-1).name, 'Contract Guard / gitnexus-contract');
+  assert.deepEqual(requests, [
+    {
+      method: 'GET',
+      path: '/repos/ceilf6/code-tape/commits/head%2Fsha/check-runs?filter=all&per_page=100',
+    },
+    {
+      method: 'GET',
+      path: '/repos/ceilf6/code-tape/commits/head%2Fsha/check-runs?filter=all&per_page=100&page=2',
+    },
+  ]);
+});
+
 test('auto merge orders duplicate required check runs by creation time before start time', () => {
   const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
 

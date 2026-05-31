@@ -65,11 +65,18 @@ export class GitHubClient {
   }
 
   async listCheckRunsForRef(ref) {
-    const data = await this.request(
-      'GET',
-      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(ref)}/check-runs?filter=all&per_page=100`,
-    );
-    return data.check_runs ?? [];
+    const checkRuns = [];
+    const basePath = `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(ref)}/check-runs?filter=all&per_page=100`;
+    for (let page = 1; ; page += 1) {
+      const path = page === 1 ? basePath : `${basePath}&page=${page}`;
+      const data = await this.request('GET', path);
+      const pageRuns = data.check_runs ?? [];
+      checkRuns.push(...pageRuns);
+      if (pageRuns.length < 100 || (data.total_count !== undefined && checkRuns.length >= data.total_count)) {
+        break;
+      }
+    }
+    return checkRuns;
   }
 
   async addLabels(issueNumber, labels) {
