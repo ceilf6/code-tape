@@ -1238,8 +1238,10 @@ test('repo guard supports fork pull requests without checking out PR code', () =
   const workflow = readFileSync('.github/workflows/repo-guard.yml', 'utf8');
 
   assert.match(workflow, /name:\s*Repo Guard/);
-  assert.match(workflow, /group:\s*repo-guard-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.event\.issue\.number\s*\|\|\s*github\.run_id\s*\}\}/);
-  assert.match(workflow, /cancel-in-progress:\s*true/);
+  assert.doesNotMatch(workflow, /^concurrency:\s*$/m);
+  assert.match(workflow, /^\s{4}concurrency:\s*$/m);
+  assert.match(workflow, /^\s{6}group:\s*repo-guard-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.event\.issue\.number\s*\|\|\s*github\.run_id\s*\}\}/m);
+  assert.match(workflow, /^\s{6}cancel-in-progress:\s*true$/m);
   assert.match(workflow, /^\s{2}pull_request_target:\s*$/m);
   assert.doesNotMatch(workflow, /^\s{2}pull_request:\s*$/m);
   assert.doesNotMatch(workflow, /head\.repo\.full_name\s*==\s*github\.repository/);
