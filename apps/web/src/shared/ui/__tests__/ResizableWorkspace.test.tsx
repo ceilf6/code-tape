@@ -94,6 +94,87 @@ describe("ResizableWorkspace", () => {
       "78",
     );
   });
+
+  it("updates and persists the split when dragged vertically", () => {
+    render(
+      <ResizableWorkspace
+        orientation="vertical"
+        ariaLabel="竖直工作区"
+        separatorLabel="调整竖直工作区高度"
+        storageKey="code-tape:vertical-workspace:left-percent"
+        defaultLeftPercent={68}
+        minLeftPercent={30}
+        maxLeftPercent={85}
+        left={<div>Top</div>}
+        right={<div>Bottom</div>}
+      />,
+    );
+    const workspace = screen.getByLabelText("竖直工作区");
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 500,
+      width: 800,
+      height: 500,
+      toJSON: () => ({}),
+    });
+
+    const separator = screen.getByRole("separator", { name: "调整竖直工作区高度" });
+    expect(separator).toHaveAttribute("aria-orientation", "horizontal");
+    // 竖直方向用 clientY 计算：250/500 = 50%（落在 [30,85] 内，step=4 → 48 or 52）。
+    fireEvent(separator, new PointerEvent("pointerdown", { bubbles: true, clientY: 250, pointerId: 1 }));
+    fireEvent(separator, new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }));
+
+    const valueNow = Number(separator.getAttribute("aria-valuenow"));
+    expect(valueNow).toBeGreaterThanOrEqual(30);
+    expect(valueNow).toBeLessThanOrEqual(85);
+    expect(valueNow % 4).toBe(0);
+    expect(window.localStorage.getItem("code-tape:vertical-workspace:left-percent")).toBe(
+      String(valueNow),
+    );
+  });
+
+  it("keeps the vertical separator visible on all viewports (not desktop-only)", () => {
+    render(
+      <ResizableWorkspace
+        orientation="vertical"
+        ariaLabel="竖直可见工作区"
+        separatorLabel="调整竖直可见工作区高度"
+        storageKey="code-tape:vertical-visible:left-percent"
+        left={<div>Top</div>}
+        right={<div>Bottom</div>}
+      />,
+    );
+    const separator = screen.getByRole("separator", { name: "调整竖直可见工作区高度" });
+    expect(separator).toHaveClass("flex", "cursor-row-resize");
+    expect(separator).not.toHaveClass("hidden");
+  });
+
+  it("adjusts the vertical split with ArrowUp/ArrowDown keys", () => {
+    render(
+      <ResizableWorkspace
+        orientation="vertical"
+        ariaLabel="竖直键盘工作区"
+        separatorLabel="调整竖直键盘工作区高度"
+        storageKey="code-tape:vertical-keyboard:left-percent"
+        defaultLeftPercent={60}
+        minLeftPercent={30}
+        maxLeftPercent={85}
+        step={4}
+        left={<div>Top</div>}
+        right={<div>Bottom</div>}
+      />,
+    );
+    const separator = screen.getByRole("separator", { name: "调整竖直键盘工作区高度" });
+    fireEvent.keyDown(separator, { key: "ArrowDown" });
+    expect(separator).toHaveAttribute("aria-valuenow", "64");
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    expect(separator).toHaveAttribute("aria-valuenow", "56");
+  });
 });
 
 class TestPointerEvent extends MouseEvent {

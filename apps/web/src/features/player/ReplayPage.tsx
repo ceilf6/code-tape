@@ -386,10 +386,25 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
           rightClassName="flex flex-col"
           left={replayStage}
           right={
-            <>
-              <PreviewPane runtime={runtime} previewHtml={stableState.runtime.previewHtml} className="min-h-0 flex-1" />
-              <RuntimeOutputPanel runtime={stableState.runtime} />
-            </>
+            <ResizableWorkspace
+              orientation="vertical"
+              ariaLabel="回放预览与输出区"
+              separatorLabel="调整回放预览与输出区高度"
+              storageKey="code-tape:workspace:replay:preview-percent"
+              defaultLeftPercent={68}
+              minLeftPercent={30}
+              maxLeftPercent={85}
+              leftClassName="flex flex-col"
+              rightClassName="flex flex-col"
+              left={
+                <PreviewPane
+                  runtime={runtime}
+                  previewHtml={stableState.runtime.previewHtml}
+                  className="min-h-0 flex-1"
+                />
+              }
+              right={<RuntimeOutputPanel runtime={stableState.runtime} />}
+            />
           }
         />
       ) : (

@@ -15,12 +15,19 @@ const DEFAULT_MIN_LEFT_PERCENT = 52;
 const DEFAULT_MAX_LEFT_PERCENT = 78;
 const DEFAULT_STEP = 4;
 
+export type ResizableWorkspaceOrientation = "horizontal" | "vertical";
+
 export type ResizableWorkspaceProps = {
   ariaLabel: string;
   separatorLabel: string;
   storageKey: string;
   left: ReactNode;
   right: ReactNode;
+  /**
+   * "horizontal"（默认）按左右分配空间，`left`/`right` 即左栏/右栏；
+   * "vertical" 按上下分配空间，`left` 为上区、`right` 为下区。
+   */
+  orientation?: ResizableWorkspaceOrientation;
   className?: string;
   leftClassName?: string;
   rightClassName?: string;
@@ -36,6 +43,7 @@ export function ResizableWorkspace({
   storageKey,
   left,
   right,
+  orientation = "horizontal",
   className,
   leftClassName,
   rightClassName,
@@ -44,6 +52,7 @@ export function ResizableWorkspace({
   maxLeftPercent = DEFAULT_MAX_LEFT_PERCENT,
   step = DEFAULT_STEP,
 }: ResizableWorkspaceProps) {
+  const isVertical = orientation === "vertical";
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const [leftPercent, setLeftPercent] = useState(() =>
@@ -64,25 +73,30 @@ export function ResizableWorkspace({
   );
 
   const commitPointerPosition = useCallback(
-    (clientX: number) => {
-      if (!Number.isFinite(clientX)) return;
+    (clientX: number, clientY: number) => {
       const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width <= 0) return;
-      commitPercent(((clientX - rect.left) / rect.width) * 100);
+      if (!rect) return;
+      if (isVertical) {
+        if (!Number.isFinite(clientY) || rect.height <= 0) return;
+        commitPercent(((clientY - rect.top) / rect.height) * 100);
+      } else {
+        if (!Number.isFinite(clientX) || rect.width <= 0) return;
+        commitPercent(((clientX - rect.left) / rect.width) * 100);
+      }
     },
-    [commitPercent],
+    [commitPercent, isVertical],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     draggingRef.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    commitPointerPosition(event.clientX);
+    commitPointerPosition(event.clientX, event.clientY);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
-    commitPointerPosition(event.clientX);
+    commitPointerPosition(event.clientX, event.clientY);
   };
 
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -93,9 +107,9 @@ export function ResizableWorkspace({
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const keyActions: Record<string, number> = {
       ArrowLeft: leftPercent - step,
-      ArrowDown: leftPercent - step,
+      ArrowDown: leftPercent + step,
       ArrowRight: leftPercent + step,
-      ArrowUp: leftPercent + step,
+      ArrowUp: leftPercent - step,
       Home: minLeftPercent,
       End: maxLeftPercent,
     };
@@ -109,12 +123,19 @@ export function ResizableWorkspace({
     <div
       ref={containerRef}
       aria-label={ariaLabel}
-      className={cn("flex min-h-0 flex-1 flex-col md:flex-row", className)}
+      className={cn(
+        "flex min-h-0 flex-1",
+        isVertical ? "flex-col" : "flex-col md:flex-row",
+        className,
+      )}
       style={layoutStyle}
     >
       <div
         className={cn(
-          "min-h-0 md:min-w-0 md:basis-[var(--workspace-left)] md:shrink-0 md:grow-0",
+          "min-h-0",
+          isVertical
+            ? "basis-[var(--workspace-left)] shrink-0 grow-0"
+            : "md:min-w-0 md:basis-[var(--workspace-left)] md:shrink-0 md:grow-0",
           leftClassName,
         )}
       >
@@ -123,14 +144,17 @@ export function ResizableWorkspace({
       <div
         role="separator"
         aria-label={separatorLabel}
-        aria-orientation="vertical"
+        aria-orientation={isVertical ? "horizontal" : "vertical"}
         aria-valuemin={minLeftPercent}
         aria-valuemax={maxLeftPercent}
         aria-valuenow={leftPercent}
         aria-valuetext={`${leftPercent}%`}
         tabIndex={0}
         className={cn(
-          "group hidden w-3 shrink-0 cursor-col-resize touch-none items-stretch justify-center outline-none md:flex",
+          "group shrink-0 touch-none items-stretch justify-center outline-none",
+          isVertical
+            ? "flex h-3 w-full cursor-row-resize"
+            : "hidden w-3 cursor-col-resize md:flex",
           "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         )}
         onPointerDown={handlePointerDown}
@@ -139,9 +163,22 @@ export function ResizableWorkspace({
         onPointerCancel={handlePointerUp}
         onKeyDown={handleKeyDown}
       >
-        <span className="my-3 w-px rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+        <span
+          className={cn(
+            "rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary",
+            isVertical ? "mx-3 h-px w-full self-center" : "my-3 w-px",
+          )}
+        />
       </div>
-      <div className={cn("min-h-0 md:min-w-0 md:flex-1", rightClassName)}>{right}</div>
+      <div
+        className={cn(
+          "min-h-0",
+          isVertical ? "flex-1" : "md:min-w-0 md:flex-1",
+          rightClassName,
+        )}
+      >
+        {right}
+      </div>
     </div>
   );
 }

@@ -701,14 +701,25 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
           </>
         }
         right={
-          <>
-            <PreviewPane
-              runtime={stack.runtime}
-              className="min-h-0 flex-1"
-              onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
-            />
-            <RecorderRuntimeOutputPanel runtime={runtimeState} />
-          </>
+          <ResizableWorkspace
+            orientation="vertical"
+            ariaLabel="录制预览与输出区"
+            separatorLabel="调整录制预览与输出区高度"
+            storageKey="code-tape:workspace:recorder:preview-percent"
+            defaultLeftPercent={68}
+            minLeftPercent={30}
+            maxLeftPercent={85}
+            leftClassName="flex flex-col"
+            rightClassName="flex flex-col"
+            left={
+              <PreviewPane
+                runtime={stack.runtime}
+                className="min-h-0 flex-1"
+                onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
+              />
+            }
+            right={<RecorderRuntimeOutputPanel runtime={runtimeState} />}
+          />
         }
       />
     </div>
