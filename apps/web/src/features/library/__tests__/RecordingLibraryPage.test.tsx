@@ -405,6 +405,32 @@ describe("RecordingLibraryPage", () => {
     expect(repositoryMocks.remove).not.toHaveBeenCalled();
   });
 
+  it("uploads a local thumbnail to the cloud when one is available", async () => {
+    const mediaBlob = new Blob(["media"], { type: "video/webm" });
+    const thumbnailBlob = new Blob(["thumbnail"], { type: "image/webp" });
+    repositoryMocks.list.mockResolvedValue([{ ...BASE_ITEM, thumbnailBlobId: "thumbnail-1" }]);
+    repositoryMocks.loadThumbnail.mockResolvedValue(thumbnailBlob);
+    repositoryMocks.load.mockResolvedValueOnce({
+      ok: true,
+      package: LOCAL_PACKAGE,
+      mediaBlob,
+      warnings: [],
+    });
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    fireEvent.click(screen.getByRole("button", { name: "上传到云端" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.loadThumbnail).toHaveBeenCalledWith("thumbnail-1");
+      expect(cloudRepositoryMocks.uploadPackage).toHaveBeenCalledWith(
+        LOCAL_PACKAGE,
+        { media: mediaBlob, thumbnail: thumbnailBlob },
+        expect.objectContaining({ onProgress: expect.any(Function) }),
+      );
+    });
+  });
+
   it("keeps the local recording when cloud upload fails", async () => {
     repositoryMocks.list.mockResolvedValue([BASE_ITEM]);
     cloudRepositoryMocks.uploadPackage.mockResolvedValueOnce({

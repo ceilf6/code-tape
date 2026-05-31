@@ -32,8 +32,18 @@ export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase>
       const target = event.target as IDBOpenDBRequest;
       options.onUpgrade(target.result, event.oldVersion, event.newVersion ?? options.version, target.transaction!);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("indexeddb open blocked"));
+    request.onblocked = () => {
+      // Existing connections that use this helper close on versionchange.
+      // Older tabs may still block briefly; keep the open request pending so it
+      // can continue once the user closes that tab instead of failing forever.
+    };
   });
 }

@@ -185,15 +185,14 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
             }
           : null,
         blobId,
-        thumbnailBlobId: thumbnailPayload ? thumbnailBlobId : null,
+        thumbnailBlobId: null,
         createdAtMs: Date.now(),
       };
 
       try {
-        const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS, STORE_THUMBNAILS], "readwrite");
+        const tx = db.transaction([STORE_RECORDINGS, STORE_BLOBS], "readwrite");
         const recordings = tx.objectStore(STORE_RECORDINGS);
         const blobs = tx.objectStore(STORE_BLOBS);
-        const thumbnails = tx.objectStore(STORE_THUMBNAILS);
         recordings.put(stored);
         if (bufferToStore && blobId && input.mediaBlob) {
           const payload: StoredBlob = {
@@ -202,10 +201,10 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           };
           blobs.put(payload, blobId);
         }
-        if (thumbnailPayload && thumbnailBlobId) {
-          thumbnails.put(thumbnailPayload, thumbnailBlobId);
-        }
         await awaitTransaction(tx);
+        if (thumbnailPayload && thumbnailBlobId) {
+          await persistThumbnail(db, stored, thumbnailBlobId, thumbnailPayload);
+        }
         return { ok: true, recordingId };
       } catch (err) {
         const error = err as Error;
@@ -450,6 +449,22 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       return { usageBytes: 0, quotaBytes: 0 };
     },
   };
+}
+
+async function persistThumbnail(
+  db: IDBDatabase,
+  stored: StoredRecording,
+  thumbnailBlobId: string,
+  thumbnailPayload: StoredBlob,
+): Promise<void> {
+  try {
+    const tx = db.transaction([STORE_RECORDINGS, STORE_THUMBNAILS], "readwrite");
+    tx.objectStore(STORE_THUMBNAILS).put(thumbnailPayload, thumbnailBlobId);
+    tx.objectStore(STORE_RECORDINGS).put({ ...stored, thumbnailBlobId });
+    await awaitTransaction(tx);
+  } catch {
+    // Thumbnail storage is best-effort; the recording and media are already durable.
+  }
 }
 
 async function prepareThumbnailPayload(

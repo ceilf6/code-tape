@@ -212,6 +212,39 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(list[0].thumbnailBlobId).toBeNull();
   });
 
+  it("continues saving video media when thumbnail storage fails", async () => {
+    const originalPut = IDBObjectStore.prototype.put;
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function put(
+      this: IDBObjectStore,
+      value: unknown,
+      key?: IDBValidKey,
+    ) {
+      if (this.name === "thumbnails") {
+        throw new DOMException("thumbnail quota exceeded", "QuotaExceededError");
+      }
+      return key === undefined ? originalPut.call(this, value) : originalPut.call(this, value, key);
+    });
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator: vi.fn(async () => new Blob(["thumbnail"], { type: "image/webp" })),
+    });
+    try {
+      const input = makeInput("rec-thumbnail-storage-failure");
+      input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+
+      const saved = await store.saveDraft(input);
+      if (!saved.ok) throw new Error(saved.message);
+      await store.commit("rec-thumbnail-storage-failure");
+
+      const list = await store.list();
+      expect(list).toHaveLength(1);
+      expect(list[0].thumbnailBlobId).toBeNull();
+      expect(putSpy).toHaveBeenCalled();
+    } finally {
+      putSpy.mockRestore();
+    }
+  });
+
   it("returns media-write-failed when media blob cannot be prepared", async () => {
     const store = createRecordingStore({ databaseName: uniqueDbName() });
     const input = makeInput("rec-media-fail");

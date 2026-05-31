@@ -266,7 +266,12 @@ export function RecordingLibraryPage() {
       if (!loaded.ok) {
         throw new Error(`本地录制包读取失败：${formatPackageLoadError(loaded.error)}`);
       }
-      const blobs = loaded.mediaBlob ? { media: loaded.mediaBlob } : {};
+      const thumbnail = item.thumbnailBlobId
+        ? await localRepository.loadThumbnail(item.thumbnailBlobId).catch(() => null)
+        : null;
+      const blobs: { media?: Blob; thumbnail?: Blob } = {};
+      if (loaded.mediaBlob) blobs.media = loaded.mediaBlob;
+      if (thumbnail) blobs.thumbnail = thumbnail;
       const upload = await cloudRepository.uploadPackage(
         loaded.package,
         blobs,
