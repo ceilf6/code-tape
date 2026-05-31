@@ -15,7 +15,8 @@ const RUNTIME_SOURCE = "code-tape-runtime";
 export const RUNTIME_CONSOLE_ARG_LIMIT = 50;
 export const RUNTIME_CONSOLE_ARG_MAX_CHARS = 2_000;
 export const RUNTIME_PREVIEW_HTML_MAX_CHARS = 200_000;
-/** Per-run cap on stdout/stderr lines — bounds memory and recording size when
+/** Per-run cap on the combined stdout + stderr line count (including the
+ *  reserved truncation-notice slot) — bounds memory and recording size when
  *  async code floods console before the run timeout fires. */
 export const RUNTIME_OUTPUT_LINE_LIMIT = 1_000;
 export const RUNTIME_OUTPUT_TRUNCATED_NOTICE = "[输出已截断：超过单次运行行数上限]";
@@ -191,12 +192,15 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       const stdout: string[] = [];
       const stderr: string[] = [];
       let outputTruncated = false;
+      // Shared cap over stdout + stderr (a runaway async task can flood either
+      // stream). The final slot is reserved for the truncation notice so the
+      // combined line count never exceeds RUNTIME_OUTPUT_LINE_LIMIT.
       const pushOutput = (sink: string[], line: string) => {
-        if (sink.length >= RUNTIME_OUTPUT_LINE_LIMIT) {
-          if (!outputTruncated) {
-            outputTruncated = true;
-            stderr.push(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
-          }
+        if (outputTruncated) return;
+        const total = stdout.length + stderr.length;
+        if (total >= RUNTIME_OUTPUT_LINE_LIMIT - 1) {
+          outputTruncated = true;
+          stderr.push(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
           return;
         }
         sink.push(line);

@@ -288,28 +288,68 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
-  it("caps stdout/stderr to the per-run line limit and flags truncation", async () => {
+  it("caps combined stdout/stderr to the per-run line limit and flags truncation", async () => {
+    const cases: Array<{ name: string; level: "log" | "error" }> = [
+      { name: "stdout flood", level: "log" },
+      { name: "stderr flood", level: "error" },
+    ];
+    for (const { level } of cases) {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const runtime = createIframeRuntime();
+
+      await runtime.mount(host);
+      const run = runtime.run({ runId: "run-flood", compiledCode: "", timeoutMs: 200 });
+      const frame = host.querySelector("iframe");
+      const source = frame?.contentWindow;
+      expect(source).toBeTruthy();
+      // The message handler is registered after the iframe load event fires inside
+      // run(); wait a macrotask so dispatched console messages are observed.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      for (let i = 0; i < RUNTIME_OUTPUT_LINE_LIMIT + 50; i += 1) {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source,
+            data: {
+              source: "code-tape-runtime",
+              runId: "run-flood",
+              type: "console",
+              payload: { level, args: [`line-${i}`] },
+            },
+          }),
+        );
+      }
+      const result = await run;
+
+      expect(result.status).toBe("timeout");
+      const combined = result.stdout.length + result.stderr.length;
+      expect(combined).toBe(RUNTIME_OUTPUT_LINE_LIMIT);
+      expect(result.stderr).toContain(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
+      runtime.destroy();
+      host.remove();
+    }
+  });
+
+  it("keeps the combined cap when stdout and stderr flood together", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const runtime = createIframeRuntime();
 
     await runtime.mount(host);
-    const run = runtime.run({ runId: "run-flood", compiledCode: "", timeoutMs: 200 });
+    const run = runtime.run({ runId: "run-mixed", compiledCode: "", timeoutMs: 200 });
     const frame = host.querySelector("iframe");
     const source = frame?.contentWindow;
     expect(source).toBeTruthy();
-    // The message handler is registered after the iframe load event fires inside
-    // run(); wait a macrotask so dispatched console messages are observed.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    for (let i = 0; i < RUNTIME_OUTPUT_LINE_LIMIT + 25; i += 1) {
+    for (let i = 0; i < RUNTIME_OUTPUT_LINE_LIMIT + 50; i += 1) {
       window.dispatchEvent(
         new MessageEvent("message", {
           source,
           data: {
             source: "code-tape-runtime",
-            runId: "run-flood",
+            runId: "run-mixed",
             type: "console",
-            payload: { level: "log", args: [`line-${i}`] },
+            payload: { level: i % 2 === 0 ? "log" : "error", args: [`line-${i}`] },
           },
         }),
       );
@@ -317,8 +357,10 @@ describe("IframeRuntime sandbox lifecycle", () => {
     const result = await run;
 
     expect(result.status).toBe("timeout");
-    expect(result.stdout).toHaveLength(RUNTIME_OUTPUT_LINE_LIMIT);
+    expect(result.stdout.length + result.stderr.length).toBe(RUNTIME_OUTPUT_LINE_LIMIT);
     expect(result.stderr).toContain(RUNTIME_OUTPUT_TRUNCATED_NOTICE);
+    // The truncation notice occupies the reserved final slot — never overflows.
+    expect(result.stderr.filter((line) => line === RUNTIME_OUTPUT_TRUNCATED_NOTICE)).toHaveLength(1);
     runtime.destroy();
     host.remove();
   });
