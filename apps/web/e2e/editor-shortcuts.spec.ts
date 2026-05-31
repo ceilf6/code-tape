@@ -14,7 +14,7 @@ test("primary slash comments the current editor line", async ({ page }) => {
 test("shift alt f formats the current editor document", async ({ page }) => {
   await openRecorder(page);
 
-  await page.keyboard.type("function demo(){\n\t\treturn 1;");
+  await pasteIntoEditor(page, "function demo(){\n\t\treturn 1;\n}");
   await page.keyboard.press("Shift+Alt+F");
 
   await expect(editorLines(page)).toContainText("function demo() {");
@@ -30,6 +30,15 @@ test("primary g opens Monaco go to line", async ({ page }) => {
 
   await expect(page.locator(".quick-input-widget")).toBeVisible();
 });
+
+async function pasteIntoEditor(page: Page, text: string): Promise<void> {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(async (nextText) => {
+    await navigator.clipboard.writeText(nextText);
+  }, text);
+  await page.keyboard.press(`${PRIMARY_MODIFIER}+V`);
+  await expect(editorLines(page)).toContainText(text.split("\n")[0] ?? text);
+}
 
 async function openRecorder(page: Page): Promise<void> {
   await page.goto("/record", { waitUntil: "domcontentloaded" });
