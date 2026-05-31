@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T05:02:54Z",
+  "updatedAt": "2026-05-31T05:05:01Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        219
       ],
       "completedIssues": [
         11,
@@ -1126,6 +1127,20 @@
       "claimedAt": "2026-05-31T03:58:50Z",
       "closedAt": "2026-05-31T05:02:54Z",
       "mergedPr": 218
+    },
+    "219": {
+      "number": 219,
+      "title": "提升回放帧率与播放流畅度",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T05:05:01Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
