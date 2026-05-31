@@ -6,7 +6,7 @@
   "scripts": {
     "predev": "npm run build -w @code-tape/recording-schema",
     "pretest": "npm run build -w @code-tape/recording-schema",
-    "prebuild": "npm run build -w @code-tape/recording-schema",
+    "prebuild": "npm run build -w @code-tape/recording-schema && node ../../scripts/subtitle-llm/verify-vendored-assets.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
