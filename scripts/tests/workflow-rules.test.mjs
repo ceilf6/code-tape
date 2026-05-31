@@ -607,6 +607,8 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /warm-up 只下载\/初始化模型，不提前转写音频/u);
   assert.match(technicalPlan, /实际音频转写仍只在用户点击后发生/u);
   assert.match(technicalPlan, /同一录制媒体只触发一次 warm-up/u);
+  assert.match(technicalPlan, /字幕主操作按钮可以显式发起一键 ASR -> LLM 流程/u);
+  assert.match(technicalPlan, /先生成、保存并展示 ASR 字幕[\s\S]*LLM 完成后/u);
   assert.match(technicalPlan, /不得把 token 打包进浏览器 bundle/u);
   assert.match(technicalPlan, /浏览器本地推理只拉取公开模型资产/u);
   assert.match(technicalPlan, /不得携带 Hugging Face token/u);
@@ -614,6 +616,8 @@ test('technical plan owns P1 plus AI subtitle architecture and HF token boundary
   assert.match(technicalPlan, /prompt 只描述目标和输出格式/u);
   assert.match(technicalPlan, /优先保证本地小模型稳定输出可解析 JSON/u);
   assert.match(technicalPlan, /有音频媒体时可以预热本地 LLM/u);
+  assert.match(technicalPlan, /LLM 后处理只能由用户点击字幕主操作触发/u);
+  assert.match(technicalPlan, /主操作先运行 ASR 并立即展示结果，再继续运行 LLM 后处理/u);
   assert.match(technicalPlan, /默认模型：`ceilf6\/code-tape-subtitle-postprocessor-onnx`/u);
   assert.match(technicalPlan, /WASM `q8` ONNX 资产/u);
   assert.match(technicalPlan, /`q4f16` \/ `q4` 资产/u);
