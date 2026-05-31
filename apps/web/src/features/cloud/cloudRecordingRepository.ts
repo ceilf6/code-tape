@@ -122,23 +122,27 @@ export function createCloudRecordingRepository(
 
   /**
    * 带 Bearer access token 发起业务请求；token 过期前自动刷新，遇 401 强制刷新重试一次。
-   * 刷新失败时回退到旧的 x-owner-token 头，保证离线/降级场景仍可用。
+   * 刷新失败时**不**回退到 x-owner-token——refresh token（设备 token）绝不随业务请求裸传，
+   * 仅发往 /api/auth/token。服务端的 x-owner-token 兼容路径只服务旧客户端。
    */
   const authorizedFetch = async (
     url: string,
     init: RequestInit & { headers?: Record<string, string> } = {},
   ): Promise<Response> => {
     const baseHeaders = init.headers ?? {};
-    const send = async (token: string | null): Promise<Response> => {
-      const headers: Record<string, string> = { ...baseHeaders };
-      if (token) headers.authorization = `Bearer ${token}`;
-      else headers["x-owner-token"] = repo.getOwnerToken();
-      return fetch(url, { ...init, headers });
-    };
+    const send = (token: string): Promise<Response> =>
+      fetch(url, { ...init, headers: { ...baseHeaders, authorization: `Bearer ${token}` } });
 
     const token = await ensureAccessToken();
+    if (!token) {
+      // 刷新失败：返回 401 让上层得到结构化 unauthorized 错误，绝不裸传 refresh token。
+      return new Response(
+        JSON.stringify({ error: { code: "unauthorized", message: "failed to obtain access token" } }),
+        { status: 401, headers: { "content-type": "application/json" } },
+      );
+    }
     const response = await send(token);
-    if (response.status === 401 && token) {
+    if (response.status === 401) {
       const refreshed = await ensureAccessToken(true);
       if (refreshed) return send(refreshed);
     }

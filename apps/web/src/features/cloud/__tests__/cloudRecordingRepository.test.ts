@@ -259,6 +259,8 @@ function makePlaybackDescriptor(
 
 // 业务响应队列（FIFO）；access token 刷新端点不入队，由默认实现透明应答。
 const businessResponseQueue: Array<() => Promise<Response> | Response> = [];
+// 允许单个用例覆盖 /api/auth/token 的应答（模拟刷新失败）。
+let authTokenResponder: (() => Promise<Response> | Response) | null = null;
 
 function authTokenResponse(): Response {
   return {
@@ -277,7 +279,9 @@ function authTokenResponse(): Response {
 function installFetchRouter() {
   vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes("/api/auth/token")) return authTokenResponse();
+    if (url.includes("/api/auth/token")) {
+      return (authTokenResponder ?? authTokenResponse)();
+    }
     const next = businessResponseQueue.shift();
     if (!next) throw new Error(`unexpected fetch to ${url} (no mockFetch queued)`);
     return next();
@@ -362,6 +366,7 @@ function setupRepo(): CloudRecordingRepository {
     vi.stubGlobal("fetch", vi.fn());
   }
   businessResponseQueue.length = 0;
+  authTokenResponder = null;
   installFetchRouter();
   return createCloudRecordingRepository();
 }
@@ -533,6 +538,54 @@ describe("CloudRecordingRepository", () => {
       expect((retryInit?.headers as Record<string, string>).authorization).toBe(
         "Bearer test.access.token",
       );
+    });
+
+    it("token 刷新失败时不把 refresh token 裸传到业务端点（返回 unauthorized）", async () => {
+      const repo = setupRepo();
+      // /api/auth/token 全部失败（500）。
+      authTokenResponder = () =>
+        ({
+          ok: false,
+          status: 500,
+          statusText: "Error",
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ error: { code: "rate-limited", message: "boom" } }),
+        }) as Response;
+
+      const result = await repo.createUploadSession(makeCreateSessionRequest());
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("unauthorized");
+      // 关键安全断言：没有任何业务请求发出（更不会带 x-owner-token）。
+      const businessCalls = vi.mocked(fetch).mock.calls.filter((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        return !url.includes("/api/auth/token");
+      });
+      expect(businessCalls).toHaveLength(0);
+    });
+
+    it("token 响应体缺少 accessToken 时不裸传 refresh token", async () => {
+      const repo = setupRepo();
+      authTokenResponder = () =>
+        ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ tokenType: "Bearer" }),
+        }) as Response;
+
+      const result = await repo.createUploadSession(makeCreateSessionRequest());
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error.code).toBe("unauthorized");
+      const businessCalls = vi.mocked(fetch).mock.calls.filter((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        return !url.includes("/api/auth/token");
+      });
+      expect(businessCalls).toHaveLength(0);
     });
   });
 
