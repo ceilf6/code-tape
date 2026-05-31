@@ -213,6 +213,65 @@ export function SubtitlePanel({
       status !== "generating" &&
       status !== "post-processing",
   );
+  const shouldGenerateBeforePostProcess = Boolean(postProcessor && canGenerate);
+  const primaryActionLabel = shouldGenerateBeforePostProcess
+    ? "生成字幕并优化"
+    : track && postProcessor
+      ? "优化字幕和章节"
+      : "生成字幕";
+  const canRunPrimaryAction = shouldGenerateBeforePostProcess
+    ? canGenerate
+    : track && postProcessor
+      ? canPostProcess
+      : canGenerate;
+
+  const postProcessTrack = async (
+    baseTrack: SubtitleTrack,
+    requestVersion: number,
+    abortController: AbortController,
+  ) => {
+    if (!postProcessor) return;
+    setStatus("post-processing");
+    try {
+      const correction = await runWithPostProcessTimeout(
+        postProcessor.process({
+          track: baseTrack,
+          context: postProcessorContext,
+          signal: abortController.signal,
+        }),
+        {
+          abortController,
+          timeoutMs: postProcessTimeoutMs,
+        },
+      );
+      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
+      const result = applySubtitleCorrection(baseTrack, correction, { durationMs });
+      const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
+      if (hasInvalidCorrection) {
+        setWarnings(result.warnings);
+        setStatus("ready");
+        return;
+      }
+      await store.saveWithChapters(result.track, result.chapters);
+      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
+      setTrack(result.track);
+      setChapters(result.chapters);
+      setWarnings(result.warnings);
+      setStatus("ready");
+    } catch (err) {
+      if (isPostProcessTimeoutError(err)) {
+        if (requestVersionRef.current !== requestVersion || generationAbortRef.current !== abortController) return;
+        setError(formatSubtitleError(err));
+        setStatus("error");
+        return;
+      }
+      if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
+      if (requestStaleTransformersImportRecovery(err)) return;
+      setError(formatSubtitleError(err));
+      setStatus("error");
+    }
+  };
+
   const generateSubtitles = async () => {
     if (!recordingId || !mediaBlob || !hasAudio) return;
     const requestVersion = requestVersionRef.current + 1;
@@ -240,6 +299,10 @@ export function SubtitlePanel({
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(nextTrack);
       setChapters([]);
+      if (postProcessor) {
+        await postProcessTrack(nextTrack, requestVersion, abortController);
+        return;
+      }
       setStatus("ready");
     } catch (err) {
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
@@ -261,51 +324,23 @@ export function SubtitlePanel({
     cancelPendingPostProcessorWarmUp(postProcessorWarmUpRef, postProcessor);
     const abortController = new AbortController();
     generationAbortRef.current = abortController;
-    setStatus("post-processing");
     setError(null);
     setWarnings([]);
     try {
-      const correction = await runWithPostProcessTimeout(
-        postProcessor.process({
-          track,
-          context: postProcessorContext,
-          signal: abortController.signal,
-        }),
-        {
-          abortController,
-          timeoutMs: postProcessTimeoutMs,
-        },
-      );
-      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
-      const result = applySubtitleCorrection(track, correction, { durationMs });
-      const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
-      if (hasInvalidCorrection) {
-        setWarnings(result.warnings);
-        setStatus("ready");
-        return;
-      }
-      await store.saveWithChapters(result.track, result.chapters);
-      if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
-      setTrack(result.track);
-      setChapters(result.chapters);
-      setWarnings(result.warnings);
-      setStatus("ready");
-    } catch (err) {
-      if (isPostProcessTimeoutError(err)) {
-        if (requestVersionRef.current !== requestVersion || generationAbortRef.current !== abortController) return;
-        setError(formatSubtitleError(err));
-        setStatus("error");
-        return;
-      }
-      if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
-      if (requestStaleTransformersImportRecovery(err)) return;
-      setError(formatSubtitleError(err));
-      setStatus("error");
+      await postProcessTrack(track, requestVersion, abortController);
     } finally {
       if (generationAbortRef.current === abortController) {
         generationAbortRef.current = null;
       }
     }
+  };
+
+  const runPrimarySubtitleAction = () => {
+    if (!shouldGenerateBeforePostProcess && track && postProcessor) {
+      void postProcessSubtitles();
+      return;
+    }
+    void generateSubtitles();
   };
 
   return (
@@ -322,35 +357,19 @@ export function SubtitlePanel({
           ) : null}
         </div>
         <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
-          {track && postProcessor ? (
-            <button
-              type="button"
-              aria-label="纠错并生成章节"
-              disabled={!canPostProcess}
-              onClick={postProcessSubtitles}
-              className={buttonClassName}
-            >
-              {status === "post-processing" ? (
-                <Loader2 aria-hidden size={14} className="animate-spin" />
-              ) : (
-                <WandSparkles aria-hidden size={14} />
-              )}
-              <span>纠错并生成章节</span>
-            </button>
-          ) : null}
           <button
             type="button"
-            aria-label="生成字幕"
-            disabled={!canGenerate}
-            onClick={generateSubtitles}
+            aria-label={primaryActionLabel}
+            disabled={!canRunPrimaryAction}
+            onClick={runPrimarySubtitleAction}
             className={buttonClassName}
           >
-            {status === "generating" ? (
+            {status === "generating" || status === "post-processing" ? (
               <Loader2 aria-hidden size={14} className="animate-spin" />
             ) : (
               <WandSparkles aria-hidden size={14} />
             )}
-            <span>生成字幕</span>
+            <span>{primaryActionLabel}</span>
           </button>
         </div>
       </div>

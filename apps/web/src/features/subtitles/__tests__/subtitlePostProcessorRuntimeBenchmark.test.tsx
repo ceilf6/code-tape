@@ -122,7 +122,7 @@ describe("subtitle postprocessor runtime benchmark", () => {
     render(
       <SubtitlePanel
         recordingId="recording-1"
-        mediaBlob={new Blob(["webm"], { type: "video/webm" })}
+        mediaBlob={null}
         hasAudio
         durationMs={3_000}
         currentTimeMs={500}
@@ -138,7 +138,7 @@ describe("subtitle postprocessor runtime benchmark", () => {
     await waitFor(() => expect(warmUpEndedAt).toBeGreaterThanOrEqual(warmUpStartedAt));
 
     clickStartedAt = performance.now();
-    fireEvent.click(screen.getByRole("button", { name: "纠错并生成章节" }));
+    fireEvent.click(screen.getByRole("button", { name: "优化字幕和章节" }));
     await waitFor(() => expect(postProcessor.process).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "render result" }));
