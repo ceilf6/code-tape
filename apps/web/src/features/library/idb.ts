@@ -28,6 +28,7 @@ export type OpenDatabaseOptions = {
 
 export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let rejectedAfterBlocked = false;
     const request = indexedDB.open(options.name, options.version);
     request.onupgradeneeded = (event) => {
       const target = event.target as IDBOpenDBRequest;
@@ -35,6 +36,10 @@ export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase>
     };
     request.onsuccess = () => {
       const db = request.result;
+      if (rejectedAfterBlocked) {
+        db.close();
+        return;
+      }
       db.onversionchange = () => {
         db.close();
         options.onVersionChange?.();
@@ -43,6 +48,7 @@ export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase>
     };
     request.onerror = () => reject(request.error);
     request.onblocked = () => {
+      rejectedAfterBlocked = true;
       reject(new Error("indexeddb open blocked by another open tab; close other Code Tape tabs and retry"));
     };
   });
