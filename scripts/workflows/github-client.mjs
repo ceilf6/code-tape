@@ -67,7 +67,7 @@ export class GitHubClient {
   async listCheckRunsForRef(ref) {
     const data = await this.request(
       'GET',
-      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(ref)}/check-runs?filter=latest&per_page=100`,
+      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(ref)}/check-runs?filter=all&per_page=100`,
     );
     return data.check_runs ?? [];
   }

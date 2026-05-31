@@ -18,6 +18,7 @@ import {
   pullNumberFromEvent,
   resolvePullNumberFromEvent,
 } from '../workflows/action-context.mjs';
+import { GitHubClient } from '../workflows/github-client.mjs';
 import {
   findMaintainerMergeConfirmation,
   shouldDeferAutoMergeForForkReview,
@@ -1183,6 +1184,24 @@ test('auto merge uses the newest required check run when duplicate names exist',
   );
 });
 
+test('GitHub check run listing requests all duplicate runs for required check de-duplication', async () => {
+  const client = new GitHubClient({ token: 'token', owner: 'ceilf6', repo: 'code-tape' });
+  const requests = [];
+  client.request = async (method, path) => {
+    requests.push({ method, path });
+    return { check_runs: [] };
+  };
+
+  await client.listCheckRunsForRef('head/sha');
+
+  assert.deepEqual(requests, [
+    {
+      method: 'GET',
+      path: '/repos/ceilf6/code-tape/commits/head%2Fsha/check-runs?filter=all&per_page=100',
+    },
+  ]);
+});
+
 test('auto merge orders duplicate required check runs by creation time before start time', () => {
   const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
 
@@ -1217,6 +1236,40 @@ test('auto merge orders duplicate required check runs by creation time before st
   assert.deepEqual(result.failed, []);
 });
 
+test('auto merge orders duplicate required check runs by id when creation time is unavailable', () => {
+  const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
+
+  const result = shouldWaitForRequiredChecks({
+    requiredChecks,
+    checkRuns: [
+      {
+        id: 11,
+        name: 'Workflow Tests / quality',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-05-31T16:09:25Z',
+      },
+      {
+        id: 20,
+        name: 'Contract Guard / gitnexus-contract',
+        status: 'completed',
+        conclusion: 'failure',
+        started_at: '2026-05-31T16:30:00Z',
+      },
+      {
+        id: 30,
+        name: 'Contract Guard / gitnexus-contract',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-05-31T16:21:00Z',
+      },
+    ],
+  });
+
+  assert.equal(result.wait, false);
+  assert.deepEqual(result.failed, []);
+});
+
 test('auto merge waits for a newer queued duplicate required check', () => {
   const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
 
@@ -1230,16 +1283,17 @@ test('auto merge waits for a newer queued duplicate required check', () => {
         started_at: '2026-05-31T16:09:25Z',
       },
       {
+        id: 10,
         name: 'Contract Guard / gitnexus-contract',
         status: 'completed',
         conclusion: 'success',
         started_at: '2026-05-31T16:10:10Z',
       },
       {
+        id: 20,
         name: 'Contract Guard / gitnexus-contract',
         status: 'queued',
         conclusion: null,
-        created_at: '2026-05-31T16:22:38Z',
       },
     ],
   });

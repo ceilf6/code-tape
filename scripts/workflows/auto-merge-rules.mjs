@@ -46,11 +46,35 @@ function checkRunTime(check) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function checkRunId(check) {
+  try {
+    const id = check?.id;
+    if (typeof id === 'number' && Number.isInteger(id) && id >= 0) {
+      return BigInt(id);
+    }
+    if (typeof id === 'string' && /^\d+$/.test(id)) {
+      return BigInt(id);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isNewerCheckRun(check, existing) {
+  const checkId = checkRunId(check);
+  const existingId = checkRunId(existing);
+  if (checkId !== null && existingId !== null) {
+    return checkId > existingId;
+  }
+  return checkRunTime(check) > checkRunTime(existing);
+}
+
 function latestCheckRunsByName(checkRuns) {
   const byName = new Map();
   for (const check of checkRuns ?? []) {
     const existing = byName.get(check.name);
-    if (!existing || checkRunTime(check) > checkRunTime(existing)) {
+    if (!existing || isNewerCheckRun(check, existing)) {
       byName.set(check.name, check);
     }
   }
