@@ -1,10 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T05:20:52Z",
+  "updatedAt": "2026-05-31T05:24:27Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
-        202
+        202,
+        221,
+        222
       ],
       "completedIssues": [
         11,
@@ -1141,6 +1143,34 @@
       "claimedAt": "2026-05-31T05:05:01Z",
       "closedAt": "2026-05-31T05:20:52Z",
       "mergedPr": 220
+    },
+    "221": {
+      "number": 221,
+      "title": "支持录制与回放工作区拖拽调整空间",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T05:22:51Z",
+      "closedAt": null,
+      "mergedPr": null
+    },
+    "222": {
+      "number": 222,
+      "title": "优化协作工作流等待时间",
+      "score": 2,
+      "stack": [
+        "typescript",
+        "github-actions"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T05:24:27Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
