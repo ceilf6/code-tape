@@ -43,6 +43,57 @@ describe("ResizableWorkspace", () => {
     expect(separator).toHaveAttribute("aria-valuenow", "76");
     expect(window.localStorage.getItem("code-tape:test-workspace:left-percent")).toBe("76");
   });
+
+  it("keeps the separator desktop-only while the base layout stays stacked", () => {
+    render(
+      <ResizableWorkspace
+        ariaLabel="窄屏测试工作区"
+        separatorLabel="调整窄屏测试工作区宽度"
+        storageKey="code-tape:narrow-workspace:left-percent"
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+
+    expect(screen.getByLabelText("窄屏测试工作区")).toHaveClass("flex-col", "md:flex-row");
+    expect(screen.getByRole("separator", { name: "调整窄屏测试工作区宽度" })).toHaveClass(
+      "hidden",
+      "md:flex",
+    );
+  });
+
+  it("falls back from invalid persisted values and clamps out-of-range values", () => {
+    window.localStorage.setItem("code-tape:invalid-workspace:left-percent", "not-a-number");
+    const { unmount } = render(
+      <ResizableWorkspace
+        ariaLabel="损坏偏好工作区"
+        separatorLabel="调整损坏偏好工作区宽度"
+        storageKey="code-tape:invalid-workspace:left-percent"
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+    expect(screen.getByRole("separator", { name: "调整损坏偏好工作区宽度" })).toHaveAttribute(
+      "aria-valuenow",
+      "68",
+    );
+    unmount();
+
+    window.localStorage.setItem("code-tape:clamped-workspace:left-percent", "99");
+    render(
+      <ResizableWorkspace
+        ariaLabel="越界偏好工作区"
+        separatorLabel="调整越界偏好工作区宽度"
+        storageKey="code-tape:clamped-workspace:left-percent"
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+    expect(screen.getByRole("separator", { name: "调整越界偏好工作区宽度" })).toHaveAttribute(
+      "aria-valuenow",
+      "78",
+    );
+  });
 });
 
 class TestPointerEvent extends MouseEvent {
