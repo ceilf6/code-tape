@@ -32,7 +32,6 @@ const MODELS = [
       "vocab.json",
       "merges.txt",
       "added_tokens.json",
-      "normalizer.json",
       "onnx/encoder_model_quantized.onnx",
       "onnx/decoder_model_merged_quantized.onnx",
     ],
