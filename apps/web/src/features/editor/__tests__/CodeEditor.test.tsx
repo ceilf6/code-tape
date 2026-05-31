@@ -73,6 +73,7 @@ const monacoMock = vi.hoisted(() => {
     setScrollTop = vi.fn();
     setScrollLeft = vi.fn();
     trigger = vi.fn();
+    getAction = vi.fn(() => null as { run(): Promise<void> | void } | null);
     pushUndoStop = vi.fn(() => true);
     executeEdits = vi.fn((_source: string, edits: Array<{ text: string }>) => {
       const [edit] = edits;
@@ -535,6 +536,33 @@ describe("CodeEditor", () => {
       "function demo(){\n\t\treturn 1;\n}",
       expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
     );
+  });
+
+  it("uses the formatter fallback when the Monaco format action rejects", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+    const actionError = new Error("format action failed");
+    editor.getAction.mockReturnValueOnce({
+      run: vi.fn(async () => {
+        throw actionError;
+      }),
+    });
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+
+    await waitFor(() => expect(editor.getValue()).toBe("function demo() {\n  return 1;\n}\n"));
+    expect(consoleWarn).toHaveBeenCalledWith("Monaco format action failed", actionError);
+    consoleWarn.mockRestore();
   });
 
   it("uses a TypeScript formatter fallback when Monaco format action leaves the document unchanged", async () => {

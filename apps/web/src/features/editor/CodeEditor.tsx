@@ -389,10 +389,14 @@ async function formatEditorDocument(
   const originalValue = editor.getValue();
   const action = typeof editor.getAction === "function" ? editor.getAction(FORMAT_ACTION_ID) : null;
 
-  if (action) {
-    await action.run();
-  } else {
-    editor.trigger("keyboard", FORMAT_ACTION_ID, null);
+  try {
+    if (action) {
+      await action.run();
+    } else {
+      editor.trigger("keyboard", FORMAT_ACTION_ID, null);
+    }
+  } catch (error) {
+    console.warn("Monaco format action failed", error);
   }
 
   if (isReadOnly() || editor.getValue() !== originalValue) return;
