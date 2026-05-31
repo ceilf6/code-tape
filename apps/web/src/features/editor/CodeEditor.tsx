@@ -42,9 +42,15 @@ type MonacoEnvironmentHost = typeof globalThis & {
 
 let workerPromise: Promise<WorkerConstructors> | null = null;
 let monacoPromise: Promise<MonacoModule> | null = null;
+let prettierFormatterPromise: Promise<PrettierFormatter> | null = null;
 let themesDefined = false;
 let workersConfigured = false;
 const COLLAPSED_SELECTION_PULSE_MS = 420;
+const FORMAT_ACTION_ID = "editor.action.formatDocument";
+
+type PrettierFormatter = {
+  format(source: string, language: RecordingLanguage): Promise<string | null>;
+};
 
 function monacoTheme(theme: CodeEditorProps["theme"]): MonacoTheme {
   return theme === "dark" ? "code-tape-dark" : "code-tape-light";
@@ -236,7 +242,12 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
         const contentChangeDisposable = editor.onDidChangeModelContent(() => {
           onChangeRef.current?.();
         });
-        registerEditorCommands(monaco, editor, (command) => onCommandRef.current?.(command));
+        registerEditorCommands(
+          monaco,
+          editor,
+          () => latestPropsRef.current.readOnly,
+          (command) => onCommandRef.current?.(command),
+        );
         applyControlledEditorState(editor, currentProps);
         pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
         onMountRef.current?.(editor);
@@ -328,6 +339,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
 function registerEditorCommands(
   _monaco: MonacoModule,
   editor: Monaco.editor.IStandaloneCodeEditor,
+  isReadOnly: () => boolean,
   onCommand: (command: CodeEditorCommand) => void,
 ) {
   editor.onKeyDown((event) => {
@@ -342,7 +354,8 @@ function registerEditorCommands(
 
     if (isFormatShortcut(event)) {
       consumeShortcut(event);
-      editor.trigger("keyboard", "editor.action.formatDocument", null);
+      if (isReadOnly()) return;
+      void formatEditorDocument(editor);
       onCommand("format");
       return;
     }
@@ -360,6 +373,64 @@ function registerEditorCommands(
       onCommand("go-to-line");
     }
   });
+}
+
+async function formatEditorDocument(editor: Monaco.editor.IStandaloneCodeEditor) {
+  const originalValue = editor.getValue();
+  const action = typeof editor.getAction === "function" ? editor.getAction(FORMAT_ACTION_ID) : null;
+
+  if (action) {
+    await action.run();
+  } else {
+    editor.trigger("keyboard", FORMAT_ACTION_ID, null);
+  }
+
+  if (editor.getValue() !== originalValue) return;
+
+  const language = editor.getModel()?.getLanguageId() as RecordingLanguage | undefined;
+  if (!language || !isPrettierSupportedLanguage(language)) return;
+
+  try {
+    const formatter = await loadPrettierFormatter();
+    const formatted = await formatter.format(originalValue, language);
+    if (formatted && formatted !== originalValue) {
+      editor.setValue(formatted);
+    }
+  } catch (error) {
+    console.warn("Failed to format editor document", error);
+  }
+}
+
+function isPrettierSupportedLanguage(language: RecordingLanguage): boolean {
+  return language === "javascript" || language === "typescript";
+}
+
+function loadPrettierFormatter(): Promise<PrettierFormatter> {
+  prettierFormatterPromise ??= (async () => {
+    const [prettier, babelPlugin, estreePlugin, typescriptPlugin] = await Promise.all([
+      import("prettier/standalone"),
+      import("prettier/plugins/babel"),
+      import("prettier/plugins/estree"),
+      import("prettier/plugins/typescript"),
+    ]);
+    return {
+      async format(source: string, language: RecordingLanguage) {
+        const parser = language === "typescript" ? "typescript" : "babel";
+        return prettier.format(source, {
+          parser,
+          plugins: [babelPlugin, estreePlugin, typescriptPlugin],
+          tabWidth: 2,
+          useTabs: false,
+          semi: true,
+          singleQuote: false,
+        });
+      },
+    };
+  })().catch((error: unknown) => {
+    prettierFormatterPromise = null;
+    throw error;
+  });
+  return prettierFormatterPromise;
 }
 
 function isPrimaryShortcut(event: Monaco.IKeyboardEvent, key: string): boolean {

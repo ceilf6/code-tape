@@ -30,6 +30,10 @@ const monacoMock = vi.hoisted(() => {
       return this.value;
     }
 
+    getLanguageId() {
+      return this.language;
+    }
+
     setValue(next: string) {
       this.value = next;
     }
@@ -86,6 +90,10 @@ const monacoMock = vi.hoisted(() => {
 
     getValue() {
       return this.options.model.getValue();
+    }
+
+    getModel() {
+      return this.options.model;
     }
 
     dispose() {
@@ -148,6 +156,15 @@ const monacoMock = vi.hoisted(() => {
   };
 });
 
+const prettierMock = vi.hoisted(() => ({
+  format: vi.fn(async (source: string, options: { parser?: string }) => {
+    if (source === "function demo(){\n\t\treturn 1;\n}" && options.parser === "babel") {
+      return "function demo() {\n  return 1;\n}\n";
+    }
+    return source;
+  }),
+}));
+
 vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
   editor: monacoMock.editor,
   KeyMod: monacoMock.KeyMod,
@@ -171,6 +188,12 @@ vi.mock("monaco-editor/esm/vs/editor/editor.worker?worker", () => ({
 vi.mock("monaco-editor/esm/vs/language/typescript/ts.worker?worker", () => ({
   default: monacoMock.MockTsWorker,
 }));
+vi.mock("prettier/standalone", () => ({
+  format: prettierMock.format,
+}));
+vi.mock("prettier/plugins/babel", () => ({}));
+vi.mock("prettier/plugins/estree", () => ({}));
+vi.mock("prettier/plugins/typescript", () => ({}));
 
 describe("CodeEditor", () => {
   beforeEach(() => {
@@ -184,6 +207,7 @@ describe("CodeEditor", () => {
     monacoMock.editor.defineTheme.mockClear();
     monacoMock.editor.setTheme.mockClear();
     monacoMock.editor.setModelLanguage.mockClear();
+    prettierMock.format.mockClear();
     delete (globalThis as { MonacoEnvironment?: unknown }).MonacoEnvironment;
   });
 
@@ -457,6 +481,49 @@ describe("CodeEditor", () => {
     });
 
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+  });
+
+  it("uses a JS formatter fallback when Monaco format action leaves the document unchanged", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+
+    await waitFor(() => expect(editor.getValue()).toBe("function demo() {\n  return 1;\n}\n"));
+    expect(prettierMock.format).toHaveBeenCalledWith(
+      "function demo(){\n\t\treturn 1;\n}",
+      expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
+    );
+  });
+
+  it("does not run formatter fallback for read-only replay editors", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+        readOnly
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(editor.getValue()).toBe("function demo(){\n\t\treturn 1;\n}");
+    expect(prettierMock.format).not.toHaveBeenCalled();
   });
 
   it("configures JS/TS workers and disposes editor resources on unmount", async () => {

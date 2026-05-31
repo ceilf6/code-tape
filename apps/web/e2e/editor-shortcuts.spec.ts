@@ -14,11 +14,12 @@ test("primary slash comments the current editor line", async ({ page }) => {
 test("shift alt f formats the current editor document", async ({ page }) => {
   await openRecorder(page);
 
-  await page.keyboard.type("function demo(){return 1;}");
+  await page.keyboard.type("function demo(){\n\t\treturn 1;");
   await page.keyboard.press("Shift+Alt+F");
 
   await expect(editorLines(page)).toContainText("function demo() {");
   await expect(editorLines(page)).toContainText("return 1;");
+  await expect(editorLines(page)).toContainText("}");
 });
 
 test("primary g opens Monaco go to line", async ({ page }) => {
