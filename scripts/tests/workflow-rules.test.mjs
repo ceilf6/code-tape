@@ -1183,6 +1183,38 @@ test('auto merge uses the newest required check run when duplicate names exist',
   );
 });
 
+test('auto merge waits for a newer queued duplicate required check', () => {
+  const requiredChecks = ['Workflow Tests / quality', 'Contract Guard / gitnexus-contract'];
+
+  const result = shouldWaitForRequiredChecks({
+    requiredChecks,
+    checkRuns: [
+      {
+        name: 'Workflow Tests / quality',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-05-31T16:09:25Z',
+      },
+      {
+        name: 'Contract Guard / gitnexus-contract',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-05-31T16:10:10Z',
+      },
+      {
+        name: 'Contract Guard / gitnexus-contract',
+        status: 'queued',
+        conclusion: null,
+        created_at: '2026-05-31T16:22:38Z',
+      },
+    ],
+  });
+
+  assert.equal(result.wait, true);
+  assert.deepEqual(result.pending, ['Contract Guard / gitnexus-contract']);
+  assert.deepEqual(result.failed, []);
+});
+
 test('auto merge requires maintainer confirmation after the latest commit', () => {
   const latestCommitAt = '2026-05-22T10:00:00.000Z';
   const comments = [

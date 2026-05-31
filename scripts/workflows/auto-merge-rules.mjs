@@ -35,7 +35,13 @@ export function findMaintainerMergeConfirmation({ comments = [], maintainerLogin
 }
 
 function checkRunTime(check) {
-  const rawTime = check?.started_at ?? check?.startedAt ?? check?.completed_at ?? check?.completedAt;
+  const rawTime =
+    check?.started_at ??
+    check?.startedAt ??
+    check?.created_at ??
+    check?.createdAt ??
+    check?.completed_at ??
+    check?.completedAt;
   const time = Date.parse(rawTime ?? '');
   return Number.isFinite(time) ? time : 0;
 }
