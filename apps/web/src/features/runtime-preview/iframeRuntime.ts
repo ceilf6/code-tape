@@ -37,17 +37,33 @@ export type RuntimePreviewTheme = "light" | "dark";
  * user's own background/color rules still win. Tagged with id="ct-theme" so
  * the runtime boot script can swap it in-place on theme change without losing
  * run state.
+ *
+ * Split: `color-scheme` lives on `html`, `background`/`color` on `body` only.
+ * Per CSS canvas-painting rules, when only `body` has a background, that
+ * background propagates to the canvas — so a user `body { background: ... }`
+ * fully replaces the iframe canvas paint. If we put a default on `html` too,
+ * propagation is suppressed and the user's body bg only paints the body box.
  */
-const THEME_DEFAULT_STYLE: Record<RuntimePreviewTheme, string> = {
-  light: "color-scheme:light;background:#f5f5f4;color:#24272d;",
-  dark: "color-scheme:dark;background:#1c1f26;color:#e7e9ee;",
+const THEME_HTML_STYLE: Record<RuntimePreviewTheme, string> = {
+  light: "color-scheme:light;",
+  dark: "color-scheme:dark;",
+};
+
+const THEME_BODY_STYLE: Record<RuntimePreviewTheme, string> = {
+  light: "background:#f5f5f4;color:#24272d;",
+  dark: "background:#1c1f26;color:#e7e9ee;",
 };
 
 function themeStyleTag(theme: RuntimePreviewTheme): string {
   // `:where()` gives the default rule zero specificity, so any user
   // background/color rule wins regardless of source order — keeps the issue
   // non-goal "不强制覆盖用户 HTML/CSS 自定义样式" inviolable.
-  return `<style id="ct-theme">:where(html,body){${THEME_DEFAULT_STYLE[theme]}}</style>`;
+  return (
+    `<style id="ct-theme">` +
+    `:where(html){${THEME_HTML_STYLE[theme]}}` +
+    `:where(body){${THEME_BODY_STYLE[theme]}}` +
+    `</style>`
+  );
 }
 
 type SanitizedPreviewHtml = {

@@ -285,10 +285,27 @@ describe("IframeRuntime sandbox lifecycle", () => {
 
     await runtime.mount(host);
     const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
-    // Default selector must have zero specificity (`:where()` per CSS spec) so
-    // any user `body { ... }` rule wins regardless of source order.
-    expect(srcdoc).toContain(":where(html,body)");
-    expect(srcdoc).not.toMatch(/<style[^>]*>html,body\{/);
+    // Default selectors must have zero specificity (`:where()` per CSS spec)
+    // so any user `body { ... }` rule wins regardless of source order.
+    expect(srcdoc).toContain(":where(html)");
+    expect(srcdoc).toContain(":where(body)");
+    expect(srcdoc).not.toMatch(/<style[^>]*>html\{|<style[^>]*>body\{/);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("scopes background/color to body so user body bg propagates to the canvas", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // CSS canvas painting only propagates body bg when html has no bg of its own.
+    // Theme defaults: color-scheme on html; background/color only on body.
+    expect(srcdoc).toMatch(/:where\(html\)\{color-scheme:(light|dark);\}/);
+    expect(srcdoc).not.toMatch(/:where\(html\)\{[^}]*background/);
+    expect(srcdoc).toMatch(/:where\(body\)\{background:[^;]+;color:[^;]+;\}/);
     runtime.destroy();
     host.remove();
   });
