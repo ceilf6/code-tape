@@ -34,8 +34,25 @@ export function findMaintainerMergeConfirmation({ comments = [], maintainerLogin
   return commentLogin(confirmation) ?? null;
 }
 
+function checkRunTime(check) {
+  const rawTime = check?.started_at ?? check?.startedAt ?? check?.completed_at ?? check?.completedAt;
+  const time = Date.parse(rawTime ?? '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+function latestCheckRunsByName(checkRuns) {
+  const byName = new Map();
+  for (const check of checkRuns ?? []) {
+    const existing = byName.get(check.name);
+    if (!existing || checkRunTime(check) > checkRunTime(existing)) {
+      byName.set(check.name, check);
+    }
+  }
+  return byName;
+}
+
 export function shouldWaitForRequiredChecks({ requiredChecks, checkRuns }) {
-  const byName = new Map((checkRuns ?? []).map((check) => [check.name, check]));
+  const byName = latestCheckRunsByName(checkRuns);
   const missing = [];
   const pending = [];
   const failed = [];
