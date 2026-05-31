@@ -700,6 +700,10 @@ describe("ReplayPage", () => {
     expect(cameraToggle).toHaveAttribute("aria-pressed", "true");
     expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
     expect(subtitleToggle).toHaveAttribute("aria-pressed", "true");
+    for (const toggle of [pointerToggle, shortcutToggle, cameraToggle, runtimeToggle, subtitleToggle]) {
+      expect(toggle.querySelector("[data-display-toggle-state='visible']")).toBeInTheDocument();
+      expect(toggle.querySelector("[data-display-toggle-state='hidden']")).not.toBeInTheDocument();
+    }
 
     act(() => {
       replayPageMock.onTick?.(
@@ -755,6 +759,7 @@ describe("ReplayPage", () => {
 
     fireEvent.click(pointerToggle);
     fireEvent.click(shortcutToggle);
+    fireEvent.click(cameraToggle);
     fireEvent.click(runtimeToggle);
     fireEvent.click(subtitleToggle);
 
@@ -764,8 +769,14 @@ describe("ReplayPage", () => {
     expect(screen.queryByLabelText("Mock subtitle panel")).not.toBeInTheDocument();
     expect(pointerToggle).toHaveAttribute("aria-pressed", "false");
     expect(shortcutToggle).toHaveAttribute("aria-pressed", "false");
+    expect(cameraToggle).toHaveAttribute("aria-pressed", "false");
     expect(runtimeToggle).toHaveAttribute("aria-pressed", "false");
     expect(subtitleToggle).toHaveAttribute("aria-pressed", "false");
+    for (const toggle of [pointerToggle, shortcutToggle, cameraToggle, runtimeToggle, subtitleToggle]) {
+      expect(toggle.querySelector("[data-display-toggle-state='hidden']")).toBeInTheDocument();
+      expect(toggle.querySelector("[data-display-toggle-off-slash]")).toBeInTheDocument();
+      expect(toggle.querySelector("[data-display-toggle-state='visible']")).not.toBeInTheDocument();
+    }
   });
 
   it("renders recorded camera media when the package has a camera track", async () => {

@@ -6,6 +6,7 @@ import {
   useState,
   type Dispatch,
   type MutableRefObject,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -591,31 +592,31 @@ function ReplayDisplayToolbar({
 }) {
   return (
     <div className="flex min-h-11 flex-wrap items-center gap-1 border-b border-border bg-background px-3 py-2">
-      <Toggle
+      <ReplayDisplayToggle
         pressed={options.pointer}
         onPressedChange={(pressed) => onChange("pointer", pressed)}
         label="显示鼠标轨迹"
         icon={<MousePointer2 size={17} />}
       />
-      <Toggle
+      <ReplayDisplayToggle
         pressed={options.shortcuts}
         onPressedChange={(pressed) => onChange("shortcuts", pressed)}
         label="显示快捷键"
         icon={<Keyboard size={17} />}
       />
-      <Toggle
+      <ReplayDisplayToggle
         pressed={options.camera}
         onPressedChange={(pressed) => onChange("camera", pressed)}
         label="显示摄像头"
         icon={<Camera size={17} />}
       />
-      <Toggle
+      <ReplayDisplayToggle
         pressed={options.runtime}
         onPressedChange={(pressed) => onChange("runtime", pressed)}
         label="显示运行面板"
         icon={<TerminalSquare size={17} />}
       />
-      <Toggle
+      <ReplayDisplayToggle
         pressed={options.subtitles}
         onPressedChange={(pressed) => onChange("subtitles", pressed)}
         label="显示字幕"
@@ -634,6 +635,46 @@ function ReplayDisplayToolbar({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function ReplayDisplayToggle({
+  pressed,
+  onPressedChange,
+  label,
+  icon,
+}: {
+  pressed: boolean;
+  onPressedChange(pressed: boolean): void;
+  label: string;
+  icon: ReactNode;
+}) {
+  return (
+    <Toggle
+      pressed={pressed}
+      onPressedChange={onPressedChange}
+      label={label}
+      icon={<ReplayDisplayToggleIcon visible={false}>{icon}</ReplayDisplayToggleIcon>}
+      iconPressed={<ReplayDisplayToggleIcon visible>{icon}</ReplayDisplayToggleIcon>}
+    />
+  );
+}
+
+function ReplayDisplayToggleIcon({ visible, children }: { visible: boolean; children: ReactNode }) {
+  return (
+    <span
+      aria-hidden
+      className="relative inline-flex h-[17px] w-[17px] items-center justify-center"
+      data-display-toggle-state={visible ? "visible" : "hidden"}
+    >
+      {children}
+      {visible ? null : (
+        <span
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[2px] w-[23px] -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded-full bg-current"
+          data-display-toggle-off-slash="true"
+        />
+      )}
+    </span>
   );
 }
 
