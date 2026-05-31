@@ -60,7 +60,7 @@ test("records, saves, replays, seeks, and keeps content-change events debounced"
   await page.waitForTimeout(250);
 
   await page.getByRole("button", { name: "停止录制" }).click();
-  await page.waitForURL(/\/replay\/[^/]+$/);
+  await expect(page).toHaveURL(/\/replay\/[^/]+$/);
   await expect(page.getByRole("button", { name: "播放" })).toBeEnabled();
 
   const recordingId = recordingIdFromUrl(page.url());
