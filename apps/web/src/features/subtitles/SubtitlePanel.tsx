@@ -79,8 +79,10 @@ export function SubtitlePanel({
       if (!isExternalLlmConfigured(externalConfig)) return localProcessor;
       const externalProcessor = createExternalLlmSubtitlePostProcessor({ config: externalConfig });
       return createFallbackSubtitlePostProcessor(externalProcessor, localProcessor, {
-        onFallback: (error) =>
-          console.warn("[code-tape] external subtitle LLM failed, falling back to local model", error),
+        // Log only a sanitized category — never the raw error/response, which
+        // could echo the API key or subtitle/code context from a misconfigured endpoint.
+        onFallback: () =>
+          console.warn("[code-tape] external subtitle LLM failed; falling back to local model"),
       });
     },
     // llmConfigVersion bumps when the user saves/clears the external LLM config,

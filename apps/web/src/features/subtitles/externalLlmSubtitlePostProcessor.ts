@@ -142,8 +142,10 @@ async function requestCompletion(
     signal?.removeEventListener("abort", onCallerAbort);
   }
   if (!response.ok) {
-    const detail = await safeReadText(response);
-    throw new Error(`外部 LLM 返回 HTTP ${response.status}${detail ? `：${detail}` : ""}`);
+    // Deliberately omit the response body: a misconfigured proxy/endpoint could
+    // echo request headers (the API key) or subtitle/code context, and this
+    // error is surfaced to logs on fallback. Status + statusText is enough to act on.
+    throw new Error(`外部 LLM 返回 HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
   }
   const payload: unknown = await response.json().catch(() => {
     throw new Error("外部 LLM 响应不是合法 JSON");
@@ -188,6 +190,9 @@ function buildAnthropicRequest(messages: SubtitlePostProcessorMessage[], config:
         "content-type": "application/json",
         "x-api-key": config.apiKey,
         "anthropic-version": ANTHROPIC_VERSION,
+        // Required opt-in for calling the Anthropic API directly from a browser
+        // (CORS). Without it official endpoints reject the preflight.
+        "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
         model: config.model,
@@ -222,14 +227,6 @@ function readAnthropicText(payload: unknown): string | null {
 
 function joinUrl(baseURL: string, path: string): string {
   return `${baseURL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-}
-
-async function safeReadText(response: Response): Promise<string> {
-  try {
-    return (await response.text()).slice(0, 300);
-  } catch {
-    return "";
-  }
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

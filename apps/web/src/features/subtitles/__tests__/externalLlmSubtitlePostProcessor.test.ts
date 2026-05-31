@@ -83,11 +83,30 @@ describe("createExternalLlmSubtitlePostProcessor", () => {
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers["x-api-key"]).toBe("ak-test");
     expect(headers["anthropic-version"]).toBe("2023-06-01");
+    // Required CORS opt-in for browser direct access to the Anthropic API.
+    expect(headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(typeof body.system).toBe("string");
     expect(body.system.length).toBeGreaterThan(0);
     expect(body.messages.every((m: { role: string }) => m.role !== "system")).toBe(true);
     expect(result.segments).toEqual([{ id: "subtitle-1", text: "这里用 useState 维护 count" }]);
+  });
+
+  it("does not leak the response body into the HTTP error", async () => {
+    const fetchImpl = vi.fn<FetchMock>(
+      async () =>
+        new Response('{"error":"invalid x-api-key: sk-leaked-secret"}', {
+          status: 401,
+          statusText: "Unauthorized",
+        }),
+    );
+    const processor = createExternalLlmSubtitlePostProcessor({ config: openAiConfig, fetchImpl });
+    await expect(processor.process({ track })).rejects.toThrow(/HTTP 401/);
+    await processor.process({ track }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain("sk-leaked-secret");
+      expect(message).not.toContain("invalid x-api-key");
+    });
   });
 
   it("throws on a non-2xx response", async () => {
