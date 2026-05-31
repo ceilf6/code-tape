@@ -314,6 +314,67 @@ describe("createReplayScheduler", () => {
     expect(seen).toContain("ended");
   });
 
+  it("restarts from the beginning when play is pressed after reaching the end", async () => {
+    let wall = 0;
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const pkg = makePkg([content(1, 100, "first"), content(2, 900, "last")], [], 1000);
+    const scheduler = createReplayScheduler({
+      clock,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(pkg);
+
+    scheduler.play();
+    wall = 1200;
+    scheduler.tick();
+    expect(latest().status).toBe("ended");
+    expect(latest().timelineTimeMs).toBe(1000);
+    expect(scheduler.getStableState().editor.code).toBe("last");
+
+    scheduler.play();
+    expect(latest().status).toBe("playing");
+    expect(latest().timelineTimeMs).toBe(0);
+    expect(latest().lastAppliedSeq).toBe(0);
+    expect(scheduler.getStableState().editor.code).toBe("");
+
+    wall += 150;
+    scheduler.tick();
+    expect(latest().timelineTimeMs).toBe(150);
+    expect(scheduler.getStableState().editor.code).toBe("first");
+  });
+
+  it("seeks media back to the beginning when replaying from ended state", async () => {
+    let wall = 0;
+    let mediaCurrentTimeSec = 0;
+    const seek = vi.fn(async (targetTimeMs: number) => {
+      mediaCurrentTimeSec = targetTimeMs / 1000;
+    });
+    const clock = createTimelineClock({ nowProvider: () => wall });
+    const scheduler = createReplayScheduler({
+      clock,
+      mediaAdapter: testMediaAdapter({
+        currentTimeSec: () => mediaCurrentTimeSec,
+        seek,
+      }) as never,
+      tickStrategy: { start: () => {}, stop: () => {} },
+    });
+    const latest = watchState(scheduler);
+    await scheduler.load(makePkg([content(1, 100, "media")], [], 1000, true));
+
+    scheduler.play();
+    wall = 1200;
+    mediaCurrentTimeSec = 1.2;
+    scheduler.tick();
+    expect(latest().status).toBe("ended");
+
+    scheduler.play();
+
+    expect(latest().status).toBe("playing");
+    expect(latest().timelineTimeMs).toBe(0);
+    expect(seek).toHaveBeenCalledWith(0);
+  });
+
   it("does not rescan already-applied events on later playback ticks", async () => {
     const counter = { reads: 0 };
     const events = Array.from({ length: 1_000 }, (_, index) =>

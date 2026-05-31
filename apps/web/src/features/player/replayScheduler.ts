@@ -414,6 +414,22 @@ export function createReplayScheduler(options: ReplaySchedulerOptions = {}): Rep
     },
     play() {
       if (!pkg) return;
+      if (schedulerState.status === "ended") {
+        const { state, lastSeq } = recomputeFromTime(0);
+        stableState = state;
+        nextEventIndex = findFirstEventIndexAfterSeq(lastSeq);
+        clock.setBase(0);
+        const replayMediaAdapter = mediaAdapter;
+        if (replayMediaAdapter) runMediaOperation(() => replayMediaAdapter.seek(0));
+        updateState({
+          status: "playing",
+          timelineTimeMs: 0,
+          lastAppliedSeq: lastSeq,
+          mediaStatus: currentMediaStatus(),
+          driftMs: 0,
+        });
+        options.onTick?.(stableState, transientEventsForSeek(0), 0);
+      }
       clock.play();
       updateState({ status: "playing" });
       ensureDriving();
