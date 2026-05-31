@@ -411,15 +411,21 @@ async function formatEditorDocument(
     const formatted = await formatter.format(originalValue, language);
     if (!formatted || formatted === originalValue || isReadOnly() || editor.getValue() !== originalValue) return;
     const cancelFormatSignal = onBeforeFormatApply();
+    const currentSelection = editor.getSelection();
+    const endCursorState = currentSelection ? [currentSelection] : undefined;
     try {
       editor.pushUndoStop();
-      const applied = editor.executeEdits("code-tape-format", [
-        {
-          range: model.getFullModelRange(),
-          text: formatted,
-          forceMoveMarkers: true,
-        },
-      ]);
+      const applied = editor.executeEdits(
+        "code-tape-format",
+        [
+          {
+            range: model.getFullModelRange(),
+            text: formatted,
+            forceMoveMarkers: true,
+          },
+        ],
+        endCursorState,
+      );
       if (!applied) {
         cancelFormatSignal?.();
         return;

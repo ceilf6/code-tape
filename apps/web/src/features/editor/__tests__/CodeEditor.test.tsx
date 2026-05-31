@@ -66,7 +66,15 @@ const monacoMock = vi.hoisted(() => {
       this.options.model.setValue(next);
     });
     setPosition = vi.fn();
-    setSelection = vi.fn();
+    selection = {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    };
+    setSelection = vi.fn((next: typeof this.selection) => {
+      this.selection = next;
+    });
     deltaDecorations = vi.fn((_oldDecorations: string[], newDecorations: unknown[]) =>
       newDecorations.map((_decoration, index) => `decoration-${index + 1}`),
     );
@@ -112,6 +120,10 @@ const monacoMock = vi.hoisted(() => {
 
     getModel() {
       return this.options.model;
+    }
+
+    getSelection() {
+      return this.selection;
     }
 
     dispose() {
@@ -517,6 +529,13 @@ describe("CodeEditor", () => {
     await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
     const editor = monacoMock.editors[0];
     const originalRange = monacoMock.models[0].getFullModelRange();
+    const originalSelection = {
+      startLineNumber: 2,
+      startColumn: 3,
+      endLineNumber: 2,
+      endColumn: 9,
+    };
+    editor.selection = originalSelection;
 
     pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
 
@@ -530,6 +549,7 @@ describe("CodeEditor", () => {
           text: "function demo() {\n  return 1;\n}\n",
         }),
       ],
+      [originalSelection],
     );
     expect(editor.pushUndoStop).toHaveBeenCalledTimes(2);
     expect(prettierMock.format).toHaveBeenCalledWith(
