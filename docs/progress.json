@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T18:49:06Z",
+  "updatedAt": "2026-05-31T18:52:28Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
-        247
+        247,
+        250
       ],
       "completedIssues": [
         11,
@@ -1360,6 +1361,20 @@
       "claimedAt": "2026-05-31T18:25:58Z",
       "closedAt": "2026-05-31T18:49:06Z",
       "mergedPr": 249
+    },
+    "250": {
+      "number": 250,
+      "title": "[前端] 库页展示视频最后帧封面",
+      "score": 3,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T18:52:28Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
