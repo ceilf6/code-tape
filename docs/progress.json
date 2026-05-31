@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-31T09:21:37Z",
+  "updatedAt": "2026-05-31T10:35:41Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
-        227
+        229
       ],
       "completedIssues": [
         11,
@@ -60,7 +60,8 @@
         219,
         222,
         221,
-        226
+        226,
+        227
       ],
       "reviewedIssues": [
         4,
@@ -81,10 +82,10 @@
           "delta": -1.5
         }
       ],
-      "developmentScore": 95.25,
+      "developmentScore": 99,
       "reviewScore": 5.75,
       "penaltyScore": -1.5,
-      "totalScore": 99.5
+      "totalScore": 103.25
     },
     "MINTPIPERAS": {
       "activeIssue": [],
@@ -1196,9 +1197,22 @@
         "react",
         "typescript"
       ],
-      "status": "claimed",
+      "status": "closed",
       "assignee": "ceilf6",
       "claimedAt": "2026-05-31T09:21:37Z",
+      "closedAt": "2026-05-31T10:23:34Z",
+      "mergedPr": 228
+    },
+    "229": {
+      "number": 229,
+      "title": "[安全] 运行沙箱 DoS 加固：超时必须销毁 iframe + 限制运行输出累积",
+      "score": 3,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-05-31T10:35:41Z",
       "closedAt": null,
       "mergedPr": null
     }
@@ -2127,6 +2141,18 @@
       "developerDelta": 2.25,
       "reviewerDelta": 0,
       "createdAt": "2026-05-31T07:53:16Z"
+    },
+    {
+      "id": "pr-228-merge",
+      "type": "feature_merge",
+      "issue": 227,
+      "pr": 228,
+      "score": 5,
+      "developer": "ceilf6",
+      "reviewer": null,
+      "developerDelta": 3.75,
+      "reviewerDelta": 0,
+      "createdAt": "2026-05-31T10:23:34Z"
     }
   ]
 }
