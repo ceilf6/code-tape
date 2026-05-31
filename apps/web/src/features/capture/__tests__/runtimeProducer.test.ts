@@ -14,6 +14,7 @@ import { createRuntimeProducer } from "../runtimeProducer";
 function setup(overrides: {
   compile?: PreviewCompiler["compile"];
   run?: IframeRuntime["run"];
+  renderDocument?: IframeRuntime["renderDocument"];
 } = {}) {
   const clock = createRecordingClock({ nowProvider: () => 1000 });
   const bus = createEventBus({ clock, wallTimeProvider: () => "T" });
@@ -35,18 +36,22 @@ function setup(overrides: {
         stderr: [],
       })),
   );
+  const renderDocument = vi.fn(
+    overrides.renderDocument ?? (async (html: string): Promise<string> => html),
+  );
   const compiler: PreviewCompiler = { compile };
   const runtime: IframeRuntime = {
     mount: vi.fn(),
     run,
     renderPreview: vi.fn(),
+    renderDocument,
     reset: vi.fn(),
     destroy: vi.fn(),
   };
   const producer = createRuntimeProducer({ bus, clock, compiler, runtime });
   clock.start();
   producer.start();
-  return { bus, compile, producer, run, runtime };
+  return { bus, compile, producer, run, renderDocument, runtime };
 }
 
 describe("createRuntimeProducer", () => {
@@ -86,6 +91,59 @@ describe("createRuntimeProducer", () => {
         },
       },
     ]);
+  });
+
+  it("emits run-start then run-output for an HTML render (no JS compile/exec)", async () => {
+    const { bus, compile, producer, run, renderDocument } = setup();
+
+    const result = await producer.trigger({
+      language: "html",
+      source: "<h1>hi</h1>",
+    });
+
+    expect(compile).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(renderDocument).toHaveBeenCalledWith("<h1>hi</h1>");
+    expect(result.status).toBe("complete");
+    if (result.status === "complete") {
+      expect(result.previewHtml).toBe("<h1>hi</h1>");
+      expect(result.stdout).toEqual([]);
+    }
+    const events = bus.drain().map((event) => ({ type: event.type, payload: event.payload }));
+    expect(events[0]).toEqual({
+      type: "run-start",
+      payload: { language: "html", runtime: "iframe", runId: result.runId },
+    });
+    expect(events[1]?.type).toBe("run-output");
+  });
+
+  it("wraps CSS in an HTML scaffold and renders it (no JS compile/exec)", async () => {
+    const { compile, producer, run, renderDocument } = setup();
+
+    const result = await producer.trigger({
+      language: "css",
+      source: "h1 { color: red; }",
+    });
+
+    expect(compile).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    const renderedHtml = renderDocument.mock.calls[0]?.[0] as string;
+    expect(renderedHtml).toContain("<style>h1 { color: red; }</style>");
+    expect(result.status).toBe("complete");
+  });
+
+  it("emits run-error if HTML render throws", async () => {
+    const { bus, producer } = setup({
+      renderDocument: async () => {
+        throw new Error("render boom");
+      },
+    });
+
+    const result = await producer.trigger({ language: "html", source: "<h1>x</h1>" });
+
+    expect(result.status).toBe("error");
+    const types = bus.drain().map((event) => event.type);
+    expect(types).toEqual(["run-start", "run-error"]);
   });
 
   it("emits run-error with transpile phase when compilation fails", async () => {

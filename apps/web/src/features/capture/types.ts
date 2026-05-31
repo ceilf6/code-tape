@@ -135,7 +135,7 @@ export type RuntimeProducerHandle = EventProducer & {
    * result so the page UI can render console output during the run.
    */
   trigger(input: {
-    language: "javascript" | "typescript";
+    language: "javascript" | "typescript" | "html" | "css";
     source: string;
   }): Promise<RuntimeProducerRunResult>;
 };

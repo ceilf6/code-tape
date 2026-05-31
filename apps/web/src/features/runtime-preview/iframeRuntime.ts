@@ -274,6 +274,13 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
     async renderPreview(previewHtml: string): Promise<void> {
       await createIframe("", buildPreviewSrcDoc(previewHtml));
     },
+    async renderDocument(html: string): Promise<string> {
+      const srcdoc = buildPreviewSrcDoc(html);
+      await createIframe("", srcdoc);
+      // Persist exactly what was written (post-sanitize) so replay restores the
+      // same no-script document; cap to the preview budget for recording size.
+      return limitString(html, RUNTIME_PREVIEW_HTML_MAX_CHARS);
+    },
     reset() {
       teardown();
     },

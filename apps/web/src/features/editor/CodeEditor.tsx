@@ -131,6 +131,9 @@ async function loadMonaco() {
     await Promise.all([
       import("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution"),
       import("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution"),
+      import("monaco-editor/esm/vs/basic-languages/python/python.contribution"),
+      import("monaco-editor/esm/vs/basic-languages/html/html.contribution"),
+      import("monaco-editor/esm/vs/basic-languages/css/css.contribution"),
       import("monaco-editor/esm/vs/editor/contrib/comment/browser/comment"),
       import("monaco-editor/esm/vs/editor/contrib/format/browser/formatActions"),
       import("monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess"),

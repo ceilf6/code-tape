@@ -16,6 +16,25 @@ function errorInfo(err: unknown): { message: string; stack?: string } {
   return { message: String(err) };
 }
 
+/**
+ * 为 HTML/CSS「运行」构造注入 no-script sandbox 的静态文档。
+ * - HTML：源码本身即文档（renderDocument 内部会剥离 <script> 并套 CSP）。
+ * - CSS：包进最小 HTML 脚手架的 <style>，让用户看到样式作用在示例结构上。
+ */
+function buildRenderDocument(language: "html" | "css", source: string): string {
+  if (language === "html") return source;
+  return [
+    "<body>",
+    `<style>${source}</style>`,
+    '<main class="code-tape-css-preview">',
+    "<h1>CSS Preview</h1>",
+    "<p>这是用于预览样式效果的示例文本。This is sample text for previewing your styles.</p>",
+    '<button type="button">Button</button>',
+    "</main>",
+    "</body>",
+  ].join("");
+}
+
 export const createRuntimeProducer: CreateRuntimeProducer = (deps): RuntimeProducerHandle => {
   const { bus, compiler, runtime } = deps;
   let paused = false;
@@ -115,6 +134,29 @@ export const createRuntimeProducer: CreateRuntimeProducer = (deps): RuntimeProdu
             runId,
           },
         });
+
+        // HTML/CSS：渲染到只读（no-script）sandbox，不走 JS 编译/执行链路。
+        if (input.language === "html" || input.language === "css") {
+          let previewHtml: string;
+          try {
+            previewHtml = await runtime.renderDocument(buildRenderDocument(input.language, input.source));
+          } catch (err) {
+            return emitRuntimeThrownError(runId, err);
+          }
+          bus.emit({
+            type: "run-output",
+            source: "runtime",
+            track: "runtime",
+            payload: { runId, stdout: [], stderr: [], previewHtml, status: "success" },
+          });
+          return {
+            runId,
+            status: "complete",
+            previewHtml,
+            stdout: [],
+            stderr: [],
+          };
+        }
 
         let compiled: CompileResult;
         try {

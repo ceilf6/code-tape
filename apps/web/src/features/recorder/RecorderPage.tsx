@@ -113,8 +113,21 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     const devices = createMediaDevicesController();
     let currentEditorLanguage: RecordingLanguage = "javascript";
     let currentMediaCapability: MediaCapability = INITIAL_CONTROLLER_STATE.mediaCapability;
-    const getCurrentRuntimeLanguage = (): RunStartPayload["language"] =>
-      currentEditorLanguage === "typescript" ? "typescript" : "javascript";
+    const getCurrentRuntimeLanguage = (): RunStartPayload["language"] | null => {
+      switch (currentEditorLanguage) {
+        case "typescript":
+          return "typescript";
+        case "html":
+          return "html";
+        case "css":
+          return "css";
+        case "javascript":
+          return "javascript";
+        case "python":
+          // Python：只高亮 / 录制 / 回放，不执行（见 docs/技术方案.md 第六章）。
+          return null;
+      }
+    };
     const editorProducer = createEditorProducer({
       bus,
       clock,
@@ -557,13 +570,16 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   const handleRun = async (options: { clearPendingAutoRun?: boolean } = {}) => {
     if (options.clearPendingAutoRun ?? true) clearAutoRunTimer();
     if (isRuntimeRunLocked()) return;
+    const runtimeLanguage = stack.getCurrentRuntimeLanguage();
+    // Python 不执行：跳过运行，保持高亮/录制/回放。
+    if (runtimeLanguage === null) return;
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
     stack.editorProducer.flushPending();
     setRuntimeState({ status: "running", stdout: [], stderr: [], errorMessage: null });
     try {
       const result = await stack.runtimeProducer.trigger({
-        language: stack.getCurrentRuntimeLanguage(),
+        language: runtimeLanguage,
         source: editor.getValue(),
       });
       if (result.status === "complete") {
@@ -788,6 +804,9 @@ function RecorderSetupToolbar({
         options={[
           { value: "javascript", label: "JavaScript" },
           { value: "typescript", label: "TypeScript" },
+          { value: "html", label: "HTML" },
+          { value: "css", label: "CSS" },
+          { value: "python", label: "Python" },
         ]}
       />
       <LabeledSelect

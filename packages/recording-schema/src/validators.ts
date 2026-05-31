@@ -38,7 +38,7 @@ const EVENT_SOURCES = new Set([
   "annotation",
 ]);
 const EVENT_TRACKS = new Set(["main", "media", "runtime", "ui"]);
-const LANGUAGES = new Set(["javascript", "typescript", "python"]);
+const LANGUAGES = new Set(["javascript", "typescript", "python", "html", "css"]);
 
 export function isKnownRecordingEventType(type: unknown): type is RecordingEventType {
   return typeof type === "string" && EVENT_TYPES.has(type as RecordingEventType);
@@ -114,8 +114,12 @@ function validateMeta(value: unknown, errors: SchemaValidationIssue[]): void {
   if (value.ownerId !== null && typeof value.ownerId !== "string") {
     pushIssue(errors, "meta.ownerId", "ownerId must be string or null");
   }
-  if (value.initialLanguage !== "javascript" && value.initialLanguage !== "typescript" && value.initialLanguage !== "python") {
-    pushIssue(errors, "meta.initialLanguage", "initialLanguage must be one of javascript|typescript|python");
+  if (typeof value.initialLanguage !== "string" || !LANGUAGES.has(value.initialLanguage)) {
+    pushIssue(
+      errors,
+      "meta.initialLanguage",
+      "initialLanguage must be one of javascript|typescript|python|html|css",
+    );
   }
   expectNumber(value.initialFontSize, "meta.initialFontSize", errors);
   if (value.initialTheme !== "light" && value.initialTheme !== "dark") {
@@ -233,7 +237,7 @@ function validateEventPayload(
       expectNumber(payload.y, `${path}.y`, errors);
       break;
     case "run-start":
-      expectOneOf(payload.language, ["javascript", "typescript"], `${path}.language`, errors);
+      expectOneOf(payload.language, ["javascript", "typescript", "html", "css"], `${path}.language`, errors);
       expectLiteral(payload.runtime, "iframe", `${path}.runtime`, errors);
       expectString(payload.runId, `${path}.runId`, errors);
       break;

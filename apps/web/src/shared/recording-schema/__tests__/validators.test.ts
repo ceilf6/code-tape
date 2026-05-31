@@ -52,6 +52,23 @@ describe("validateRecordingPackageV1", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each(["javascript", "typescript", "python", "html", "css"] as const)(
+    "accepts initialLanguage %s",
+    (language) => {
+      const pkg = makePackage();
+      pkg.meta.initialLanguage = language;
+      const result = validateRecordingPackageV1(pkg);
+      expect(result.ok).toBe(true);
+    },
+  );
+
+  it("rejects an unknown initialLanguage", () => {
+    const pkg = makePackage();
+    (pkg.meta as { initialLanguage: string }).initialLanguage = "rust";
+    const result = validateRecordingPackageV1(pkg);
+    expect(result.ok).toBe(false);
+  });
+
   it("rejects non-object inputs", () => {
     const result = validateRecordingPackageV1("not a package");
     expect(result.ok).toBe(false);

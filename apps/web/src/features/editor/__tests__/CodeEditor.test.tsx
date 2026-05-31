@@ -205,6 +205,9 @@ vi.mock("monaco-editor/esm/vs/editor/editor.api", () => ({
 }));
 vi.mock("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution", () => ({}));
+vi.mock("monaco-editor/esm/vs/basic-languages/python/python.contribution", () => ({}));
+vi.mock("monaco-editor/esm/vs/basic-languages/html/html.contribution", () => ({}));
+vi.mock("monaco-editor/esm/vs/basic-languages/css/css.contribution", () => ({}));
 vi.mock("monaco-editor/esm/vs/editor/contrib/comment/browser/comment", () => ({}));
 vi.mock("monaco-editor/esm/vs/editor/contrib/format/browser/formatActions", () => ({}));
 vi.mock("monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess", () => ({}));
