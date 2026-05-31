@@ -154,6 +154,15 @@ describe("RecordingLibraryPage", () => {
     expect(await screen.findByText("\u8fd8\u6ca1\u6709\u5f55\u5236")).toBeInTheDocument();
   });
 
+  it("does not repeat the product wordmark above the library title", async () => {
+    renderPage();
+    await waitForElementToBeRemoved(() => screen.queryByRole("status"));
+
+    expect(screen.getByRole("heading", { name: "\u6211\u7684\u5f55\u5236" })).toBeInTheDocument();
+    expect(screen.queryByText("code-tape")).not.toBeInTheDocument();
+    expect(screen.queryByText("CODE-TAPE")).not.toBeInTheDocument();
+  });
+
   it("keeps persistent load error state after closing load-failed dialog", async () => {
     repositoryMocks.list.mockRejectedValueOnce(new Error("idb read failed"));
     renderPage();

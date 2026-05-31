@@ -12,7 +12,7 @@ export function AppShell() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-12 items-center gap-4 border-b border-border bg-surface/80 px-4 backdrop-blur">
-        <span className="font-display text-sm font-semibold tracking-tight">code-tape</span>
+        <span className="font-display text-xs font-semibold tracking-[0.24em]">CODE-TAPE</span>
         <nav className="flex items-center gap-1 text-sm">
           <NavLink
             to="/"

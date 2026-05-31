@@ -335,7 +335,6 @@ export function RecordingLibraryPage() {
     <div className="flex h-full flex-col gap-6 px-16 py-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-muted">code-tape</p>
           <h1 className="font-display text-3xl font-semibold">我的录制</h1>
           {quotaLabel ? <p className="mt-2 text-xs text-muted">{quotaLabel}</p> : null}
           <div

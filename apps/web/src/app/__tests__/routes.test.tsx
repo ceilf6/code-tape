@@ -22,6 +22,19 @@ describe("appRoutes", () => {
 });
 
 describe("AppShell", () => {
+  it("uses the uppercase wordmark in the top navigation", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <AppShell />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByText("CODE-TAPE")).toBeInTheDocument();
+    expect(screen.queryByText("code-tape")).not.toBeInTheDocument();
+  });
+
   it("exposes the interview lobby entry in the top navigation", () => {
     render(
       <ThemeProvider>
