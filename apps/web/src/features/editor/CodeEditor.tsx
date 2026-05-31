@@ -387,15 +387,24 @@ async function formatEditorDocument(editor: Monaco.editor.IStandaloneCodeEditor)
 
   if (editor.getValue() !== originalValue) return;
 
-  const language = editor.getModel()?.getLanguageId() as RecordingLanguage | undefined;
+  const model = editor.getModel();
+  if (!model) return;
+  const language = model.getLanguageId() as RecordingLanguage | undefined;
   if (!language || !isPrettierSupportedLanguage(language)) return;
 
   try {
     const formatter = await loadPrettierFormatter();
     const formatted = await formatter.format(originalValue, language);
-    if (formatted && formatted !== originalValue) {
-      editor.setValue(formatted);
-    }
+    if (!formatted || formatted === originalValue || editor.getValue() !== originalValue) return;
+    editor.pushUndoStop();
+    editor.executeEdits("code-tape-format", [
+      {
+        range: model.getFullModelRange(),
+        text: formatted,
+        forceMoveMarkers: true,
+      },
+    ]);
+    editor.pushUndoStop();
   } catch (error) {
     console.warn("Failed to format editor document", error);
   }

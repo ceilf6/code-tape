@@ -34,6 +34,17 @@ const monacoMock = vi.hoisted(() => {
       return this.language;
     }
 
+    getFullModelRange() {
+      const lines = this.value.split("\n");
+      const lastLine = lines[lines.length - 1] ?? "";
+      return {
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: lines.length,
+        endColumn: lastLine.length + 1,
+      };
+    }
+
     setValue(next: string) {
       this.value = next;
     }
@@ -62,6 +73,12 @@ const monacoMock = vi.hoisted(() => {
     setScrollTop = vi.fn();
     setScrollLeft = vi.fn();
     trigger = vi.fn();
+    pushUndoStop = vi.fn(() => true);
+    executeEdits = vi.fn((_source: string, edits: Array<{ text: string }>) => {
+      const [edit] = edits;
+      if (edit) this.options.model.setValue(edit.text);
+      return true;
+    });
     addCommand = vi.fn((keybinding: number, handler: () => void) => {
       this.commands.push({ keybinding, handler });
       return `command-${this.commands.length}`;
@@ -498,10 +515,22 @@ describe("CodeEditor", () => {
     );
     await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
     const editor = monacoMock.editors[0];
+    const originalRange = monacoMock.models[0].getFullModelRange();
 
     pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
 
     await waitFor(() => expect(editor.getValue()).toBe("function demo() {\n  return 1;\n}\n"));
+    expect(editor.setValue).not.toHaveBeenCalled();
+    expect(editor.executeEdits).toHaveBeenCalledWith(
+      "code-tape-format",
+      [
+        expect.objectContaining({
+          range: originalRange,
+          text: "function demo() {\n  return 1;\n}\n",
+        }),
+      ],
+    );
+    expect(editor.pushUndoStop).toHaveBeenCalledTimes(2);
     expect(prettierMock.format).toHaveBeenCalledWith(
       "function demo(){\n\t\treturn 1;\n}",
       expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
@@ -528,6 +557,43 @@ describe("CodeEditor", () => {
       "const value:number=1;",
       expect.objectContaining({ parser: "typescript", tabWidth: 2, useTabs: false }),
     );
+  });
+
+  it("does not overwrite edits made while the formatter fallback is pending", async () => {
+    let resolveFormat: (formatted: string) => void = () => {
+      throw new Error("format promise was not created");
+    };
+    prettierMock.format.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFormat = resolve;
+        }),
+    );
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+    await waitFor(() => expect(prettierMock.format).toHaveBeenCalledTimes(1));
+
+    monacoMock.models[0].setValue("const userKeptTyping = true;");
+    await act(async () => {
+      resolveFormat("function demo() {\n  return 1;\n}\n");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(editor.getValue()).toBe("const userKeptTyping = true;");
+    expect(editor.executeEdits).not.toHaveBeenCalled();
+    expect(editor.setValue).not.toHaveBeenCalled();
   });
 
   it("does not run formatter fallback for read-only replay editors", async () => {
