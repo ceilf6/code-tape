@@ -607,6 +607,12 @@ export type IframeRuntime = {
    * as the run's previewHtml for replay. Used for HTML/CSS "run" (no JS exec).
    */
   renderDocument(html: string): Promise<string>;
+  /**
+   * Update the preview/runtime theme. Re-renders the current static preview
+   * (mount default / renderPreview / renderDocument) so its background tracks
+   * the host theme; a JS run iframe keeps its boot-time theme until next run.
+   */
+  setTheme(theme: "light" | "dark"): void;
   reset(): void;
   destroy(): void;
 };

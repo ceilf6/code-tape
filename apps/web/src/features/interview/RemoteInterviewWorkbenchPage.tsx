@@ -673,6 +673,7 @@ export function RemoteInterviewWorkbenchView({
             <PreviewPane
               runtime={previewRuntime}
               previewHtml={runtime.previewHtml}
+              theme={editor.theme}
               showReset={false}
               className="min-h-0 flex-1"
             />

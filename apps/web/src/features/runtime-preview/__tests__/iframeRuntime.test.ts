@@ -215,6 +215,69 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("injects a dark theme background into the empty preview srcdoc by default", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("color-scheme:dark");
+    expect(frame?.srcdoc).toContain("#1c1f26"); // dark default background
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("injects a light theme background when initialized with theme: 'light'", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "light" });
+
+    await runtime.mount(host);
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("color-scheme:light");
+    expect(frame?.srcdoc).toContain("#f5f5f4"); // light default background
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("re-renders the current preview with the new theme on setTheme", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    expect(host.querySelector("iframe")?.srcdoc).toContain("color-scheme:dark");
+
+    runtime.setTheme("light");
+    // setTheme triggers an async re-render; wait a microtask.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector("iframe")?.srcdoc).toContain("color-scheme:light");
+
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("preserves the rendered preview content across a theme change", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime({ theme: "dark" });
+
+    await runtime.mount(host);
+    await runtime.renderPreview("<body><h1>kept</h1></body>");
+    expect(host.querySelector("iframe")?.srcdoc).toContain("<h1>kept</h1>");
+
+    runtime.setTheme("light");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    expect(srcdoc).toContain("<h1>kept</h1>");
+    expect(srcdoc).toContain("color-scheme:light");
+    runtime.destroy();
+    host.remove();
+  });
+
   it("renders replay preview in a no-script sandbox", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

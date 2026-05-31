@@ -8,6 +8,8 @@ function makeRuntime(): IframeRuntime {
     mount: vi.fn(async () => {}),
     run: vi.fn(),
     renderPreview: vi.fn(async () => {}),
+    renderDocument: vi.fn(async (html: string) => html),
+    setTheme: vi.fn(),
     reset: vi.fn(),
     destroy: vi.fn(),
   } as unknown as IframeRuntime;
@@ -36,5 +38,15 @@ describe("PreviewPane", () => {
     await waitFor(() => expect(runtime.mount).toHaveBeenCalled());
 
     expect(screen.queryByRole("button", { name: "重置预览" })).not.toBeInTheDocument();
+  });
+
+  it("propagates the theme prop to the runtime via setTheme", async () => {
+    const runtime = makeRuntime();
+    const { rerender } = render(<PreviewPane runtime={runtime} theme="dark" />);
+    await waitFor(() => expect(runtime.mount).toHaveBeenCalled());
+    expect(runtime.setTheme).toHaveBeenCalledWith("dark");
+
+    rerender(<PreviewPane runtime={runtime} theme="light" />);
+    expect(runtime.setTheme).toHaveBeenCalledWith("light");
   });
 });

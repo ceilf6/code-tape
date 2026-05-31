@@ -400,6 +400,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
                 <PreviewPane
                   runtime={runtime}
                   previewHtml={stableState.runtime.previewHtml}
+                  theme={stableState.editor.theme}
                   className="min-h-0 flex-1"
                 />
               }

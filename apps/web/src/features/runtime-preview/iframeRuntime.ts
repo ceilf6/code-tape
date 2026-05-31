@@ -9,6 +9,8 @@ import { IFRAME_BOOT_SCRIPT } from "./iframeBoot";
 export type IframeRuntimeOptions = {
   /** Override sandbox attributes; only "allow-scripts" is on by default. */
   sandboxFlags?: string;
+  /** Initial preview theme; defaults to "dark". */
+  theme?: RuntimePreviewTheme;
 };
 
 const RUNTIME_SOURCE = "code-tape-runtime";
@@ -25,6 +27,23 @@ const RUNTIME_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
 const REPLAY_PREVIEW_CSP =
   "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
+
+export type RuntimePreviewTheme = "light" | "dark";
+
+/**
+ * Theme-aware default styling injected into preview/runtime srcdoc so the empty
+ * and rendered sandbox follows the host theme (opaque-origin iframes can't
+ * inherit the host's CSS variables). Placed in <head> before user content so a
+ * user's own background/color rules still win.
+ */
+const THEME_DEFAULT_STYLE: Record<RuntimePreviewTheme, string> = {
+  light: "color-scheme:light;background:#f5f5f4;color:#24272d;",
+  dark: "color-scheme:dark;background:#1c1f26;color:#e7e9ee;",
+};
+
+function themeStyleTag(theme: RuntimePreviewTheme): string {
+  return `<style>html,body{margin:0;${THEME_DEFAULT_STYLE[theme]}}</style>`;
+}
 
 type SanitizedPreviewHtml = {
   headHtml: string;
@@ -54,13 +73,13 @@ export function acceptRuntimeMessage(
   return sanitizeRuntimeMessage(m as RuntimeMessage);
 }
 
-function buildSrcDoc(bootScript: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${RUNTIME_CSP}" /><title>code-tape runtime</title></head><body><script>${bootScript}</script></body></html>`;
+function buildSrcDoc(bootScript: string, theme: RuntimePreviewTheme): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${RUNTIME_CSP}" />${themeStyleTag(theme)}<title>code-tape runtime</title></head><body><script>${bootScript}</script></body></html>`;
 }
 
-function buildPreviewSrcDoc(previewHtml: string): string {
+function buildPreviewSrcDoc(previewHtml: string, theme: RuntimePreviewTheme): string {
   const safePreviewHtml = sanitizePreviewHtml(previewHtml);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${REPLAY_PREVIEW_CSP}" /><title>code-tape replay preview</title>${safePreviewHtml.headHtml}</head>${safePreviewHtml.bodyHtml}</html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${REPLAY_PREVIEW_CSP}" />${themeStyleTag(theme)}<title>code-tape replay preview</title>${safePreviewHtml.headHtml}</head>${safePreviewHtml.bodyHtml}</html>`;
 }
 
 function isRuntimePayload(type: string, payload: object): boolean {
@@ -155,6 +174,10 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
   let iframe: HTMLIFrameElement | null = null;
   let host: HTMLElement | null = null;
   let messageHandler: ((event: MessageEvent) => void) | null = null;
+  let theme: RuntimePreviewTheme = options.theme ?? "dark";
+  // Track the current static preview so a theme change can re-render it with the
+  // new default background. Null while a JS run iframe is mounted.
+  let currentPreviewHtml: string | null = "<body></body>";
 
   const sandboxFlags = options.sandboxFlags ?? "allow-scripts";
 
@@ -185,10 +208,21 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
   return {
     async mount(target: HTMLElement) {
       host = target;
-      if (!iframe) await createIframe("", buildPreviewSrcDoc("<body></body>"));
+      if (!iframe) await createIframe("", buildPreviewSrcDoc("<body></body>", theme));
+    },
+    setTheme(nextTheme: RuntimePreviewTheme) {
+      if (nextTheme === theme) return;
+      theme = nextTheme;
+      // Re-render the current static preview so the empty / replay preview
+      // background tracks the host theme. Skip while a JS run iframe is mounted
+      // (currentPreviewHtml === null) — its theme is fixed for that run.
+      if (host && currentPreviewHtml !== null) {
+        void createIframe("", buildPreviewSrcDoc(currentPreviewHtml, theme));
+      }
     },
     async run(input: IframeRunInput): Promise<IframeRunResult> {
-      const frame = await createIframe(sandboxFlags, buildSrcDoc(IFRAME_BOOT_SCRIPT));
+      currentPreviewHtml = null;
+      const frame = await createIframe(sandboxFlags, buildSrcDoc(IFRAME_BOOT_SCRIPT, theme));
       const stdout: string[] = [];
       const stderr: string[] = [];
       let outputTruncated = false;
@@ -272,20 +306,24 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       });
     },
     async renderPreview(previewHtml: string): Promise<void> {
-      await createIframe("", buildPreviewSrcDoc(previewHtml));
+      currentPreviewHtml = previewHtml;
+      await createIframe("", buildPreviewSrcDoc(previewHtml, theme));
     },
     async renderDocument(html: string): Promise<string> {
+      currentPreviewHtml = html;
       const safe = sanitizePreviewHtml(html);
-      await createIframe("", buildPreviewSrcDoc(html));
+      await createIframe("", buildPreviewSrcDoc(html, theme));
       // Return the SANITIZED markup actually rendered (scripts stripped), so the
       // persisted previewHtml is script-free regardless of who re-renders it.
       const sanitized = safe.headHtml ? `${safe.headHtml}${safe.bodyHtml}` : safe.bodyHtml;
       return limitString(sanitized, RUNTIME_PREVIEW_HTML_MAX_CHARS);
     },
     reset() {
+      currentPreviewHtml = "<body></body>";
       teardown();
     },
     destroy() {
+      currentPreviewHtml = null;
       teardown();
       host = null;
     },

@@ -730,6 +730,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
             left={
               <PreviewPane
                 runtime={stack.runtime}
+                theme={theme.resolved}
                 className="min-h-0 flex-1"
                 onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
               />

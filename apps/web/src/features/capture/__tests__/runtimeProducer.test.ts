@@ -45,6 +45,7 @@ function setup(overrides: {
     run,
     renderPreview: vi.fn(),
     renderDocument,
+    setTheme: vi.fn(),
     reset: vi.fn(),
     destroy: vi.fn(),
   };
