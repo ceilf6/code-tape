@@ -948,11 +948,12 @@ function MediaStreamTile({
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
+  const displayValue = label === "面试官" ? `面试官${value}` : value;
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-surface px-2 py-1.5">
-      <dt className="text-muted">{label}</dt>
-      <dd className="truncate font-mono text-foreground">
-        {label === "面试官" ? `面试官${value}` : value}
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-surface px-2 py-1.5">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 max-w-full truncate text-right font-mono text-foreground" title={displayValue}>
+        {displayValue}
       </dd>
     </div>
   );

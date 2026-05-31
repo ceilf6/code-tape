@@ -184,6 +184,28 @@ describe("CandidateInterviewPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps long interviewer links from forcing the room status sidebar wider", () => {
+    const longRoomId = `room-${"a".repeat(160)}`;
+    const expectedLink = `http://localhost:3000/interview/interviewer/${longRoomId}?joinCode=JOIN1234`;
+
+    renderCandidateView({
+      roomId: longRoomId,
+      roomState: {
+        status: "waiting-interviewer",
+        joinCode: "JOIN1234",
+        interviewerOnline: false,
+      },
+      mediaState: makeMediaState(),
+      recordingWorkspace: <div>Recording area</div>,
+    });
+
+    const linkMetric = screen.getByText(expectedLink);
+
+    expect(linkMetric.parentElement).toHaveClass("min-w-0");
+    expect(linkMetric).toHaveClass("min-w-0", "max-w-full", "truncate");
+    expect(linkMetric).toHaveAttribute("title", expectedLink);
+  });
+
   it("resets the copied state when the interviewer room link changes", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", {
