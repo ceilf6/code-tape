@@ -41,9 +41,7 @@ export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase>
     };
     request.onerror = () => reject(request.error);
     request.onblocked = () => {
-      // Existing connections that use this helper close on versionchange.
-      // Older tabs may still block briefly; keep the open request pending so it
-      // can continue once the user closes that tab instead of failing forever.
+      reject(new Error("indexeddb open blocked by another open tab; close other Code Tape tabs and retry"));
     };
   });
 }

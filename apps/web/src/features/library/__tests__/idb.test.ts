@@ -26,4 +26,35 @@ describe("openDatabase", () => {
 
     expect(closeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects when an upgrade is blocked by an older open connection", async () => {
+    const name = uniqueDbName();
+    const oldDb = await openRawDatabase(name, 1);
+
+    try {
+      await expect(openDatabase({
+        name,
+        version: 2,
+        onUpgrade(upgradeDb) {
+          if (!upgradeDb.objectStoreNames.contains("items")) {
+            upgradeDb.createObjectStore("items");
+          }
+          upgradeDb.createObjectStore("thumbnails");
+        },
+      })).rejects.toThrow("indexeddb open blocked");
+    } finally {
+      oldDb.close();
+    }
+  });
 });
+
+function openRawDatabase(name: string, version: number): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore("items");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
