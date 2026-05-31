@@ -180,4 +180,36 @@ describe("createExternalLlmSubtitlePostProcessor", () => {
     controller.abort();
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it("uses a single overall budget across chunks for tracks over the chunk size", async () => {
+    // >60 segments => multiple chunks. The whole external attempt shares ONE
+    // fail-fast budget, so a hung endpoint trips exactly one timeout (not one per
+    // chunk) and the panel's additive budget keeps the local fallback's full slice.
+    const bigTrack: SubtitleTrack = {
+      ...track,
+      segments: Array.from({ length: 130 }, (_, index) => ({
+        id: `subtitle-${index + 1}`,
+        startMs: index * 1000,
+        endMs: index * 1000 + 1000,
+        text: `第 ${index + 1} 段`,
+      })),
+    };
+    let fetchCalls = 0;
+    const fetchImpl = vi.fn<FetchMock>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          fetchCalls += 1;
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    );
+    const processor = createExternalLlmSubtitlePostProcessor({
+      config: openAiConfig,
+      fetchImpl,
+      requestTimeoutMs: 20,
+    });
+    await expect(processor.process({ track: bigTrack })).rejects.toBeInstanceOf(ExternalLlmTimeoutError);
+    // The shared budget aborts the in-flight chunk; we never fan out to a fresh
+    // per-chunk timeout, so at most one request is outstanding when it trips.
+    expect(fetchCalls).toBeLessThanOrEqual(3);
+  });
 });

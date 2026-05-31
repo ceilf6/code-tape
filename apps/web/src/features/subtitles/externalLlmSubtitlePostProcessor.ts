@@ -61,36 +61,88 @@ export function createExternalLlmSubtitlePostProcessor(
   return {
     async process(input) {
       throwIfAborted(input.signal);
-      if (input.track.segments.length <= POSTPROCESSOR_CHUNK_SEGMENTS) {
-        return processChunk(input.track, input, config, fetchImpl, requestTimeoutMs);
+      // One overall fail-fast budget for the WHOLE external attempt (all chunks
+      // combined), so the external path never consumes more than requestTimeoutMs
+      // total — regardless of chunk count. This keeps the panel's additive budget
+      // (local full budget + one external budget) exact, leaving the local
+      // fallback its complete budget after the external attempt bails.
+      const attempt = createExternalAttemptSignal(input.signal, requestTimeoutMs);
+      try {
+        if (input.track.segments.length <= POSTPROCESSOR_CHUNK_SEGMENTS) {
+          return await processChunk(input.track, input, config, fetchImpl, attempt.signal);
+        }
+        const chunks = chunkSubtitleTrack(input.track, POSTPROCESSOR_CHUNK_SEGMENTS);
+        const merged: SubtitleCorrectionResult = { segments: [], chapters: [] };
+        for (const chunk of chunks) {
+          const result = await processChunk(chunk, input, config, fetchImpl, attempt.signal);
+          merged.segments.push(...result.segments);
+          merged.chapters?.push(...(result.chapters ?? []));
+        }
+        return constrainCorrectionToTrack(merged, input.track);
+      } catch (error) {
+        // The attempt's own deadline aborted us (not a user cancel): surface a
+        // recoverable timeout so the fallback wrapper runs the local model.
+        if (attempt.didTimeout && !input.signal?.aborted) {
+          throw new ExternalLlmTimeoutError(requestTimeoutMs);
+        }
+        throw error;
+      } finally {
+        attempt.dispose();
       }
-      const chunks = chunkSubtitleTrack(input.track, POSTPROCESSOR_CHUNK_SEGMENTS);
-      const merged: SubtitleCorrectionResult = { segments: [], chapters: [] };
-      for (const chunk of chunks) {
-        throwIfAborted(input.signal);
-        const result = await processChunk(chunk, input, config, fetchImpl, requestTimeoutMs);
-        merged.segments.push(...result.segments);
-        merged.chapters?.push(...(result.chapters ?? []));
-      }
-      throwIfAborted(input.signal);
-      return constrainCorrectionToTrack(merged, input.track);
     },
   };
 }
 
+type ExternalAttempt = {
+  signal: AbortSignal;
+  didTimeout: boolean;
+  dispose(): void;
+};
+
+// Bridges the caller's signal with a single overall deadline for the whole
+// external attempt. didTimeout distinguishes "our deadline fired" from a genuine
+// caller/global cancel so the two can surface as different error types.
+function createExternalAttemptSignal(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): ExternalAttempt {
+  const controller = new AbortController();
+  const attempt: ExternalAttempt = {
+    signal: controller.signal,
+    didTimeout: false,
+    dispose: () => {},
+  };
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  const timeoutId =
+    Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? setTimeout(() => {
+          attempt.didTimeout = true;
+          controller.abort();
+        }, timeoutMs)
+      : null;
+  attempt.dispose = () => {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", onCallerAbort);
+  };
+  return attempt;
+}
+
 async function processChunk(
   track: SubtitleTrack,
-  input: { context?: Parameters<SubtitlePostProcessor["process"]>[0]["context"]; signal?: AbortSignal },
+  input: { context?: Parameters<SubtitlePostProcessor["process"]>[0]["context"] },
   config: ExternalLlmConfig,
   fetchImpl: typeof fetch,
-  requestTimeoutMs: number,
+  signal: AbortSignal,
 ): Promise<SubtitleCorrectionResult> {
   const messages = buildSubtitlePostProcessorMessages(
     { track, context: input.context },
     { systemContent: EXTERNAL_SYSTEM_CONTENT },
   );
-  const generatedText = await requestCompletion(messages, config, fetchImpl, requestTimeoutMs, input.signal);
-  throwIfAborted(input.signal);
+  const generatedText = await requestCompletion(messages, config, fetchImpl, signal);
   try {
     return constrainCorrectionToTrack(extractSubtitleCorrectionResult(generatedText), track);
   } catch (error) {
@@ -105,42 +157,19 @@ async function requestCompletion(
   messages: SubtitlePostProcessorMessage[],
   config: ExternalLlmConfig,
   fetchImpl: typeof fetch,
-  requestTimeoutMs: number,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<string> {
   const request =
     config.provider === "anthropic"
       ? buildAnthropicRequest(messages, config)
       : buildOpenAiRequest(messages, config);
 
-  // Combine the caller's signal (user cancel / global budget) with our own
-  // request timeout. We track which one fired so a timeout surfaces as a
-  // recoverable ExternalLlmTimeoutError while a real cancel stays an AbortError.
-  const requestController = new AbortController();
-  let didTimeout = false;
-  const onCallerAbort = () => requestController.abort();
-  if (signal) {
-    if (signal.aborted) requestController.abort();
-    else signal.addEventListener("abort", onCallerAbort, { once: true });
-  }
-  const timeoutId =
-    Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
-      ? setTimeout(() => {
-          didTimeout = true;
-          requestController.abort();
-        }, requestTimeoutMs)
-      : null;
-
   let response: Response;
   try {
-    response = await fetchImpl(request.url, { ...request.init, signal: requestController.signal });
+    response = await fetchImpl(request.url, { ...request.init, signal });
   } catch (error) {
-    if (didTimeout) throw new ExternalLlmTimeoutError(requestTimeoutMs);
     if (isAbortError(error)) throw error;
     throw new Error(`外部 LLM 请求失败：${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    if (timeoutId !== null) clearTimeout(timeoutId);
-    signal?.removeEventListener("abort", onCallerAbort);
   }
   if (!response.ok) {
     // Deliberately omit the response body: a misconfigured proxy/endpoint could
