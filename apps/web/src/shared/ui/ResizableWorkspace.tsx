@@ -105,14 +105,25 @@ export function ResizableWorkspace({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const keyActions: Record<string, number> = {
-      ArrowLeft: leftPercent - step,
-      ArrowDown: leftPercent + step,
-      ArrowRight: leftPercent + step,
-      ArrowUp: leftPercent - step,
-      Home: minLeftPercent,
-      End: maxLeftPercent,
-    };
+    // horizontal 保持既有映射（ArrowDown 缩小左栏）；vertical 用上下直觉映射
+    // （ArrowDown 增大上区）。分支保证不传 orientation 时行为与旧版本完全一致。
+    const keyActions: Record<string, number> = isVertical
+      ? {
+          ArrowUp: leftPercent - step,
+          ArrowDown: leftPercent + step,
+          ArrowLeft: leftPercent - step,
+          ArrowRight: leftPercent + step,
+          Home: minLeftPercent,
+          End: maxLeftPercent,
+        }
+      : {
+          ArrowLeft: leftPercent - step,
+          ArrowDown: leftPercent - step,
+          ArrowRight: leftPercent + step,
+          ArrowUp: leftPercent + step,
+          Home: minLeftPercent,
+          End: maxLeftPercent,
+        };
     const nextPercent = keyActions[event.key];
     if (nextPercent === undefined) return;
     event.preventDefault();

@@ -95,6 +95,29 @@ describe("ResizableWorkspace", () => {
     );
   });
 
+  it("preserves the legacy horizontal ArrowDown/ArrowUp keyboard behavior", () => {
+    render(
+      <ResizableWorkspace
+        ariaLabel="水平键盘工作区"
+        separatorLabel="调整水平键盘工作区宽度"
+        storageKey="code-tape:horizontal-keyboard:left-percent"
+        defaultLeftPercent={68}
+        minLeftPercent={52}
+        maxLeftPercent={78}
+        step={4}
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+    const separator = screen.getByRole("separator", { name: "调整水平键盘工作区宽度" });
+    // 旧行为：ArrowDown 缩小左栏，ArrowUp 增大左栏。
+    fireEvent.keyDown(separator, { key: "ArrowDown" });
+    expect(separator).toHaveAttribute("aria-valuenow", "64");
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    expect(separator).toHaveAttribute("aria-valuenow", "72");
+  });
+
   it("updates and persists the split when dragged vertically", () => {
     render(
       <ResizableWorkspace
