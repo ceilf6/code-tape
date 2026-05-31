@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeEditorProps } from "@/features/editor/CodeEditor";
 import type { PreviewPaneProps } from "@/features/runtime-preview/PreviewPane";
@@ -38,6 +38,7 @@ const replayIntegrationMock = vi.hoisted(() => {
   };
   const descriptorRepository = {
     getPlaybackDescriptor: vi.fn(),
+    getSharedPlaybackDescriptor: vi.fn(),
   };
   const localRepository = {
     load: vi.fn(),
@@ -54,10 +55,13 @@ const replayIntegrationMock = vi.hoisted(() => {
       scheduler.destroy.mockClear();
       scheduler.subscribe.mockClear();
       descriptorRepository.getPlaybackDescriptor.mockReset();
+      descriptorRepository.getSharedPlaybackDescriptor.mockReset();
       localRepository.load.mockReset();
       this.routeId = "cloud-rec-1";
+      this.routeToken = "share-token";
       this.search = "";
     },
+    routeToken: "share-token",
   };
 });
 
@@ -65,7 +69,7 @@ vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof ReactRouterDom>("react-router-dom");
   return {
     ...actual,
-    useParams: () => ({ id: replayIntegrationMock.routeId }),
+    useParams: () => ({ id: replayIntegrationMock.routeId, token: replayIntegrationMock.routeToken }),
     useSearchParams: () => [new URLSearchParams(replayIntegrationMock.search), vi.fn()],
   };
 });
@@ -157,6 +161,60 @@ describe("ReplayPage cloud package loader integration", () => {
     });
     expect(replayIntegrationMock.localRepository.load).not.toHaveBeenCalled();
   });
+
+  it("loads share links by token and seeks to the t query after package load", async () => {
+    const parts = await makePackageParts();
+    let resolveLoad!: () => void;
+    const loadCompletion = new Promise<void>((resolve) => {
+      resolveLoad = resolve;
+    });
+    replayIntegrationMock.scheduler.load.mockImplementationOnce(async () => loadCompletion);
+    replayIntegrationMock.routeToken = "share-token-1";
+    replayIntegrationMock.search = "t=42000";
+    replayIntegrationMock.descriptorRepository.getSharedPlaybackDescriptor.mockResolvedValue({
+      ok: true,
+      value: makeDescriptor({ id: "shared-rec-1", durationMs: 60_000 }),
+    });
+    vi.stubGlobal("fetch", makeAssetFetch({
+      "https://assets.example.com/manifest.json": jsonResponse({
+        ...parts.manifest,
+        packageId: "shared-rec-1",
+      }),
+      "https://assets.example.com/meta.json": jsonResponse({
+        ...parts.meta,
+        id: "shared-rec-1",
+        durationMs: 60_000,
+      }),
+      "https://assets.example.com/events.json": jsonResponse(parts.events),
+      "https://assets.example.com/snapshots.json": jsonResponse(parts.snapshots),
+    }));
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage source="share" />);
+
+    await waitFor(() => {
+      expect(replayIntegrationMock.descriptorRepository.getSharedPlaybackDescriptor).toHaveBeenCalledWith("share-token-1");
+    });
+    expect(replayIntegrationMock.descriptorRepository.getPlaybackDescriptor).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(replayIntegrationMock.scheduler.load).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({ id: "shared-rec-1" }),
+        }),
+      );
+    });
+    expect(replayIntegrationMock.scheduler.seek).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveLoad();
+      await loadCompletion;
+    });
+    await waitFor(() => {
+      expect(replayIntegrationMock.scheduler.seek).toHaveBeenCalledWith(42_000);
+    });
+    expect(replayIntegrationMock.scheduler.load.mock.invocationCallOrder[0]).toBeLessThan(
+      replayIntegrationMock.scheduler.seek.mock.invocationCallOrder[0]!,
+    );
+  });
 });
 
 async function makePackageParts() {
@@ -234,7 +292,7 @@ async function makePackageParts() {
   return { manifest, meta, events, snapshots };
 }
 
-function makeDescriptor(): CloudPlaybackDescriptor {
+function makeDescriptor(overrides: Partial<CloudPlaybackDescriptor> = {}): CloudPlaybackDescriptor {
   return {
     id: "cloud-rec-1",
     title: "Cloud Replay",
@@ -248,6 +306,7 @@ function makeDescriptor(): CloudPlaybackDescriptor {
     mediaUrl: null,
     thumbnailUrl: null,
     expiresAt: "2026-05-29T00:10:00.000Z",
+    ...overrides,
   };
 }
 
