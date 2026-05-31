@@ -281,8 +281,10 @@ describe("IframeRuntime sandbox lifecycle", () => {
     expect(frame?.srcdoc).toContain("script-src 'none'");
     expect(frame?.srcdoc).toContain("<h1>hello</h1>");
     expect(frame?.srcdoc).not.toMatch(/<script/i);
-    // 返回的标记用于回放持久化（保留原始 HTML，便于复现）。
+    // 返回值是净化后的标记（脚本已剥离），作为 previewHtml 持久化时不含脚本。
     expect(returned).toContain("<h1>hello</h1>");
+    expect(returned).not.toMatch(/<script/i);
+    expect(returned).not.toContain("window.x=1");
     runtime.destroy();
     host.remove();
   });

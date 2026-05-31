@@ -275,11 +275,12 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       await createIframe("", buildPreviewSrcDoc(previewHtml));
     },
     async renderDocument(html: string): Promise<string> {
-      const srcdoc = buildPreviewSrcDoc(html);
-      await createIframe("", srcdoc);
-      // Persist exactly what was written (post-sanitize) so replay restores the
-      // same no-script document; cap to the preview budget for recording size.
-      return limitString(html, RUNTIME_PREVIEW_HTML_MAX_CHARS);
+      const safe = sanitizePreviewHtml(html);
+      await createIframe("", buildPreviewSrcDoc(html));
+      // Return the SANITIZED markup actually rendered (scripts stripped), so the
+      // persisted previewHtml is script-free regardless of who re-renders it.
+      const sanitized = safe.headHtml ? `${safe.headHtml}${safe.bodyHtml}` : safe.bodyHtml;
+      return limitString(sanitized, RUNTIME_PREVIEW_HTML_MAX_CHARS);
     },
     reset() {
       teardown();
