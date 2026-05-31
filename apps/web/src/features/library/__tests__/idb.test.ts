@@ -27,6 +27,22 @@ describe("openDatabase", () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("notifies callers when a versionchange closes the connection", async () => {
+    const onVersionChange = vi.fn();
+    const db = await openDatabase({
+      name: uniqueDbName(),
+      version: 1,
+      onUpgrade(upgradeDb) {
+        upgradeDb.createObjectStore("items");
+      },
+      onVersionChange,
+    });
+
+    db.onversionchange?.(new Event("versionchange") as IDBVersionChangeEvent);
+
+    expect(onVersionChange).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects when an upgrade is blocked by an older open connection", async () => {
     const name = uniqueDbName();
     const oldDb = await openRawDatabase(name, 1);

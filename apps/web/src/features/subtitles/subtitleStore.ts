@@ -14,6 +14,9 @@ export function createSubtitleStore(options: SubtitleStoreOptions = {}): Subtitl
   const databaseName = options.databaseName ?? DEFAULT_DB_NAME;
   const getDb = (() => {
     let cached: Promise<IDBDatabase> | null = null;
+    const clearCached = () => {
+      cached = null;
+    };
     return () => {
       if (!cached) {
         cached = openDatabase({
@@ -27,6 +30,10 @@ export function createSubtitleStore(options: SubtitleStoreOptions = {}): Subtitl
               db.createObjectStore(STORE_CHAPTERS, { keyPath: "recordingId" });
             }
           },
+          onVersionChange: clearCached,
+        }).catch((err) => {
+          clearCached();
+          throw err;
         });
       }
       return cached;

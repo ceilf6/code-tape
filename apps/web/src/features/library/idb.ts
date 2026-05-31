@@ -23,6 +23,7 @@ export type OpenDatabaseOptions = {
   name: string;
   version: number;
   onUpgrade(db: IDBDatabase, oldVersion: number, newVersion: number, transaction: IDBTransaction): void;
+  onVersionChange?: () => void;
 };
 
 export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase> {
@@ -36,6 +37,7 @@ export function openDatabase(options: OpenDatabaseOptions): Promise<IDBDatabase>
       const db = request.result;
       db.onversionchange = () => {
         db.close();
+        options.onVersionChange?.();
       };
       resolve(db);
     };

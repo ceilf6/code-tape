@@ -194,6 +194,34 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("thumbnail");
   });
 
+  it("writes the draft before optional video thumbnail generation settles", async () => {
+    let resolveThumbnail!: (thumbnail: Blob | null) => void;
+    const thumbnailPromise = new Promise<Blob | null>((resolve) => {
+      resolveThumbnail = resolve;
+    });
+    const dbName = uniqueDbName();
+    const store = createRecordingStore({
+      databaseName: dbName,
+      thumbnailGenerator: vi.fn(() => thumbnailPromise),
+    });
+    const input = makeInput("rec-thumbnail-background");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+
+    const saving = store.saveDraft(input);
+
+    const draft = await waitForRawRecording(dbName, "rec-thumbnail-background");
+    expect(draft?.manifest.status).toBe("draft");
+    expect(draft?.thumbnailBlobId).toBeNull();
+
+    resolveThumbnail(new Blob(["thumbnail"], { type: "image/webp" }));
+    const saved = await saving;
+    if (!saved.ok) throw new Error(saved.message);
+    await store.commit("rec-thumbnail-background");
+
+    const list = await store.list();
+    expect(list[0].thumbnailBlobId).toMatch(/^thumbnail-/);
+  });
+
   it("continues saving video media when thumbnail generation fails", async () => {
     const store = createRecordingStore({
       databaseName: uniqueDbName(),
@@ -328,6 +356,17 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(result.removedDrafts).toBeGreaterThanOrEqual(1);
   });
 
+  it("retries opening after a blocked version upgrade is unblocked", async () => {
+    const dbName = uniqueDbName();
+    const oldDb = await openRecordingDatabaseV1(dbName);
+    const store = createRecordingStore({ databaseName: dbName });
+
+    await expect(store.list()).rejects.toThrow("indexeddb open blocked");
+    oldDb.close();
+
+    await expect(store.list()).resolves.toEqual([]);
+  });
+
   it("exportZip then importZip survives the round-trip", async () => {
     const store = createRecordingStore({ databaseName: uniqueDbName() });
     await store.saveDraft(makeInput("rec-export"));
@@ -385,3 +424,64 @@ describe("createRecordingStore — two-phase commit", () => {
     }
   });
 });
+
+async function waitForRawRecording(dbName: string, id: string): Promise<{ manifest: { status: string }; thumbnailBlobId: string | null } | undefined> {
+  const deadline = Date.now() + 250;
+  let lastValue: { manifest: { status: string }; thumbnailBlobId: string | null } | undefined;
+  while (Date.now() < deadline) {
+    lastValue = await readRawRecording(dbName, id);
+    if (lastValue) return lastValue;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return lastValue;
+}
+
+async function readRawRecording(dbName: string, id: string): Promise<{ manifest: { status: string }; thumbnailBlobId: string | null } | undefined> {
+  const db = await openExistingDatabase(dbName, 2);
+  try {
+    const tx = db.transaction("recordings", "readonly");
+    const value = await requestToPromise(tx.objectStore("recordings").get(id));
+    await transactionDone(tx);
+    return value as { manifest: { status: string }; thumbnailBlobId: string | null } | undefined;
+  } finally {
+    db.close();
+  }
+}
+
+function openExistingDatabase(name: string, version: number): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("blocked"));
+  });
+}
+
+function openRecordingDatabaseV1(name: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () => {
+      const recordings = request.result.createObjectStore("recordings", { keyPath: "id" });
+      recordings.createIndex("status", "manifest.status", { unique: false });
+      recordings.createIndex("createdAtMs", "createdAtMs", { unique: false });
+      request.result.createObjectStore("blobs");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error);
+  });
+}

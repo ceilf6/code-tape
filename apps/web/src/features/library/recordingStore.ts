@@ -79,6 +79,9 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
 
   const getDb = (() => {
     let cached: Promise<IDBDatabase> | null = null;
+    const clearCached = () => {
+      cached = null;
+    };
     return () => {
       if (!cached) {
         cached = openDatabase({
@@ -97,6 +100,10 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
               db.createObjectStore(STORE_THUMBNAILS);
             }
           },
+          onVersionChange: clearCached,
+        }).catch((err) => {
+          clearCached();
+          throw err;
         });
       }
       return cached;
@@ -151,10 +158,6 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
         };
       }
 
-      const thumbnailPayload = thumbnailBlobId && input.mediaBlob
-        ? await prepareThumbnailPayload(input.mediaBlob, thumbnailGenerator)
-        : null;
-
       const stored: StoredRecording = {
         id: recordingId,
         manifest: {
@@ -202,8 +205,11 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           blobs.put(payload, blobId);
         }
         await awaitTransaction(tx);
-        if (thumbnailPayload && thumbnailBlobId) {
-          await persistThumbnail(db, stored, thumbnailBlobId, thumbnailPayload);
+        if (thumbnailBlobId && input.mediaBlob) {
+          const thumbnailPayload = await prepareThumbnailPayload(input.mediaBlob, thumbnailGenerator);
+          if (thumbnailPayload) {
+            await persistThumbnail(db, stored, thumbnailBlobId, thumbnailPayload);
+          }
         }
         return { ok: true, recordingId };
       } catch (err) {
