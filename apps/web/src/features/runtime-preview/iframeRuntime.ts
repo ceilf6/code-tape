@@ -44,7 +44,10 @@ const THEME_DEFAULT_STYLE: Record<RuntimePreviewTheme, string> = {
 };
 
 function themeStyleTag(theme: RuntimePreviewTheme): string {
-  return `<style id="ct-theme">html,body{${THEME_DEFAULT_STYLE[theme]}}</style>`;
+  // `:where()` gives the default rule zero specificity, so any user
+  // background/color rule wins regardless of source order — keeps the issue
+  // non-goal "不强制覆盖用户 HTML/CSS 自定义样式" inviolable.
+  return `<style id="ct-theme">:where(html,body){${THEME_DEFAULT_STYLE[theme]}}</style>`;
 }
 
 type SanitizedPreviewHtml = {

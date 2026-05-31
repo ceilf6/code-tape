@@ -278,6 +278,21 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("uses :where() for the theme default so user CSS wins regardless of source order", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const srcdoc = host.querySelector("iframe")?.srcdoc ?? "";
+    // Default selector must have zero specificity (`:where()` per CSS spec) so
+    // any user `body { ... }` rule wins regardless of source order.
+    expect(srcdoc).toContain(":where(html,body)");
+    expect(srcdoc).not.toMatch(/<style[^>]*>html,body\{/);
+    runtime.destroy();
+    host.remove();
+  });
+
   it("does not reset body margin in the theme default style", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

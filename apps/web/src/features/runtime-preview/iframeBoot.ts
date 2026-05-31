@@ -88,7 +88,7 @@ export const IFRAME_BOOT_SCRIPT = `
       styleEl.id = "ct-theme";
       document.head.appendChild(styleEl);
     }
-    styleEl.textContent = "html,body{" + body + "}";
+    styleEl.textContent = ":where(html,body){" + body + "}";
   });
 
   window.addEventListener("message", async function (event) {
