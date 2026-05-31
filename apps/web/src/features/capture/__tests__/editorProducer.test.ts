@@ -265,6 +265,47 @@ describe("createEditorProducer", () => {
     });
   });
 
+  it("can mark the next content change as a format operation", () => {
+    const env = setup();
+    const mounted = editor("function demo(){\n\t\treturn 1;\n}");
+    env.setEditor(mounted);
+
+    env.producer.markNextChangeAsFormat();
+    mounted.changeContent("function demo() {\n  return 1;\n}\n", {
+      changes: [{ text: "function demo() {\n  return 1;\n}\n" }],
+    });
+
+    expect(env.bus.drain()[0]).toMatchObject({
+      type: "content-change",
+      payload: {
+        code: "function demo() {\n  return 1;\n}\n",
+        changeReason: "format",
+        flushedBy: "format",
+      },
+    });
+  });
+
+  it("does not leak a canceled format signal into later edits", async () => {
+    const env = setup();
+    const mounted = editor("const value = 1;");
+    env.setEditor(mounted);
+
+    const cancel = env.producer.markNextChangeAsFormat();
+    cancel();
+    await Promise.resolve();
+    mounted.changeContent("const value = 12;", { changes: [{ text: "2" }] });
+    vi.advanceTimersByTime(300);
+
+    expect(env.bus.drain()[0]).toMatchObject({
+      type: "content-change",
+      payload: {
+        code: "const value = 12;",
+        changeReason: "input",
+        flushedBy: "debounce",
+      },
+    });
+  });
+
   it("flushes paste, undo, redo, pause, stop, and snapshot boundaries immediately", async () => {
     const env = setup();
     const mounted = editor("old");

@@ -25,6 +25,7 @@ export type CodeEditorProps = {
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
   onChange?(): void;
   onCommand?(command: CodeEditorCommand): void;
+  onBeforeFormatApply?(): (() => void) | void;
 };
 
 type MonacoModule = typeof Monaco;
@@ -159,6 +160,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     onMount,
     onChange,
     onCommand,
+    onBeforeFormatApply,
   },
   ref,
 ) {
@@ -183,6 +185,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const onMountRef = useRef(onMount);
   const onChangeRef = useRef(onChange);
   const onCommandRef = useRef(onCommand);
+  const onBeforeFormatApplyRef = useRef(onBeforeFormatApply);
   const [loadError, setLoadError] = useState<unknown>(null);
 
   latestPropsRef.current = {
@@ -199,6 +202,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   onMountRef.current = onMount;
   onChangeRef.current = onChange;
   onCommandRef.current = onCommand;
+  onBeforeFormatApplyRef.current = onBeforeFormatApply;
 
   useImperativeHandle(
     ref,
@@ -247,6 +251,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
           editor,
           () => latestPropsRef.current.readOnly,
           (command) => onCommandRef.current?.(command),
+          () => onBeforeFormatApplyRef.current?.(),
         );
         applyControlledEditorState(editor, currentProps);
         pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
@@ -341,6 +346,7 @@ function registerEditorCommands(
   editor: Monaco.editor.IStandaloneCodeEditor,
   isReadOnly: () => boolean,
   onCommand: (command: CodeEditorCommand) => void,
+  onBeforeFormatApply: () => (() => void) | void,
 ) {
   editor.onKeyDown((event) => {
     const browserEvent = event.browserEvent;
@@ -355,7 +361,7 @@ function registerEditorCommands(
     if (isFormatShortcut(event)) {
       consumeShortcut(event);
       if (isReadOnly()) return;
-      void formatEditorDocument(editor);
+      void formatEditorDocument(editor, isReadOnly, onBeforeFormatApply);
       onCommand("format");
       return;
     }
@@ -375,7 +381,11 @@ function registerEditorCommands(
   });
 }
 
-async function formatEditorDocument(editor: Monaco.editor.IStandaloneCodeEditor) {
+async function formatEditorDocument(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  isReadOnly: () => boolean,
+  onBeforeFormatApply: () => (() => void) | void,
+) {
   const originalValue = editor.getValue();
   const action = typeof editor.getAction === "function" ? editor.getAction(FORMAT_ACTION_ID) : null;
 
@@ -385,7 +395,7 @@ async function formatEditorDocument(editor: Monaco.editor.IStandaloneCodeEditor)
     editor.trigger("keyboard", FORMAT_ACTION_ID, null);
   }
 
-  if (editor.getValue() !== originalValue) return;
+  if (isReadOnly() || editor.getValue() !== originalValue) return;
 
   const model = editor.getModel();
   if (!model) return;
@@ -395,16 +405,26 @@ async function formatEditorDocument(editor: Monaco.editor.IStandaloneCodeEditor)
   try {
     const formatter = await loadPrettierFormatter();
     const formatted = await formatter.format(originalValue, language);
-    if (!formatted || formatted === originalValue || editor.getValue() !== originalValue) return;
-    editor.pushUndoStop();
-    editor.executeEdits("code-tape-format", [
-      {
-        range: model.getFullModelRange(),
-        text: formatted,
-        forceMoveMarkers: true,
-      },
-    ]);
-    editor.pushUndoStop();
+    if (!formatted || formatted === originalValue || isReadOnly() || editor.getValue() !== originalValue) return;
+    const cancelFormatSignal = onBeforeFormatApply();
+    try {
+      editor.pushUndoStop();
+      const applied = editor.executeEdits("code-tape-format", [
+        {
+          range: model.getFullModelRange(),
+          text: formatted,
+          forceMoveMarkers: true,
+        },
+      ]);
+      if (!applied) {
+        cancelFormatSignal?.();
+        return;
+      }
+      editor.pushUndoStop();
+    } catch (error) {
+      cancelFormatSignal?.();
+      throw error;
+    }
   } catch (error) {
     console.warn("Failed to format editor document", error);
   }

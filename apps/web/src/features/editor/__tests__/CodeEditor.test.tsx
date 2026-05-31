@@ -596,6 +596,54 @@ describe("CodeEditor", () => {
     expect(editor.setValue).not.toHaveBeenCalled();
   });
 
+  it("does not apply pending formatter fallback after the editor becomes read-only", async () => {
+    let resolveFormat: (formatted: string) => void = () => {
+      throw new Error("format promise was not created");
+    };
+    prettierMock.format.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFormat = resolve;
+        }),
+    );
+    const { CodeEditor } = await import("../CodeEditor");
+    const onBeforeFormatApply = vi.fn();
+    const { rerender } = render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+        onBeforeFormatApply={onBeforeFormatApply}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
+    await waitFor(() => expect(prettierMock.format).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+        readOnly
+        onBeforeFormatApply={onBeforeFormatApply}
+      />,
+    );
+    await act(async () => {
+      resolveFormat("function demo() {\n  return 1;\n}\n");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(editor.getValue()).toBe("function demo(){\n\t\treturn 1;\n}");
+    expect(editor.executeEdits).not.toHaveBeenCalled();
+    expect(onBeforeFormatApply).not.toHaveBeenCalled();
+  });
+
   it("does not run formatter fallback for read-only replay editors", async () => {
     const { CodeEditor } = await import("../CodeEditor");
     render(

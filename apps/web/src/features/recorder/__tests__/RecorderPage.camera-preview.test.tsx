@@ -29,6 +29,7 @@ const recorderPageCameraPreviewMock = vi.hoisted(() => {
     stop: vi.fn(),
     dispose: vi.fn(),
     flushPending: vi.fn(),
+    markNextChangeAsFormat: vi.fn(() => vi.fn()),
     takeSnapshot: vi.fn(async () => null),
   } as unknown as EditorProducerHandle;
 

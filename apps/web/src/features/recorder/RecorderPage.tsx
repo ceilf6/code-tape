@@ -679,6 +679,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
             onCommand={(command) => {
               if (command === "run") void handleRun();
             }}
+            onBeforeFormatApply={() => stack.editorProducer.markNextChangeAsFormat()}
           />
           <CameraPreview
             stream={mediaStream}

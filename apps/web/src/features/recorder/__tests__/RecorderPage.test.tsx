@@ -43,6 +43,7 @@ const recorderPageMock = vi.hoisted(() => {
     previewHtml: "<div>ok</div>",
   }));
   const flushPending = vi.fn();
+  const markNextChangeAsFormat = vi.fn(() => vi.fn());
   const editorProducer = {
     start: vi.fn(),
     pause: vi.fn(),
@@ -50,6 +51,7 @@ const recorderPageMock = vi.hoisted(() => {
     stop: vi.fn(),
     dispose: vi.fn(),
     flushPending,
+    markNextChangeAsFormat,
     takeSnapshot: vi.fn(async () => null),
     setLanguage: vi.fn((next: RecordingLanguage) => {
       editorProducerDeps?.setModelLanguage?.(editorModel as never, next);
@@ -211,6 +213,7 @@ const recorderPageMock = vi.hoisted(() => {
       vi.mocked(editorProducer.dispose).mockClear();
       vi.mocked(editorProducer.takeSnapshot).mockClear();
       vi.mocked(editorProducer.setLanguage).mockClear();
+      vi.mocked(editorProducer.markNextChangeAsFormat).mockClear();
       mediaProducer.start.mockClear();
       mediaProducer.pause.mockClear();
       mediaProducer.resume.mockClear();
@@ -459,6 +462,18 @@ describe("RecorderPage", () => {
       }),
     );
     expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks editor fallback formatting as a format content change", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+    const cancel = vi.fn();
+    vi.mocked(recorderPageMock.editorProducer.markNextChangeAsFormat).mockReturnValueOnce(cancel);
+
+    render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.codeEditorProps?.onBeforeFormatApply).toBeTypeOf("function"));
+
+    expect(recorderPageMock.codeEditorProps?.onBeforeFormatApply?.()).toBe(cancel);
+    expect(recorderPageMock.editorProducer.markNextChangeAsFormat).toHaveBeenCalledTimes(1);
   });
 
   it("automatically runs changed code after the editor is idle", async () => {

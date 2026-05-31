@@ -51,6 +51,8 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   let pendingContent: PendingContent | null = null;
   let pendingScroll: ScrollPosition | null = null;
   let pasteSignalPending = false;
+  let formatSignalPending = false;
+  let formatSignalToken = 0;
   let lastContentHash: string | null = null;
   let version = 0;
   let pausedState: ReplayStableState | null = null;
@@ -176,8 +178,13 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
     event: ContentChangedEvent,
   ) => {
     if (!isListening()) return;
-    const changeReason = pasteSignalPending ? "paste" : classifyContentChange(event);
+    const changeReason = formatSignalPending
+      ? "format"
+      : pasteSignalPending
+        ? "paste"
+        : classifyContentChange(event);
     pasteSignalPending = false;
+    formatSignalPending = false;
     const code = getEditorValue(editor);
     const existingCount = pendingContent?.changeCount ?? 0;
     pendingContent = {
@@ -208,6 +215,23 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
     });
   };
 
+  const handleFormatSignal = () => {
+    if (!isListening()) return () => {};
+    const token = formatSignalToken + 1;
+    formatSignalToken = token;
+    formatSignalPending = true;
+    queueMicrotask(() => {
+      if (formatSignalToken === token) {
+        formatSignalPending = false;
+      }
+    });
+    return () => {
+      if (formatSignalToken === token) {
+        formatSignalPending = false;
+      }
+    };
+  };
+
   const bindEditor = (editor: MonacoEditor.IStandaloneCodeEditor) => {
     currentEditor = editor;
     currentLanguage = deps.getCurrentLanguage();
@@ -227,6 +251,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
       emitContent("snapshot");
     }
     pasteSignalPending = false;
+    formatSignalPending = false;
     clearScrollTimer();
     disposeEditorListeners();
     if (nextEditor) bindEditor(nextEditor);
@@ -333,6 +358,9 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
     flushPending() {
       if (!isListening()) return;
       emitContent("run");
+    },
+    markNextChangeAsFormat() {
+      return handleFormatSignal();
     },
     async takeSnapshot(): Promise<RecordingSnapshot | null> {
       syncEditor();
