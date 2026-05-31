@@ -610,7 +610,8 @@ export type IframeRuntime = {
   /**
    * Update the preview/runtime theme. Re-renders the current static preview
    * (mount default / renderPreview / renderDocument) so its background tracks
-   * the host theme; a JS run iframe keeps its boot-time theme until next run.
+   * the host theme; for an active JS run iframe, posts a message so the boot
+   * script swaps the injected theme style in place — preserves run state.
    */
   setTheme(theme: "light" | "dark"): void;
   reset(): void;
