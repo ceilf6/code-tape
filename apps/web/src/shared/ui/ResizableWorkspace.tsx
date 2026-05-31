@@ -16,6 +16,7 @@ const DEFAULT_MAX_LEFT_PERCENT = 78;
 const DEFAULT_STEP = 4;
 
 export type ResizableWorkspaceOrientation = "horizontal" | "vertical";
+export type ResizableWorkspaceDesktopBreakpoint = "md" | "lg";
 
 export type ResizableWorkspaceProps = {
   ariaLabel: string;
@@ -35,6 +36,7 @@ export type ResizableWorkspaceProps = {
   minLeftPercent?: number;
   maxLeftPercent?: number;
   step?: number;
+  desktopBreakpoint?: ResizableWorkspaceDesktopBreakpoint;
 };
 
 export function ResizableWorkspace({
@@ -51,6 +53,7 @@ export function ResizableWorkspace({
   minLeftPercent = DEFAULT_MIN_LEFT_PERCENT,
   maxLeftPercent = DEFAULT_MAX_LEFT_PERCENT,
   step = DEFAULT_STEP,
+  desktopBreakpoint = "md",
 }: ResizableWorkspaceProps) {
   const isVertical = orientation === "vertical";
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,7 +139,7 @@ export function ResizableWorkspace({
       aria-label={ariaLabel}
       className={cn(
         "flex min-h-0 flex-1",
-        isVertical ? "flex-col" : "flex-col md:flex-row",
+        isVertical ? "flex-col" : horizontalLayoutClass(desktopBreakpoint),
         className,
       )}
       style={layoutStyle}
@@ -146,7 +149,7 @@ export function ResizableWorkspace({
           "min-h-0",
           isVertical
             ? "basis-[var(--workspace-left)] shrink-0 grow-0"
-            : "md:min-w-0 md:basis-[var(--workspace-left)] md:shrink-0 md:grow-0",
+            : horizontalPaneClass(desktopBreakpoint, "left"),
           leftClassName,
         )}
       >
@@ -165,7 +168,7 @@ export function ResizableWorkspace({
           "group shrink-0 touch-none items-stretch justify-center outline-none",
           isVertical
             ? "flex h-3 w-full cursor-row-resize"
-            : "hidden w-3 cursor-col-resize md:flex",
+            : horizontalSeparatorClass(desktopBreakpoint),
           "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         )}
         onPointerDown={handlePointerDown}
@@ -184,7 +187,7 @@ export function ResizableWorkspace({
       <div
         className={cn(
           "min-h-0",
-          isVertical ? "flex-1" : "md:min-w-0 md:flex-1",
+          isVertical ? "flex-1" : horizontalPaneClass(desktopBreakpoint, "right"),
           rightClassName,
         )}
       >
@@ -192,6 +195,28 @@ export function ResizableWorkspace({
       </div>
     </div>
   );
+}
+
+function horizontalLayoutClass(breakpoint: ResizableWorkspaceDesktopBreakpoint): string {
+  return breakpoint === "lg" ? "flex-col lg:flex-row" : "flex-col md:flex-row";
+}
+
+function horizontalSeparatorClass(breakpoint: ResizableWorkspaceDesktopBreakpoint): string {
+  return breakpoint === "lg" ? "hidden w-3 cursor-col-resize lg:flex" : "hidden w-3 cursor-col-resize md:flex";
+}
+
+function horizontalPaneClass(
+  breakpoint: ResizableWorkspaceDesktopBreakpoint,
+  side: "left" | "right",
+): string {
+  if (breakpoint === "lg") {
+    return side === "left"
+      ? "lg:min-w-0 lg:basis-[var(--workspace-left)] lg:shrink-0 lg:grow-0"
+      : "lg:min-w-0 lg:flex-1";
+  }
+  return side === "left"
+    ? "md:min-w-0 md:basis-[var(--workspace-left)] md:shrink-0 md:grow-0"
+    : "md:min-w-0 md:flex-1";
 }
 
 function readStoredPercent(

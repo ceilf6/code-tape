@@ -22,6 +22,7 @@ export type CodeEditorProps = {
   selection?: ReplayStableState["editor"]["selection"];
   scrollTop?: number;
   scrollLeft?: number;
+  minHeight?: "default" | "compact";
   onMount?(editor: Monaco.editor.IStandaloneCodeEditor): void;
   onChange?(): void;
   onCommand?(command: CodeEditorCommand): void;
@@ -160,6 +161,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
     selection,
     scrollTop,
     scrollLeft,
+    minHeight = "default",
     onMount,
     onChange,
     onCommand,
@@ -190,6 +192,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   const onCommandRef = useRef(onCommand);
   const onBeforeFormatApplyRef = useRef(onBeforeFormatApply);
   const [loadError, setLoadError] = useState<unknown>(null);
+  const minHeightClass = minHeight === "compact" ? "min-h-[288px]" : "min-h-[320px]";
 
   latestPropsRef.current = {
     language,
@@ -330,8 +333,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
   }, [scrollLeft]);
 
   return (
-    <div className="relative h-full min-h-[320px] w-full bg-surface" data-code-editor>
-      <div ref={hostRef} aria-label="Code editor" className="h-full min-h-[320px] w-full" />
+    <div className={`relative h-full ${minHeightClass} w-full bg-surface`} data-code-editor>
+      <div ref={hostRef} aria-label="Code editor" className={`h-full ${minHeightClass} w-full`} />
       {loadError ? (
         <div className="absolute inset-0 flex items-center justify-center bg-surface/90 p-4" role="alert">
           <div className="max-w-sm rounded-md border border-border bg-surface-raised px-4 py-3 shadow-elevation-2">

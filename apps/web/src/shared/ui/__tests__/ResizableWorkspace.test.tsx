@@ -62,6 +62,25 @@ describe("ResizableWorkspace", () => {
     );
   });
 
+  it("can delay the horizontal split until the large breakpoint", () => {
+    render(
+      <ResizableWorkspace
+        ariaLabel="大屏测试工作区"
+        separatorLabel="调整大屏测试工作区宽度"
+        storageKey="code-tape:large-workspace:left-percent"
+        desktopBreakpoint="lg"
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+      />,
+    );
+
+    expect(screen.getByLabelText("大屏测试工作区")).toHaveClass("flex-col", "lg:flex-row");
+    expect(screen.getByRole("separator", { name: "调整大屏测试工作区宽度" })).toHaveClass(
+      "hidden",
+      "lg:flex",
+    );
+  });
+
   it("falls back from invalid persisted values and clamps out-of-range values", () => {
     window.localStorage.setItem("code-tape:invalid-workspace:left-percent", "not-a-number");
     const { unmount } = render(

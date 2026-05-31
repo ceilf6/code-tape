@@ -686,8 +686,9 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
         ariaLabel="录制工作区"
         separatorLabel="调整录制工作区宽度"
         storageKey="code-tape:workspace:recorder:left-percent"
-        leftClassName="relative min-h-[24rem] border-b border-border md:min-h-0 md:border-b-0"
-        rightClassName="flex flex-col"
+        desktopBreakpoint="lg"
+        leftClassName="relative min-h-[18rem] border-b border-border lg:min-h-0 lg:border-b-0"
+        rightClassName="flex flex-1 flex-col"
         left={
           <>
             <CodeEditor
@@ -696,6 +697,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
               initialValue=""
               fontSize={editorFontSize}
               theme={theme.resolved}
+              minHeight="compact"
               readOnly={controllerState.status === "paused"}
               onChange={scheduleAutoRun}
               onCommand={(command) => {
@@ -796,7 +798,10 @@ function RecorderSetupToolbar({
   onRequestMediaPermission,
 }: RecorderSetupToolbarProps) {
   return (
-    <div className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-2">
+    <div
+      className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-2"
+      data-recorder-setup
+    >
       <LabeledSelect
         label="语言"
         value={language}
@@ -871,13 +876,13 @@ type LabeledSelectProps = {
 
 function LabeledSelect({ label, value, disabled, options, onChange }: LabeledSelectProps) {
   return (
-    <label className="flex items-center gap-2 text-xs text-muted">
+    <label className="flex max-w-full min-w-0 items-center gap-2 text-xs text-muted">
       <span className="shrink-0">{label}</span>
       <select
         aria-label={label}
         value={value}
         disabled={disabled}
-        className="h-8 min-w-[8rem] rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-8 w-44 max-w-full rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
         onChange={(event) => onChange(event.currentTarget.value)}
       >
         {options.map((option) => (
