@@ -1,7 +1,11 @@
 import { Captions, Loader2, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { SubtitleChapterList } from "./SubtitleChapterList";
+import { SubtitleLlmConfigButton } from "./SubtitleLlmConfigButton";
 import { applySubtitleCorrection } from "./subtitleCorrection";
+import { createExternalLlmSubtitlePostProcessor } from "./externalLlmSubtitlePostProcessor";
+import { createFallbackSubtitlePostProcessor } from "./fallbackSubtitlePostProcessor";
+import { isExternalLlmConfigured, loadExternalLlmConfig } from "./subtitleLlmConfig";
 import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
 import { createWorkerBackedHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessorWorkerClient";
 import { createSubtitleStore } from "./subtitleStore";
@@ -63,15 +67,32 @@ export function SubtitlePanel({
     () => injectedTranscriber ?? createHuggingFaceSubtitleTranscriber(),
     [injectedTranscriber],
   );
+  const [llmConfigVersion, setLlmConfigVersion] = useState(0);
   const postProcessor = useMemo(
-    () =>
-      injectedPostProcessor === undefined
-        ? createWorkerBackedHuggingFaceSubtitlePostProcessor({
-            model: resolveSubtitlePostProcessorModel(),
-            onMetric: logSubtitlePostProcessorMetric,
-          })
-        : injectedPostProcessor,
-    [injectedPostProcessor],
+    () => {
+      if (injectedPostProcessor !== undefined) return injectedPostProcessor;
+      const localProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+        model: resolveSubtitlePostProcessorModel(),
+        onMetric: logSubtitlePostProcessorMetric,
+      });
+      const externalConfig = loadExternalLlmConfig();
+      if (!isExternalLlmConfigured(externalConfig)) return localProcessor;
+      const externalProcessor = createExternalLlmSubtitlePostProcessor({ config: externalConfig });
+      return createFallbackSubtitlePostProcessor(externalProcessor, localProcessor, {
+        onFallback: (error) =>
+          console.warn("[code-tape] external subtitle LLM failed, falling back to local model", error),
+      });
+    },
+    // llmConfigVersion bumps when the user saves/clears the external LLM config,
+    // forcing the post-processor to rebuild against the new config.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [injectedPostProcessor, llmConfigVersion],
+  );
+  const externalLlmConfigured = useMemo(
+    () => isExternalLlmConfigured(loadExternalLlmConfig()),
+    // Recompute when the user saves/clears the config (version bump).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [llmConfigVersion],
   );
   const [track, setTrack] = useState<SubtitleTrack | null>(null);
   const [chapters, setChapters] = useState<SubtitleChapter[]>([]);
@@ -357,6 +378,10 @@ export function SubtitlePanel({
           ) : null}
         </div>
         <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+          <SubtitleLlmConfigButton
+            configured={externalLlmConfigured}
+            onConfigChange={() => setLlmConfigVersion((version) => version + 1)}
+          />
           <button
             type="button"
             aria-label={primaryActionLabel}
