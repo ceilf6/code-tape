@@ -2497,6 +2497,37 @@ test("GET /api/recordings still accepts the legacy x-owner-token header", async 
   assert.equal(response.status, 200);
 });
 
+test("POST /api/auth/token works even when auth is not explicitly injected", async () => {
+  // 不显式注入 auth：handler 应默认构造 auth service，使 token 端点始终可用，
+  // 避免新前端在缺省装配点拿到 404。
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata: createMemoryMetadataRepository(),
+      objectStorage: createMemoryObjectStorage(),
+    }),
+    createRequestId: () => "req-auth-default",
+  });
+  const tokenResp = await handler(
+    new Request("http://localhost/api/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken: "device-token-default" }),
+    }),
+  );
+  const body = (await tokenResp.json()) as { accessToken: string; tokenType: string };
+  assert.equal(tokenResp.status, 200);
+  assert.equal(body.tokenType, "Bearer");
+
+  // 用拿到的 token 访问业务端点应成功。
+  const listResp = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { authorization: `Bearer ${body.accessToken}` },
+    }),
+  );
+  assert.equal(listResp.status, 200);
+});
+
 function createAuthEnabledHandler(createRequestId: () => string) {
   const service = createCloudRecordingService({
     metadata: createMemoryMetadataRepository(),
