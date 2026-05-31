@@ -1,4 +1,6 @@
 import { Outlet, NavLink } from "react-router-dom";
+import { Monitor, Moon, Sun } from "lucide-react";
+import type { ThemePreference } from "@/shared/ui";
 import { useTheme } from "@/shared/ui/useTheme";
 
 /**
@@ -9,9 +11,20 @@ import { useTheme } from "@/shared/ui/useTheme";
  */
 export function AppShell() {
   const theme = useTheme();
+  const themeOptions: Array<{
+    preference: ThemePreference;
+    label: string;
+    ariaLabel: string;
+    icon: typeof Monitor;
+  }> = [
+    { preference: "system", label: "系统", ariaLabel: "跟随系统主题", icon: Monitor },
+    { preference: "light", label: "浅色", ariaLabel: "切换到浅色主题", icon: Sun },
+    { preference: "dark", label: "深色", ariaLabel: "切换到深色主题", icon: Moon },
+  ];
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-12 items-center gap-4 border-b border-border bg-surface/80 px-4 backdrop-blur">
+      <header className="flex h-12 items-center gap-2 border-b border-border bg-surface/80 px-2 backdrop-blur sm:gap-4 sm:px-4">
         <span className="font-display text-xs font-semibold tracking-[0.24em]">CODE-TAPE</span>
         <nav className="flex items-center gap-1 text-sm">
           <NavLink
@@ -50,13 +63,34 @@ export function AppShell() {
           </NavLink>
         </nav>
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={theme.toggle}
-          className="rounded-md border border-border bg-surface px-3 py-1 text-xs text-muted hover:text-foreground"
+        <div
+          aria-label="主题偏好"
+          className="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-surface p-0.5"
+          role="group"
         >
-          {theme.resolved === "dark" ? "☾ Dark" : "☀ Light"}
-        </button>
+          {themeOptions.map((option) => {
+            const Icon = option.icon;
+            const selected = theme.preference === option.preference;
+            return (
+              <button
+                key={option.preference}
+                type="button"
+                aria-label={option.ariaLabel}
+                aria-pressed={selected}
+                onClick={() => theme.setPreference(option.preference)}
+                className={[
+                  "inline-flex h-7 w-8 items-center justify-center gap-1 rounded-[5px] text-xs transition-colors sm:w-auto sm:min-w-14 sm:px-2",
+                  selected
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted hover:bg-surface-raised hover:text-foreground",
+                ].join(" ")}
+              >
+                <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </header>
       <main className="min-h-0 flex-1 overflow-hidden">
         <Outlet />

@@ -27,8 +27,10 @@ test("recorder route renders Monaco with usable recorder controls", async ({ pag
   await expect(page.getByRole("button", { name: "停止录制" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "运行代码" })).toBeEnabled();
 
-  await page.getByRole("button", { name: /Dark|Light/ }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", /light|dark/);
+  await page.getByRole("button", { name: "切换到浅色主题" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "切换到深色主题" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   expect(runtimeErrors.filter((message) => /monaco|worker/i.test(message))).toEqual([]);
 });
 

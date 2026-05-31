@@ -1,9 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
 import { AppShell } from "../AppShell";
 import { appRoutes } from "../routes";
+
+beforeEach(() => {
+  window.localStorage.clear();
+  document.documentElement.dataset.theme = "";
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: query === "(prefers-color-scheme: dark)",
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+});
 
 describe("appRoutes", () => {
   it("registers cloud replay routes", () => {
@@ -45,5 +63,37 @@ describe("AppShell", () => {
     );
 
     expect(screen.getByRole("link", { name: "面试" })).toHaveAttribute("href", "/interview");
+  });
+
+  it("lets users choose system, light, and dark theme preferences", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <AppShell />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    const systemButton = screen.getByRole("button", { name: "跟随系统主题" });
+    const lightButton = screen.getByRole("button", { name: "切换到浅色主题" });
+    const darkButton = screen.getByRole("button", { name: "切换到深色主题" });
+
+    expect(systemButton).toHaveAttribute("aria-pressed", "true");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    fireEvent.click(lightButton);
+    expect(lightButton).toHaveAttribute("aria-pressed", "true");
+    expect(window.localStorage.getItem("code-tape:theme")).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    fireEvent.click(darkButton);
+    expect(darkButton).toHaveAttribute("aria-pressed", "true");
+    expect(window.localStorage.getItem("code-tape:theme")).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    fireEvent.click(systemButton);
+    expect(systemButton).toHaveAttribute("aria-pressed", "true");
+    expect(window.localStorage.getItem("code-tape:theme")).toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });
