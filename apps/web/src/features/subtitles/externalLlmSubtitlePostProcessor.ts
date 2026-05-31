@@ -14,6 +14,20 @@ import type { SubtitleCorrectionResult, SubtitlePostProcessor, SubtitleTrack } f
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS = 2_048;
 const ABORT_MESSAGE = "字幕纠错已取消";
+// External request gets its own budget, shorter than the panel's global 60s
+// post-process timeout, so a slow/hung endpoint trips THIS timeout first and
+// leaves time for the local fallback to still run under the global budget.
+const DEFAULT_EXTERNAL_REQUEST_TIMEOUT_MS = 45_000;
+
+// Thrown when the external request exceeds its own timeout (not a user cancel).
+// The fallback wrapper treats this as a recoverable failure and runs the local
+// model, unlike a genuine user/global AbortError which it rethrows.
+export class ExternalLlmTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`外部 LLM 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+    this.name = "ExternalLlmTimeoutError";
+  }
+}
 
 // Stronger system prompt for capable external models: the local fine-tuned model
 // is tiny, so its prompt is terse. External models can do richer term correction
@@ -33,6 +47,7 @@ const EXTERNAL_SYSTEM_CONTENT = [
 export type ExternalLlmSubtitlePostProcessorOptions = {
   config: ExternalLlmConfig;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 };
 
 export function createExternalLlmSubtitlePostProcessor(
@@ -40,18 +55,19 @@ export function createExternalLlmSubtitlePostProcessor(
 ): SubtitlePostProcessor {
   const { config } = options;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_EXTERNAL_REQUEST_TIMEOUT_MS;
 
   return {
     async process(input) {
       throwIfAborted(input.signal);
       if (input.track.segments.length <= POSTPROCESSOR_CHUNK_SEGMENTS) {
-        return processChunk(input.track, input, config, fetchImpl);
+        return processChunk(input.track, input, config, fetchImpl, requestTimeoutMs);
       }
       const chunks = chunkSubtitleTrack(input.track, POSTPROCESSOR_CHUNK_SEGMENTS);
       const merged: SubtitleCorrectionResult = { segments: [], chapters: [] };
       for (const chunk of chunks) {
         throwIfAborted(input.signal);
-        const result = await processChunk(chunk, input, config, fetchImpl);
+        const result = await processChunk(chunk, input, config, fetchImpl, requestTimeoutMs);
         merged.segments.push(...result.segments);
         merged.chapters?.push(...(result.chapters ?? []));
       }
@@ -66,12 +82,13 @@ async function processChunk(
   input: { context?: Parameters<SubtitlePostProcessor["process"]>[0]["context"]; signal?: AbortSignal },
   config: ExternalLlmConfig,
   fetchImpl: typeof fetch,
+  requestTimeoutMs: number,
 ): Promise<SubtitleCorrectionResult> {
   const messages = buildSubtitlePostProcessorMessages(
     { track, context: input.context },
     { systemContent: EXTERNAL_SYSTEM_CONTENT },
   );
-  const generatedText = await requestCompletion(messages, config, fetchImpl, input.signal);
+  const generatedText = await requestCompletion(messages, config, fetchImpl, requestTimeoutMs, input.signal);
   throwIfAborted(input.signal);
   try {
     return constrainCorrectionToTrack(extractSubtitleCorrectionResult(generatedText), track);
@@ -87,6 +104,7 @@ async function requestCompletion(
   messages: SubtitlePostProcessorMessage[],
   config: ExternalLlmConfig,
   fetchImpl: typeof fetch,
+  requestTimeoutMs: number,
   signal?: AbortSignal,
 ): Promise<string> {
   const request =
@@ -94,12 +112,34 @@ async function requestCompletion(
       ? buildAnthropicRequest(messages, config)
       : buildOpenAiRequest(messages, config);
 
+  // Combine the caller's signal (user cancel / global budget) with our own
+  // request timeout. We track which one fired so a timeout surfaces as a
+  // recoverable ExternalLlmTimeoutError while a real cancel stays an AbortError.
+  const requestController = new AbortController();
+  let didTimeout = false;
+  const onCallerAbort = () => requestController.abort();
+  if (signal) {
+    if (signal.aborted) requestController.abort();
+    else signal.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  const timeoutId =
+    Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+      ? setTimeout(() => {
+          didTimeout = true;
+          requestController.abort();
+        }, requestTimeoutMs)
+      : null;
+
   let response: Response;
   try {
-    response = await fetchImpl(request.url, { ...request.init, signal });
+    response = await fetchImpl(request.url, { ...request.init, signal: requestController.signal });
   } catch (error) {
+    if (didTimeout) throw new ExternalLlmTimeoutError(requestTimeoutMs);
     if (isAbortError(error)) throw error;
     throw new Error(`外部 LLM 请求失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", onCallerAbort);
   }
   if (!response.ok) {
     const detail = await safeReadText(response);

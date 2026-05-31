@@ -23,6 +23,11 @@ export function createFallbackSubtitlePostProcessor(
       try {
         return await primary.process(input);
       } catch (error) {
+        // Genuine user/global cancellation rethrows; any other failure — including
+        // the external backend's own request timeout (ExternalLlmTimeoutError, which
+        // is NOT an AbortError) — falls back to the local model. The local model
+        // still runs because the external timeout uses its own controller, leaving
+        // the caller's signal live.
         if (isAbortError(error) || input.signal?.aborted) throw error;
         options.onFallback?.(error);
         return fallback.process(input);

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createExternalLlmSubtitlePostProcessor } from "../externalLlmSubtitlePostProcessor";
+import {
+  ExternalLlmTimeoutError,
+  createExternalLlmSubtitlePostProcessor,
+} from "../externalLlmSubtitlePostProcessor";
 import type { ExternalLlmConfig } from "../subtitleLlmConfig";
 import type { SubtitleTrack } from "../types";
 
@@ -121,6 +124,41 @@ describe("createExternalLlmSubtitlePostProcessor", () => {
     const controller = new AbortController();
     await processor.process({ track, signal: controller.signal });
     const init = fetchImpl.mock.calls[0]![1] as RequestInit;
-    expect(init.signal).toBe(controller.signal);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("throws ExternalLlmTimeoutError (not AbortError) when its own request timeout fires", async () => {
+    // fetch hangs until its signal aborts; the internal timeout should trip first
+    // and surface as a recoverable timeout so the fallback wrapper runs the local model.
+    const fetchImpl = vi.fn<FetchMock>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    );
+    const processor = createExternalLlmSubtitlePostProcessor({
+      config: openAiConfig,
+      fetchImpl,
+      requestTimeoutMs: 10,
+    });
+    await expect(processor.process({ track })).rejects.toBeInstanceOf(ExternalLlmTimeoutError);
+  });
+
+  it("propagates a caller abort as AbortError even with a request timeout set", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn<FetchMock>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    );
+    const processor = createExternalLlmSubtitlePostProcessor({
+      config: openAiConfig,
+      fetchImpl,
+      requestTimeoutMs: 10_000,
+    });
+    const promise = processor.process({ track, signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
 });

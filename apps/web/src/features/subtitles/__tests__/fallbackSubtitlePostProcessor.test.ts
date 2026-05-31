@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFallbackSubtitlePostProcessor } from "../fallbackSubtitlePostProcessor";
+import { ExternalLlmTimeoutError } from "../externalLlmSubtitlePostProcessor";
 import type { SubtitleCorrectionResult, SubtitlePostProcessor, SubtitlePostProcessorInput } from "../types";
 
 const input: SubtitlePostProcessorInput = {
@@ -41,6 +42,21 @@ describe("createFallbackSubtitlePostProcessor", () => {
 
     expect(await wrapped.process(input)).toEqual(fallbackResult);
     expect(onFallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the external request times out (not a user cancel)", async () => {
+    const timeoutError = new ExternalLlmTimeoutError(45_000);
+    const primary = processor({
+      process: vi.fn(async () => {
+        throw timeoutError;
+      }),
+    });
+    const fallback = processor({ process: vi.fn(async () => fallbackResult) });
+    const onFallback = vi.fn();
+    const wrapped = createFallbackSubtitlePostProcessor(primary, fallback, { onFallback });
+
+    expect(await wrapped.process(input)).toEqual(fallbackResult);
+    expect(onFallback).toHaveBeenCalledWith(timeoutError);
   });
 
   it("does not fall back when the primary aborts", async () => {
