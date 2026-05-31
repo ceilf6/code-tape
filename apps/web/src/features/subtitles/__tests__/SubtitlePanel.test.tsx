@@ -370,9 +370,13 @@ describe("SubtitlePanel", () => {
       })),
     };
     const postProcessor: SubtitlePostProcessor = {
-      process: vi.fn(async () => {
-        throw new Error("LLM JSON parse failed");
-      }),
+      process: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("LLM JSON parse failed"))
+        .mockResolvedValueOnce({
+          segments: [{ id: "subtitle-1", text: "useState hook" }],
+          chapters: [{ title: "失败后重试", startMs: 0, endMs: 1_000 }],
+        }),
     };
 
     render(
@@ -397,6 +401,15 @@ describe("SubtitlePanel", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"));
     expect(screen.getByText("use state hook")).toBeInTheDocument();
+
+    const retryButton = screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL });
+    await waitFor(() => expect(retryButton).not.toBeDisabled());
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(screen.getByText("useState hook")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /失败后重试/ })).toBeInTheDocument();
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(2);
+    expect(postProcessor.process).toHaveBeenCalledTimes(2);
   });
 
   it("recovers from stale Transformers chunks during local LLM post-processing without showing the raw import error", async () => {
