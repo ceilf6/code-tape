@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
+import { TooltipProvider } from "@/shared/ui";
 import { ThemeProvider } from "@/shared/ui/themeProvider";
 import { AppShell } from "../AppShell";
 import { appRoutes } from "../routes";
@@ -23,6 +24,18 @@ beforeEach(() => {
   });
 });
 
+function renderAppShell() {
+  return render(
+    <ThemeProvider>
+      <TooltipProvider>
+        <MemoryRouter>
+          <AppShell />
+        </MemoryRouter>
+      </TooltipProvider>
+    </ThemeProvider>,
+  );
+}
+
 describe("appRoutes", () => {
   it("registers cloud replay routes", () => {
     const childPaths = appRoutes[0]?.children?.map((route) => route.path) ?? [];
@@ -41,38 +54,30 @@ describe("appRoutes", () => {
 
 describe("AppShell", () => {
   it("uses the uppercase wordmark in the top navigation", () => {
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AppShell />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+    renderAppShell();
 
     expect(screen.getByText("CODE-TAPE")).toBeInTheDocument();
     expect(screen.queryByText("code-tape")).not.toBeInTheDocument();
   });
 
   it("exposes the interview lobby entry in the top navigation", () => {
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AppShell />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+    renderAppShell();
 
     expect(screen.getByRole("link", { name: "面试" })).toHaveAttribute("href", "/interview");
   });
 
+  it("links the GitHub icon to the repository in a new tab", () => {
+    renderAppShell();
+
+    const repositoryLink = screen.getByRole("link", { name: "打开 GitHub 仓库" });
+
+    expect(repositoryLink).toHaveAttribute("href", "https://github.com/ceilf6/code-tape");
+    expect(repositoryLink).toHaveAttribute("target", "_blank");
+    expect(repositoryLink).toHaveAttribute("rel", "noreferrer");
+  });
+
   it("lets users choose system, light, and dark theme preferences", () => {
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AppShell />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+    renderAppShell();
 
     const systemButton = screen.getByRole("button", { name: "跟随系统主题" });
     const lightButton = screen.getByRole("button", { name: "切换到浅色主题" });

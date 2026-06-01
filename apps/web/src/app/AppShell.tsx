@@ -1,7 +1,9 @@
 import { Outlet, NavLink } from "react-router-dom";
-import { Monitor, Moon, Sun } from "lucide-react";
-import type { ThemeMode, ThemePreference } from "@/shared/ui";
+import { Github, Monitor, Moon, Sun } from "lucide-react";
+import { Tooltip, type ThemeMode, type ThemePreference } from "@/shared/ui";
 import { useTheme } from "@/shared/ui/useTheme";
+
+const GITHUB_REPOSITORY_URL = "https://github.com/ceilf6/code-tape";
 
 const THEME_PREFERENCE_LABEL: Record<ThemePreference, string> = {
   system: "跟随系统",
@@ -75,6 +77,21 @@ export function AppShell() {
           </NavLink>
         </nav>
         <span className="flex-1" />
+        <Tooltip content="打开 GitHub 仓库">
+          <a
+            href={GITHUB_REPOSITORY_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="打开 GitHub 仓库"
+            className={[
+              "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted transition-colors",
+              "hover:bg-surface-raised hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            ].join(" ")}
+          >
+            <Github aria-hidden="true" className="h-4 w-4" />
+          </a>
+        </Tooltip>
         <div
           aria-label={themeStatusLabel}
           className="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-surface p-0.5"
