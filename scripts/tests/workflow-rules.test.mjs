@@ -706,6 +706,7 @@ test('contract check launches npx through cmd on Windows', () => {
   assert.match(contractCheck, /process\.platform === 'win32'/u);
   assert.match(contractCheck, /command: 'cmd\.exe'/u);
   assert.match(contractCheck, /'npx\.cmd'/u);
+  assert.match(contractCheck, /'--prefer-offline'/u);
   assert.match(contractCheck, /execFileSync\(command, args/u);
   assert.doesNotMatch(contractCheck, /execFileSync\('npx'/u);
 });

@@ -106,7 +106,7 @@ function runGitNexusAnalyze(mode) {
 }
 
 function getGitNexusAnalyzeInvocation() {
-  const args = ['--yes', `gitnexus@${GITNEXUS_VERSION}`, 'analyze', '--force', '--index-only'];
+  const args = ['--yes', '--prefer-offline', `gitnexus@${GITNEXUS_VERSION}`, 'analyze', '--force', '--index-only'];
   if (process.platform === 'win32') {
     return { command: 'cmd.exe', args: ['/d', '/s', '/c', 'npx.cmd', ...args] };
   }
