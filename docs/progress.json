@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T04:14:57Z",
+  "updatedAt": "2026-06-01T04:17:10Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
         247,
-        269
+        269,
+        274
       ],
       "completedIssues": [
         11,
@@ -1537,6 +1538,20 @@
       "claimedAt": "2026-06-01T04:03:23Z",
       "closedAt": "2026-06-01T04:14:57Z",
       "mergedPr": 273
+    },
+    "274": {
+      "number": 274,
+      "title": "修复回放进度条显示与拖拽状态异常",
+      "score": 2,
+      "stack": [
+        "react",
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T04:17:10Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
