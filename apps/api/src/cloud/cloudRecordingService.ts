@@ -253,10 +253,20 @@ export function createCloudRecordingService(deps: {
       const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
       const page = recordings.slice(startIndex, startIndex + pageSize);
       const hasMore = startIndex + pageSize < recordings.length;
+      const items = await Promise.all(
+        page.map(async (recording) =>
+          toListItem(recording, await getAssetUrl({
+            metadata: deps.metadata,
+            objectStorage: deps.objectStorage,
+            recordingId: recording.id,
+            kind: "thumbnail",
+          })),
+        ),
+      );
       return {
         ok: true,
         value: {
-          items: page.map(toListItem),
+          items,
           nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
         },
       };
@@ -491,7 +501,7 @@ export function createCloudRecordingService(deps: {
   };
 }
 
-function toListItem(recording: CloudRecordingRecord): CloudRecordingListItem {
+function toListItem(recording: CloudRecordingRecord, thumbnailUrl: string | null): CloudRecordingListItem {
   return {
     id: recording.id,
     title: recording.title,
@@ -500,9 +510,20 @@ function toListItem(recording: CloudRecordingRecord): CloudRecordingListItem {
     initialLanguage: recording.initialLanguage,
     hasAudio: recording.hasAudio,
     hasCamera: recording.hasCamera,
-    thumbnailUrl: null,
+    thumbnailUrl,
     visibility: recording.visibility,
   };
+}
+
+async function getAssetUrl(input: {
+  metadata: MetadataRepository;
+  objectStorage: ObjectStorage;
+  recordingId: string;
+  kind: RecordingAssetKind;
+}): Promise<string | null> {
+  const assets = await input.metadata.listAssets(input.recordingId);
+  const asset = assets.find((candidate) => candidate.kind === input.kind);
+  return asset ? input.objectStorage.getAssetUrl(asset.objectKey) : null;
 }
 
 function toDetail(recording: CloudRecordingRecord): CloudRecordingDetail {

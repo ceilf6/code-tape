@@ -145,6 +145,40 @@ test("GET /api/recordings returns ready recordings for the current owner sorted 
   assert.equal(body.items[0]!.hasAudio, true);
 });
 
+test("GET /api/recordings includes thumbnail URL when a ready recording has a thumbnail asset", async () => {
+  const metadata = createMemoryMetadataRepository();
+  const objectStorage = createLocalDevObjectStorage({ publicBaseUrl: "http://localhost" });
+  await seedRecordingWithAssets(metadata, {
+    id: "rec-ready-thumbnail",
+    ownerId: "owner-1",
+    status: "ready",
+  }, ["manifest", "meta", "events", "snapshots", "thumbnail"]);
+  const handler = createCloudApiHandler({
+    service: createCloudRecordingService({
+      metadata,
+      objectStorage,
+    }),
+    createRequestId: () => "req-list-thumbnail",
+  });
+
+  const response = await handler(
+    new Request("http://localhost/api/recordings", {
+      method: "GET",
+      headers: { "x-owner-token": "owner-1" },
+    }),
+  );
+  const body = (await response.json()) as {
+    items: Array<{ id: string; thumbnailUrl: string | null }>;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.items[0]?.id, "rec-ready-thumbnail");
+  assert.equal(
+    body.items[0]?.thumbnailUrl,
+    buildLocalDevObjectUrl("http://localhost", "recordings/rec-ready-thumbnail/thumbnails/poster.webp"),
+  );
+});
+
 test("GET /api/recordings paginates ready recordings without skipping the first page", async () => {
   const metadata = createMemoryMetadataRepository();
   await seedRecording(metadata, { id: "rec-ready-old", ownerId: "owner-1", status: "ready", createdAt: "2026-05-27T00:00:00.000Z" });
