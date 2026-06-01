@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T08:31:49Z",
+  "updatedAt": "2026-06-01T08:47:54Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
         247,
-        269
+        269,
+        281
       ],
       "completedIssues": [
         11,
@@ -1559,6 +1560,19 @@
       "status": "closed",
       "closedAt": "2026-06-01T08:31:49Z",
       "mergedPr": 278
+    },
+    "281": {
+      "number": 281,
+      "title": "修复 iframe runtime postMessage 通配符目标",
+      "score": 2,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T08:47:54Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
