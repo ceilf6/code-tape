@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayStableState } from "@/shared/recording-schema";
 import { RuntimeOutputPanel } from "../RuntimeOutputPanel";
 
@@ -23,8 +23,12 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("RuntimeOutputPanel", () => {
-  it("renders the status badge and a No output placeholder when empty", () => {
+  it("renders the status badge and the empty-state placeholder when there is no output", () => {
     render(<RuntimeOutputPanel runtime={makeRuntime({ status: "idle" })} />);
 
     expect(screen.getByText("Console")).toBeInTheDocument();
@@ -49,6 +53,7 @@ describe("RuntimeOutputPanel", () => {
     expect(screen.getByRole("button", { name: "stdout 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "stderr 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "error 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "stdout 1" })).not.toHaveAttribute("aria-label");
     expect(screen.getByText("out line")).toBeInTheDocument();
     expect(screen.getByText("warn line")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
@@ -96,7 +101,30 @@ describe("RuntimeOutputPanel", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("输出已复制");
   });
 
-  it("reports copy failures", async () => {
+  it("clears copy success feedback after a short confirmation window", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<RuntimeOutputPanel runtime={makeRuntime({ status: "success", stdout: ["done"] })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制运行输出" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("输出已复制");
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("reports copy failures as alerts", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
@@ -105,6 +133,8 @@ describe("RuntimeOutputPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "复制运行输出" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("复制失败");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("复制失败");
+    expect(alert).toHaveClass("text-danger");
   });
 });

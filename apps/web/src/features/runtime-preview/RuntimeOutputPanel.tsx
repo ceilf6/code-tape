@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 export type RuntimeOutputPanelProps = {
@@ -17,6 +17,10 @@ type RuntimeOutputEntry = {
   channel: Exclude<RuntimeOutputChannel, "all">;
   line: string;
 };
+type CopyFeedback = {
+  message: string;
+  tone: "success" | "error";
+};
 
 const CHANNEL_OPTIONS: { value: RuntimeOutputChannel; label: string }[] = [
   { value: "all", label: "全部" },
@@ -27,7 +31,8 @@ const CHANNEL_OPTIONS: { value: RuntimeOutputChannel; label: string }[] = [
 
 export function RuntimeOutputPanel({ runtime }: RuntimeOutputPanelProps) {
   const [selectedChannel, setSelectedChannel] = useState<RuntimeOutputChannel>("all");
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+  const clearCopyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const entries = useMemo(() => runtimeOutputEntries(runtime), [runtime]);
   const counts = {
     all: entries.length,
@@ -47,13 +52,28 @@ export function RuntimeOutputPanel({ runtime }: RuntimeOutputPanelProps) {
   const selectedLabel =
     CHANNEL_OPTIONS.find((option) => option.value === selectedChannel)?.label ?? "output";
 
+  useEffect(() => {
+    return () => {
+      if (clearCopyFeedbackTimer.current) clearTimeout(clearCopyFeedbackTimer.current);
+    };
+  }, []);
+
+  const showCopyFeedback = (nextFeedback: CopyFeedback) => {
+    if (clearCopyFeedbackTimer.current) clearTimeout(clearCopyFeedbackTimer.current);
+    setCopyFeedback(nextFeedback);
+    clearCopyFeedbackTimer.current = setTimeout(() => {
+      setCopyFeedback(null);
+      clearCopyFeedbackTimer.current = null;
+    }, 2000);
+  };
+
   const copyOutput = async () => {
     if (!hasOutput) return;
     try {
       await navigator.clipboard.writeText(formatRuntimeOutput(entries));
-      setCopyFeedback("输出已复制");
+      showCopyFeedback({ message: "输出已复制", tone: "success" });
     } catch {
-      setCopyFeedback("复制失败");
+      showCopyFeedback({ message: "复制失败", tone: "error" });
     }
   };
 
@@ -81,7 +101,7 @@ export function RuntimeOutputPanel({ runtime }: RuntimeOutputPanelProps) {
             onClick={copyOutput}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-foreground/80 transition-[background-color,color] duration-150 ease-out-soft hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            {copyFeedback === "输出已复制" ? (
+            {copyFeedback?.tone === "success" ? (
               <Check aria-hidden size={14} />
             ) : (
               <Copy aria-hidden size={14} />
@@ -99,7 +119,6 @@ export function RuntimeOutputPanel({ runtime }: RuntimeOutputPanelProps) {
               key={option.value}
               type="button"
               aria-pressed={selected}
-              aria-label={`${option.label} ${count}`}
               className={[
                 "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -117,8 +136,14 @@ export function RuntimeOutputPanel({ runtime }: RuntimeOutputPanelProps) {
       </div>
 
       {copyFeedback ? (
-        <p role="status" className="mb-2 text-[11px] text-muted">
-          {copyFeedback}
+        <p
+          role={copyFeedback.tone === "error" ? "alert" : "status"}
+          className={[
+            "mb-2 text-[11px]",
+            copyFeedback.tone === "error" ? "text-danger" : "text-muted",
+          ].join(" ")}
+        >
+          {copyFeedback.message}
         </p>
       ) : null}
 
