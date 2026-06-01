@@ -209,6 +209,28 @@ describe("ReplayControls", () => {
       await waitFor(() => expect(onSeek).toHaveBeenCalledWith(25_000));
     });
 
+    it("keeps a slight drag preview while playback advances before commit", () => {
+      const onSeek = vi.fn();
+      const { rerender, props } = renderControls({
+        durationMs: 100_000,
+        onSeek,
+        state: state("playing", { timelineTimeMs: 50_000 }),
+      });
+
+      const progressSlider = screen.getByRole("slider", { name: "播放进度" });
+      fireEvent.change(progressSlider, { target: { value: "50.1" } });
+
+      rerender(
+        <ReplayControls
+          {...props}
+          state={state("playing", { timelineTimeMs: 50_050 })}
+        />,
+      );
+
+      expect(progressSlider).toHaveValue("50.1");
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it("does not issue playback while an async seek is pending", async () => {
       let resolveSeek: () => void = () => {};
       const onSeek = vi.fn(

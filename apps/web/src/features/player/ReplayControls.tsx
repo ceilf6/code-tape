@@ -41,6 +41,8 @@ export function ReplayControls({
   const [ratePopoverOpen, setRatePopoverOpen] = useState(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
   const [pendingProgressPercent, setPendingProgressPercent] = useState<number | null>(null);
+  const [progressInteraction, setProgressInteraction] =
+    useState<"idle" | "dragging" | "committed">("idle");
   const rateCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlaying = state.status === "playing" || state.status === "buffering";
@@ -67,12 +69,17 @@ export function ReplayControls({
     if (pendingProgressPercent === null) return;
     if (safeDuration === 0 || state.status === "loading" || state.status === "error") {
       setPendingProgressPercent(null);
+      setProgressInteraction("idle");
       return;
     }
-    if (Math.abs(baseProgressPercent - pendingProgressPercent) <= 0.1) {
+    if (
+      progressInteraction === "committed" &&
+      Math.abs(baseProgressPercent - pendingProgressPercent) <= 0.1
+    ) {
       setPendingProgressPercent(null);
+      setProgressInteraction("idle");
     }
-  }, [baseProgressPercent, pendingProgressPercent, safeDuration, state.status]);
+  }, [baseProgressPercent, pendingProgressPercent, progressInteraction, safeDuration, state.status]);
 
   const openRatePopover = () => {
     if (rateCloseTimeoutRef.current) clearTimeout(rateCloseTimeoutRef.current);
@@ -105,16 +112,19 @@ export function ReplayControls({
   const handleSliderChange = (value: number) => {
     if (timelineDisabled) return;
     setPendingProgressPercent(value);
+    setProgressInteraction("dragging");
   };
 
   const handleSliderCommit = async (value: number) => {
     if (timelineDisabled) return;
     const targetMs = (value / 100) * safeDuration;
     setPendingProgressPercent(value);
+    setProgressInteraction("committed");
     try {
       await onSeek(targetMs);
     } catch (err) {
       setPendingProgressPercent(null);
+      setProgressInteraction("idle");
       throw err;
     }
   };
