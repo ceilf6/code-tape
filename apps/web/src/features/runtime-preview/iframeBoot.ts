@@ -4,15 +4,15 @@
  * Loaded as `<script type="module">` inside the sandboxed iframe. Responsibilities:
  *   - intercept console.{log,warn,error} and forward to the parent
  *   - block alert/confirm/prompt (return null) and report via blocked-alert
- *   - listen for `init` messages carrying user JS to evaluate
+ *   - receive `init` and `set-theme` commands over a MessagePort
  *   - capture sync + async errors and post `error` events
  *   - on completion (Promise resolution or sync return), serialize document.body
  *     to a previewHtml string so the player can re-render it later
  *
- * This script never trusts message.source/origin — the parent validates that on
- * its side via IframeRuntime.acceptRuntimeMessage(). The script DOES verify that
- * messages it receives carry `type === "init"` and the correct `runId`, so a
- * second postMessage with a stale runId doesn't double-run.
+ * This script sends a dedicated MessagePort to the parent during boot, so user
+ * code is delivered over the private channel instead of a wildcard
+ * window.postMessage from the host page. The parent still validates runtime
+ * result messages via IframeRuntime.acceptRuntimeMessage().
  */
 export const IFRAME_BOOT_SCRIPT = `
 (function () {
@@ -21,6 +21,8 @@ export const IFRAME_BOOT_SCRIPT = `
   const CONSOLE_ARG_MAX_CHARS = 2000;
   const PREVIEW_HTML_MAX_CHARS = 200000;
   let currentRunId = null;
+  const controlChannel = new MessageChannel();
+  const controlPort = controlChannel.port1;
 
   function limit(value, maxLength) {
     const text = String(value ?? "");
@@ -80,8 +82,7 @@ export const IFRAME_BOOT_SCRIPT = `
     dark: "background:#1c1f26;color:#e7e9ee;",
   };
 
-  window.addEventListener("message", function (event) {
-    var msg = event.data;
+  function handleSetTheme(msg) {
     if (!msg || msg.type !== "set-theme") return;
     var htmlBody = THEME_HTML[msg.theme];
     var bodyBody = THEME_BODY[msg.theme];
@@ -94,10 +95,9 @@ export const IFRAME_BOOT_SCRIPT = `
     }
     styleEl.textContent =
       ":where(html){" + htmlBody + "}:where(body){" + bodyBody + "}";
-  });
+  }
 
-  window.addEventListener("message", async function (event) {
-    const msg = event.data;
+  async function handleInit(msg) {
     if (!msg || msg.type !== "init") return;
     if (currentRunId && msg.runId === currentRunId) return; // ignore replays
     currentRunId = msg.runId;
@@ -120,6 +120,14 @@ export const IFRAME_BOOT_SCRIPT = `
       "})();",
     ].join("\\n");
     document.body.appendChild(userScript);
+  }
+
+  controlPort.addEventListener("message", function (event) {
+    const msg = event.data;
+    handleSetTheme(msg);
+    void handleInit(msg);
   });
+  controlPort.start();
+  parent.postMessage({ source: RUNTIME_SOURCE, type: "control-port" }, "*", [controlChannel.port2]);
 })();
 `;

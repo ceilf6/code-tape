@@ -71,6 +71,10 @@ type SanitizedPreviewHtml = {
   bodyHtml: string;
 };
 
+type RuntimeControlMessage =
+  | { type: "init"; runId: string; code: string }
+  | { type: "set-theme"; theme: RuntimePreviewTheme };
+
 /**
  * Validate that an incoming postMessage genuinely came from our iframe runtime
  * and matches the current run. Exported so unit tests can poke at the predicate
@@ -123,6 +127,12 @@ function isRuntimePayload(type: string, payload: object): boolean {
     default:
       return false;
   }
+}
+
+function isRuntimeControlPortMessage(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const m = raw as { source?: unknown; type?: unknown };
+  return m.source === RUNTIME_SOURCE && m.type === "control-port";
 }
 
 function limitString(value: string, maxLength: number): string {
@@ -195,6 +205,9 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
   let iframe: HTMLIFrameElement | null = null;
   let host: HTMLElement | null = null;
   let messageHandler: ((event: MessageEvent) => void) | null = null;
+  let controlPortHandler: ((event: MessageEvent) => void) | null = null;
+  let controlPort: MessagePort | null = null;
+  let pendingControlMessages: RuntimeControlMessage[] = [];
   let theme: RuntimePreviewTheme = options.theme ?? "dark";
   // Track the current static preview so a theme change can re-render it with the
   // new default background. Null while a JS run iframe is mounted.
@@ -205,6 +218,11 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
   const teardown = () => {
     if (messageHandler) window.removeEventListener("message", messageHandler);
     messageHandler = null;
+    if (controlPortHandler) window.removeEventListener("message", controlPortHandler);
+    controlPortHandler = null;
+    controlPort?.close();
+    controlPort = null;
+    pendingControlMessages = [];
     if (iframe && iframe.parentElement) iframe.parentElement.removeChild(iframe);
     iframe = null;
   };
@@ -226,6 +244,47 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
     });
   };
 
+  const createRuntimeIframe = (sandbox: string, srcdoc: string): Promise<HTMLIFrameElement> => {
+    if (!host) throw new Error("IframeRuntime: mount(host) must be called first");
+    const targetHost = host;
+    teardown();
+    const el = document.createElement("iframe");
+    el.setAttribute("sandbox", sandbox);
+    el.setAttribute("title", "code-tape preview");
+    el.style.width = "100%";
+    el.style.height = "100%";
+    el.style.border = "0";
+    el.srcdoc = srcdoc;
+    iframe = el;
+    return new Promise((resolve) => {
+      controlPortHandler = (event: MessageEvent) => {
+        if (event.source !== el.contentWindow) return;
+        if (!isRuntimeControlPortMessage(event.data)) return;
+        const [nextPort] = event.ports;
+        if (!nextPort) return;
+        controlPort = nextPort;
+        for (const message of pendingControlMessages) controlPort.postMessage(message);
+        pendingControlMessages = [];
+        if (controlPortHandler) window.removeEventListener("message", controlPortHandler);
+        controlPortHandler = null;
+      };
+      window.addEventListener("message", controlPortHandler);
+      el.addEventListener(
+        "load",
+        () => {
+          resolve(el);
+        },
+        { once: true },
+      );
+      targetHost.appendChild(el);
+    });
+  };
+
+  const postRuntimeControlMessage = (message: RuntimeControlMessage) => {
+    if (controlPort) controlPort.postMessage(message);
+    else pendingControlMessages.push(message);
+  };
+
   return {
     async mount(target: HTMLElement) {
       host = target;
@@ -240,13 +299,13 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
       if (!host) return;
       if (currentPreviewHtml !== null) {
         void createIframe("", buildPreviewSrcDoc(currentPreviewHtml, theme));
-      } else if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage({ type: "set-theme", theme }, "*");
+      } else {
+        postRuntimeControlMessage({ type: "set-theme", theme });
       }
     },
     async run(input: IframeRunInput): Promise<IframeRunResult> {
       currentPreviewHtml = null;
-      const frame = await createIframe(sandboxFlags, buildSrcDoc(IFRAME_BOOT_SCRIPT, theme));
+      const frame = await createRuntimeIframe(sandboxFlags, buildSrcDoc(IFRAME_BOOT_SCRIPT, theme));
       const stdout: string[] = [];
       const stderr: string[] = [];
       let outputTruncated = false;
@@ -323,10 +382,7 @@ export function createIframeRuntime(options: IframeRuntimeOptions = {}): IframeR
           }
         };
         window.addEventListener("message", messageHandler);
-        frame.contentWindow?.postMessage(
-          { type: "init", runId: input.runId, code: input.compiledCode },
-          "*",
-        );
+        postRuntimeControlMessage({ type: "init", runId: input.runId, code: input.compiledCode });
       });
     },
     async renderPreview(previewHtml: string): Promise<void> {

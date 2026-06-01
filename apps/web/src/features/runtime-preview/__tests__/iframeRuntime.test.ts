@@ -324,25 +324,47 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
-  it("posts a set-theme message to the JS run iframe instead of recreating it", async () => {
+  it("sends run init and theme updates over the runtime control port", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const runtime = createIframeRuntime({ theme: "dark" });
 
     await runtime.mount(host);
     // Start a long-running JS run so the iframe stays mounted.
-    const run = runtime.run({ runId: "run-theme", compiledCode: "", timeoutMs: 200 });
+    const run = runtime.run({
+      runId: "run-theme",
+      compiledCode: "console.log('secret code');",
+      timeoutMs: 200,
+    });
     const frame = host.querySelector("iframe");
     expect(frame).toBeTruthy();
     const postSpy = vi.spyOn(frame!.contentWindow!, "postMessage");
+    const channel = new MessageChannel();
+    const controlMessages: unknown[] = [];
+    channel.port1.addEventListener("message", (event) => controlMessages.push(event.data));
+    channel.port1.start();
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: frame!.contentWindow,
+        data: { source: "code-tape-runtime", type: "control-port" },
+        ports: [channel.port2],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controlMessages).toContainEqual({
+      type: "init",
+      runId: "run-theme",
+      code: "console.log('secret code');",
+    });
 
     runtime.setTheme("light");
     // setTheme should NOT replace the run iframe; it should postMessage instead.
     expect(host.querySelector("iframe")).toBe(frame);
-    expect(postSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "set-theme", theme: "light" }),
-      "*",
-    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(controlMessages).toContainEqual({ type: "set-theme", theme: "light" });
+    expect(postSpy).not.toHaveBeenCalled();
 
     await run;
     runtime.destroy();
@@ -555,6 +577,7 @@ type PostedRuntimeMessage = {
 
 async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
   const messages: PostedRuntimeMessage[] = [];
+  let controlPort: MessagePort | null = null;
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", () => undefined);
   const dom = new JSDOM(
@@ -564,11 +587,19 @@ async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
       url: "https://runtime.code-tape.test/",
       virtualConsole,
       beforeParse(window) {
+        Object.defineProperty(window, "MessageChannel", {
+          configurable: true,
+          value: globalThis.MessageChannel,
+        });
         Object.defineProperty(window, "parent", {
           configurable: true,
           value: {
-            postMessage(message: PostedRuntimeMessage) {
+            postMessage(message: PostedRuntimeMessage, _targetOrigin?: string, transfer?: Transferable[]) {
               messages.push(message);
+              const [maybePort] = transfer ?? [];
+              if (message.type === "control-port" && maybePort && "postMessage" in maybePort) {
+                controlPort = maybePort as MessagePort;
+              }
             },
           },
         });
@@ -577,11 +608,8 @@ async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
   );
 
   try {
-    dom.window.dispatchEvent(
-      new dom.window.MessageEvent("message", {
-        data: { type: "init", runId: "run-error-path", code },
-      }),
-    );
+    const runtimeControlPort = controlPort as MessagePort | null;
+    runtimeControlPort?.postMessage({ type: "init", runId: "run-error-path", code });
     await waitForBootScript(dom.window);
     return messages;
   } finally {
