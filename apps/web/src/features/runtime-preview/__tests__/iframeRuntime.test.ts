@@ -351,19 +351,20 @@ describe("IframeRuntime sandbox lifecycle", () => {
         ports: [channel.port2],
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(controlMessages).toContainEqual({
-      type: "init",
-      runId: "run-theme",
-      code: "console.log('secret code');",
-    });
+    await waitForCondition(() =>
+      expect(controlMessages).toContainEqual({
+        type: "init",
+        runId: "run-theme",
+        code: "console.log('secret code');",
+      }),
+    );
 
     runtime.setTheme("light");
     // setTheme should NOT replace the run iframe; it should postMessage instead.
     expect(host.querySelector("iframe")).toBe(frame);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(controlMessages).toContainEqual({ type: "set-theme", theme: "light" });
+    await waitForCondition(() =>
+      expect(controlMessages).toContainEqual({ type: "set-theme", theme: "light" }),
+    );
     expect(postSpy).not.toHaveBeenCalled();
 
     await run;
@@ -630,19 +631,35 @@ async function runBootScript(code: string): Promise<PostedRuntimeMessage[]> {
   try {
     const runtimeControlPort = controlPort as MessagePort | null;
     runtimeControlPort?.postMessage({ type: "init", runId: "run-error-path", code });
-    await waitForBootScript(dom.window);
+    await waitForBootScript(messages);
     return messages;
   } finally {
     dom.window.close();
   }
 }
 
-function waitForBootScript(window: Window & typeof globalThis): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(() => {
-      window.setTimeout(resolve, 0);
-    }, 0);
+async function waitForBootScript(messages: PostedRuntimeMessage[]): Promise<void> {
+  await waitForCondition(() => {
+    expect(messages.some((message) => message.type === "complete" || message.type === "error")).toBe(
+      true,
+    );
   });
+}
+
+async function waitForCondition(assertion: () => void): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  if (lastError) throw lastError;
+  assertion();
 }
 
 function expectSingleRuntimeError(messages: PostedRuntimeMessage[]): {
