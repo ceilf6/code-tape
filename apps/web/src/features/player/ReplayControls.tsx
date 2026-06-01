@@ -1,6 +1,5 @@
 import type {
   ActivityDensityBucket,
-  ActivityDensityKind,
   ReplayPlaybackRate,
   ReplaySchedulerState,
 } from "@/shared/recording-schema";
@@ -37,7 +36,6 @@ export function ReplayControls({
   muted,
   onVolume,
   onMuted,
-  activityDensity = [],
 }: ReplayControlsProps) {
   const [ratePopoverOpen, setRatePopoverOpen] = useState(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
@@ -168,8 +166,7 @@ export function ReplayControls({
         </span>
       </div>
 
-      <div className="relative flex-1 min-w-[120px] pb-2" data-replay-progress-control>
-        <ReplayActivityMarkers activityDensity={activityDensity} durationMs={safeDuration} />
+      <div className="flex-1 min-w-[120px]" data-replay-progress-control>
         <Slider
           value={currentProgressPercent}
           min={0}
@@ -285,73 +282,4 @@ export function ReplayControls({
       </div>
     </Toolbar>
   );
-}
-
-function ReplayActivityMarkers({
-  activityDensity,
-  durationMs,
-}: {
-  activityDensity: ActivityDensityBucket[];
-  durationMs: number;
-}) {
-  if (durationMs <= 0 || activityDensity.length === 0) return null;
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-2 bottom-0 h-1"
-      data-replay-activity-markers
-    >
-      {activityDensity.map((bucket, index) => {
-        const left = clampPercent((bucket.startMs / durationMs) * 100);
-        const width = Math.max(
-          0.8,
-          clampPercent(((bucket.endMs - bucket.startMs) / durationMs) * 100),
-        );
-        return (
-          <span
-            key={`${bucket.kind}-${bucket.startMs}-${bucket.endMs}-${index}`}
-            aria-label={`活动：${activityKindLabel(bucket.kind)} ${formatDurationMs(bucket.startMs)}-${formatDurationMs(bucket.endMs)}`}
-            className={cn(
-              "absolute top-0 h-1 rounded-full opacity-80",
-              activityKindClassName(bucket.kind),
-            )}
-            style={{ left: `${left}%`, width: `${width}%` }}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function clampPercent(value: number): number {
-  return Math.min(100, Math.max(0, value));
-}
-
-function activityKindLabel(kind: ActivityDensityKind): string {
-  switch (kind) {
-    case "edit":
-      return "编辑";
-    case "run":
-      return "运行";
-    case "error":
-      return "错误";
-    case "shortcut":
-      return "快捷键";
-    case "silence":
-      return "静默";
-  }
-}
-
-function activityKindClassName(kind: ActivityDensityKind): string {
-  switch (kind) {
-    case "error":
-      return "bg-danger shadow-[0_0_10px_var(--ct-color-danger)]";
-    case "run":
-      return "bg-primary";
-    case "shortcut":
-      return "bg-warning";
-    case "edit":
-      return "bg-foreground/70";
-    case "silence":
-      return "bg-border";
-  }
 }

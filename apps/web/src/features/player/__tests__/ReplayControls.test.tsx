@@ -144,7 +144,7 @@ describe("ReplayControls", () => {
     expect(screen.getAllByText("00:00")).toHaveLength(2);
   });
 
-  it("renders activity density markers on the progress timeline", () => {
+  it("does not render activity density as a second progress timeline", () => {
     const { container } = renderControls({
       durationMs: 60_000,
       activityDensity: [
@@ -155,22 +155,8 @@ describe("ReplayControls", () => {
       ],
     });
 
-    expect(screen.getByLabelText("活动：编辑 00:00-00:10")).toBeInTheDocument();
-    expect(screen.getByLabelText("活动：运行 00:20-00:30")).toBeInTheDocument();
-    expect(screen.getByLabelText("活动：错误 00:40-00:50")).toBeInTheDocument();
-    expect(screen.getByLabelText("活动：静默 00:50-01:00")).toBeInTheDocument();
-    expect(container.querySelector("[data-replay-activity-markers]")).toHaveClass("bottom-0");
-  });
-
-  it("renders short full-duration silence markers", () => {
-    renderControls({
-      durationMs: 5_000,
-      activityDensity: [
-        { kind: "silence", startMs: 0, endMs: 5_000, count: 0, eventSeqs: [] },
-      ],
-    });
-
-    expect(screen.getByLabelText("活动：静默 00:00-00:05")).toBeInTheDocument();
+    expect(screen.getAllByRole("slider", { name: "播放进度" })).toHaveLength(1);
+    expect(container.querySelector("[data-replay-activity-markers]")).not.toBeInTheDocument();
   });
 
   it.each(["loading", "seeking", "error"] as const)(
