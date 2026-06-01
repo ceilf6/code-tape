@@ -1032,7 +1032,13 @@ describe("ReplayPage", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText(new RegExp(`加载失败：${expectedCode}`))).toBeInTheDocument(),
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === "P" &&
+            element.textContent?.startsWith(`加载失败：${expectedCode}`) === true,
+        ),
+      ).toBeInTheDocument(),
     );
     expect(replayPageMock.scheduler.load).not.toHaveBeenCalled();
     expect(screen.queryByText("音视频不可用，已切换为纯事件流回放")).not.toBeInTheDocument();
