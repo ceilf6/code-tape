@@ -38,17 +38,6 @@
 - TDD
     - 通过不断红灯->绿灯->重构配合 Karpathy-Guidelines 技能确保代码改动的高质量、精确性
 
-## 最小云端 Demo
-
-GitHub Pages 只托管静态 Web，不能承载 `/api/*`。需要验证云端上传、列表、播放、重命名、删除链路时，使用同源 Node Demo Server：
-
-```bash
-npm run demo:build
-npm run demo:start
-```
-
-默认监听 `PORT=4173`，托管 `apps/web/dist` 并挂载云端 API。Demo 使用内存元数据和本地开发对象存储，进程重启后云端录制会清空；正式云端仍需按 `docs/技术方案.md` 接入 DB、对象存储和 Worker。
-
 ## 决策记录
 
 - [ADR-001: P0 代码执行路线采用 iframe sandbox 前端展示](https://github.com/ceilf6/code-tape/discussions/20)
