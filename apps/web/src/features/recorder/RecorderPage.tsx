@@ -8,6 +8,7 @@ import { RecorderControls } from "./RecorderControls";
 import { CodeEditor, type CodeEditorHandle } from "@/features/editor/CodeEditor";
 import { CameraPreview } from "@/features/media/CameraPreview";
 import { PreviewPane } from "@/features/runtime-preview/PreviewPane";
+import { RuntimeOutputPanel } from "@/features/runtime-preview/RuntimeOutputPanel";
 import { createPreviewCompiler } from "@/features/runtime-preview/previewCompiler";
 import { createIframeRuntime } from "@/features/runtime-preview/iframeRuntime";
 import { createMediaDevicesController } from "@/features/media/mediaDevices";
@@ -737,7 +738,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
                 onReset={() => setRuntimeState(INITIAL_RUNTIME_STATE)}
               />
             }
-            right={<RecorderRuntimeOutputPanel runtime={runtimeState} />}
+            right={<RuntimeOutputPanel runtime={runtimeState} />}
           />
         }
       />
@@ -901,40 +902,6 @@ function eventOnlyMedia(warnings: OpenStreamResult["warnings"] = []): OpenStream
     warnings,
     capability: INITIAL_CONTROLLER_STATE.mediaCapability,
   };
-}
-
-function RecorderRuntimeOutputPanel({ runtime }: { runtime: RecorderRuntimeState }) {
-  const hasOutput = runtime.stdout.length > 0 || runtime.stderr.length > 0 || runtime.errorMessage;
-
-  return (
-    <section className="border-t border-border bg-background px-4 py-3" aria-label="Runtime output">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold uppercase text-muted">Console</h2>
-        <span className="rounded-sm border border-border px-2 py-0.5 text-[11px] font-medium text-muted">
-          {runtime.status}
-        </span>
-      </div>
-      {hasOutput ? (
-        <div className="max-h-40 space-y-2 overflow-auto font-mono text-xs leading-5">
-          {runtime.stdout.map((line, index) => (
-            <pre key={`stdout-${index}`} className="whitespace-pre-wrap text-foreground">
-              {line}
-            </pre>
-          ))}
-          {runtime.stderr.map((line, index) => (
-            <pre key={`stderr-${index}`} className="whitespace-pre-wrap text-warning">
-              {line}
-            </pre>
-          ))}
-          {runtime.errorMessage ? (
-            <pre className="whitespace-pre-wrap text-danger">{runtime.errorMessage}</pre>
-          ) : null}
-        </div>
-      ) : (
-        <p className="text-xs text-muted">No output</p>
-      )}
-    </section>
-  );
 }
 
 function formatPermissionNotice(audio: PermissionStatus, camera: PermissionStatus): string {
