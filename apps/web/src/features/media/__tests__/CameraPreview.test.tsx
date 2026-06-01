@@ -57,6 +57,38 @@ describe("CameraPreview", () => {
     expect(setSrcObject).toHaveBeenCalledWith(mockStream);
   });
 
+  it("uses a rectangular non-cropping frame for the camera image", () => {
+    const MockMediaStream = class {} as typeof MediaStream;
+    global.MediaStream = MockMediaStream;
+    const mockStream = new MockMediaStream();
+
+    Object.defineProperty(HTMLVideoElement.prototype, "srcObject", {
+      set: vi.fn(),
+      configurable: true,
+    });
+
+    render(
+      <CameraPreview
+        stream={mockStream}
+        enabled={true}
+        position={{ x: 0, y: 0 }}
+      />
+    );
+
+    const preview = screen.getByRole("img", { name: "Camera preview" });
+    const video = preview.querySelector("video");
+    expect(preview.className).not.toContain("rounded-full");
+    expect(video?.className).toContain("object-contain");
+    expect(video?.className).not.toContain("object-cover");
+    expect(preview.style.width).toBe("228px");
+
+    Object.defineProperty(video!, "videoWidth", { configurable: true, value: 480 });
+    Object.defineProperty(video!, "videoHeight", { configurable: true, value: 640 });
+    fireEvent.loadedMetadata(video!);
+
+    expect(preview.style.width).toBe("96px");
+  });
+
   it("clears video srcObject on unmount", () => {
     const MockMediaStream = class {} as typeof MediaStream;
     global.MediaStream = MockMediaStream;

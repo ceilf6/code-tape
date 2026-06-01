@@ -1,5 +1,6 @@
 import type { CameraPositionPayload } from "@/shared/recording-schema";
-import { useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { User } from "lucide-react";
 
 export type CameraPreviewProps = {
@@ -11,16 +12,23 @@ export type CameraPreviewProps = {
   size?: "sm" | "md" | "lg";
 };
 
+const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+
 const SIZE_MAP = {
-  sm: "h-24 w-24", // 96px
-  md: "h-32 w-32", // 128px
-  lg: "h-44 w-44", // 176px
+  sm: { heightClass: "h-24", heightPx: 96 },
+  md: { heightClass: "h-32", heightPx: 128 },
+  lg: { heightClass: "h-44", heightPx: 176 },
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 
+function getVideoAspectRatio(video: HTMLVideoElement): number {
+  if (video.videoWidth <= 0 || video.videoHeight <= 0) return DEFAULT_CAMERA_ASPECT_RATIO;
+  return video.videoWidth / video.videoHeight;
+}
+
 /**
- * CameraPreview — round picture-in-picture of the camera track.
+ * CameraPreview — floating picture-in-picture of the camera track.
  */
 export function CameraPreview(props: CameraPreviewProps) {
   const {
@@ -38,6 +46,7 @@ export function CameraPreview(props: CameraPreviewProps) {
   const startPos = useRef({ x: 0, y: 0 });
   const startPerc = useRef({ x: 0, y: 0 });
   const lastEmit = useRef(0);
+  const [aspectRatio, setAspectRatio] = useState(DEFAULT_CAMERA_ASPECT_RATIO);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -46,6 +55,7 @@ export function CameraPreview(props: CameraPreviewProps) {
     }
 
     video.srcObject = stream;
+    setAspectRatio(DEFAULT_CAMERA_ASPECT_RATIO);
 
     return () => {
       video.srcObject = null;
@@ -104,12 +114,20 @@ export function CameraPreview(props: CameraPreviewProps) {
     }
   };
 
-  const sizeClass = SIZE_MAP[size];
+  const sizeConfig = SIZE_MAP[size];
 
-  const style = {
+  const style: CSSProperties = {
     left: `${position.x * 100}%`,
     top: `${position.y * 100}%`,
     transform: `translate(-${position.x * 100}%, -${position.y * 100}%)`,
+    aspectRatio,
+    width: `${Math.round(sizeConfig.heightPx * aspectRatio)}px`,
+  };
+
+  const handleLoadedMetadata = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    setAspectRatio(getVideoAspectRatio(video));
   };
 
   return (
@@ -118,7 +136,7 @@ export function CameraPreview(props: CameraPreviewProps) {
       role="img"
       aria-label={stream ? "Camera preview" : "Camera preview placeholder"}
       style={style}
-      className={`absolute z-50 overflow-hidden rounded-full border border-border bg-surface-raised shadow-elevation-2 transition-opacity duration-200 ${sizeClass} ${enabled ? "opacity-100" : "opacity-0 pointer-events-none"} ${draggable ? "cursor-grab active:cursor-grabbing touch-none" : ""}`}
+      className={`absolute z-50 border border-border bg-surface-raised shadow-elevation-2 transition-opacity duration-200 ${sizeConfig.heightClass} ${enabled ? "opacity-100" : "opacity-0 pointer-events-none"} ${draggable ? "cursor-grab active:cursor-grabbing touch-none" : ""}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -127,10 +145,11 @@ export function CameraPreview(props: CameraPreviewProps) {
       {stream ? (
         <video
           ref={videoRef}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain"
           autoPlay
           muted
           playsInline
+          onLoadedMetadata={handleLoadedMetadata}
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-muted">

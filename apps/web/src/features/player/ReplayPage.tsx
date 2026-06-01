@@ -76,6 +76,8 @@ type ReplayOverlayState = {
 
 const EMPTY_OVERLAY_STATE: ReplayOverlayState = { pointer: null, shortcut: null };
 const TRANSIENT_OVERLAY_TTL_MS = 900;
+const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+const RECORDED_CAMERA_HEIGHT_PX = 128;
 type RecordedMedia = NonNullable<RecordingPackageV1["media"]>;
 const EVENT_ONLY_REPLAY_NOTICE = "音视频不可用，已切换为纯事件流回放";
 type ReplayDisplayOptions = {
@@ -755,6 +757,7 @@ function RecordedMediaOverlay({
   onStatusChange(): void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
+  const [cameraAspectRatio, setCameraAspectRatio] = useState(DEFAULT_CAMERA_ASPECT_RATIO);
   const hasMedia = Boolean(media && mediaBlob);
   const hasCamera = Boolean(media?.hasCamera);
   const activeMediaTimeMs = timelineToRecordedMediaTime(media, schedulerState.timelineTimeMs);
@@ -768,6 +771,7 @@ function RecordedMediaOverlay({
     }
     const url = URL.createObjectURL(mediaBlob);
     setSrc(url);
+    setCameraAspectRatio(DEFAULT_CAMERA_ASPECT_RATIO);
     return () => URL.revokeObjectURL(url);
   }, [mediaBlob]);
 
@@ -804,13 +808,23 @@ function RecordedMediaOverlay({
     left: `${mediaState.cameraPosition.x * 100}%`,
     top: `${mediaState.cameraPosition.y * 100}%`,
     transform: `translate(-${mediaState.cameraPosition.x * 100}%, -${mediaState.cameraPosition.y * 100}%)`,
+    aspectRatio: cameraAspectRatio,
+    width: `${Math.round(RECORDED_CAMERA_HEIGHT_PX * cameraAspectRatio)}px`,
+  };
+
+  const handleLoadedMetadata = () => {
+    const video = videoRef.current;
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      setCameraAspectRatio(video.videoWidth / video.videoHeight);
+    }
+    onStatusChange();
   };
 
   return (
     <div
       className={
         showCamera
-          ? "pointer-events-none absolute z-30 h-32 w-32 overflow-hidden rounded-full border border-border bg-surface-raised shadow-elevation-2"
+          ? "pointer-events-none absolute z-30 h-32 border border-border bg-surface-raised shadow-elevation-2"
           : "sr-only"
       }
       style={showCamera ? style : undefined}
@@ -819,9 +833,9 @@ function RecordedMediaOverlay({
         ref={videoRef}
         aria-label={hasCamera ? "录制摄像头视频" : "录制音频"}
         src={src}
-        className="h-full w-full object-cover"
+        className="h-full w-full object-contain"
         playsInline
-        onLoadedMetadata={onStatusChange}
+        onLoadedMetadata={handleLoadedMetadata}
         onCanPlay={onStatusChange}
         onPlaying={onStatusChange}
         onWaiting={onStatusChange}

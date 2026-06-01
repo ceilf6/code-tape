@@ -895,6 +895,14 @@ describe("ReplayPage", () => {
 
     const video = screen.getByLabelText("录制摄像头视频") as HTMLVideoElement;
     expect(video).toHaveAttribute("src", "blob:replay-media");
+    expect(video.parentElement?.className).not.toContain("rounded-full");
+    expect(video.className).toContain("object-contain");
+    expect(video.className).not.toContain("object-cover");
+    expect(video.parentElement?.style.width).toBe("228px");
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 480 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 640 });
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(video.parentElement?.style.width).toBe("96px"));
     expect(createObjectURL).toHaveBeenCalled();
     createObjectURL.mockRestore();
     revokeObjectURL.mockRestore();
