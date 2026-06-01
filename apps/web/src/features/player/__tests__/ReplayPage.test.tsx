@@ -371,6 +371,38 @@ describe("ReplayPage", () => {
     }
   });
 
+  it("shows the final replay state as the initial poster frame without moving the timeline", async () => {
+    replayPageMock.packageData.events = [
+      {
+        id: "edit-final",
+        seq: 1,
+        timestampMs: 12_000,
+        source: "editor",
+        track: "main",
+        type: "content-change",
+        payload: {
+          fileId: "main",
+          version: 1,
+          code: "console.log('final frame');",
+          contentHash: "final",
+          language: "javascript",
+          changeReason: "input",
+          changeCount: 1,
+          flushedBy: "debounce",
+        },
+      },
+    ];
+    const { ReplayPage } = await import("../ReplayPage");
+
+    render(<ReplayPage />);
+
+    await waitFor(() => expect(replayPageMock.scheduler.load).toHaveBeenCalledWith(replayPageMock.packageData));
+    await waitFor(() => {
+      expect(replayPageMock.codeEditorProps?.value).toBe("console.log('final frame');");
+    });
+    expect(replayPageMock.controlsProps?.state.timelineTimeMs).toBe(0);
+  });
+
   it("rebuilds malformed activity density indexes before rendering controls", async () => {
     replayPageMock.packageData.events = [
       {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFinalReplayStateFromPackage,
   buildInitialReplayStateFromPackage,
   buildInitialReplayStateFromRecordStart,
   cloneReplayStableState,
@@ -69,6 +70,19 @@ describe("replay stable state contract", () => {
 
     expect(state.editor.code).toBe("let answer = 42;");
     expect(state.runtime.stdout).toEqual([]);
+  });
+
+  it("builds the final stable state from package events", () => {
+    const pkg = makePackage();
+    pkg.events = [
+      contentChangeEvent(1, "console.log('final frame');"),
+      runOutputEvent(2),
+    ];
+
+    const state = buildFinalReplayStateFromPackage(pkg);
+
+    expect(state.editor.code).toBe("console.log('final frame');");
+    expect(state.runtime.previewHtml).toBe("<main>P0</main>");
   });
 });
 

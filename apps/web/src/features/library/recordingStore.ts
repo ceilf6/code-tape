@@ -27,12 +27,16 @@ import {
   DEFAULT_VIDEO_THUMBNAIL_OPTIONS,
   type VideoThumbnailOptions,
 } from "./videoThumbnail";
+import { createReplayThumbnail } from "./replayThumbnail";
 
 export type RecordingStoreOptions = {
   databaseName?: string;
   /** Drafts older than this are removed by sweep(). Defaults to 24h. */
   draftMaxAgeMs?: number;
+  /** Media-blob fallback used only when replay thumbnail rendering is unavailable. */
   thumbnailGenerator?: ThumbnailGenerator;
+  /** Final replay-state renderer. Pass null to disable replay thumbnails in tests. */
+  replayThumbnailGenerator?: ReplayThumbnailGenerator | null;
 };
 
 const DEFAULT_DB_NAME = "code-tape";
@@ -42,6 +46,7 @@ const STORE_BLOBS = "blobs";
 const STORE_THUMBNAILS = "thumbnails";
 
 type ThumbnailGenerator = (mediaBlob: Blob, options: VideoThumbnailOptions) => Promise<Blob | null>;
+type ReplayThumbnailGenerator = (pkg: RecordingPackageV1, options: VideoThumbnailOptions) => Promise<Blob | null>;
 type StoredBlob = { buffer?: ArrayBuffer; dataBase64?: string; mimeType: string };
 
 type StoredRecording = {
@@ -76,6 +81,9 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
   const databaseName = options.databaseName ?? DEFAULT_DB_NAME;
   const draftMaxAgeMs = options.draftMaxAgeMs ?? 24 * 60 * 60 * 1000;
   const thumbnailGenerator = options.thumbnailGenerator ?? createVideoThumbnail;
+  const replayThumbnailGenerator = options.replayThumbnailGenerator === undefined
+    ? createReplayThumbnail
+    : options.replayThumbnailGenerator;
 
   const getDb = (() => {
     let cached: Promise<IDBDatabase> | null = null;
@@ -137,7 +145,8 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       const db = await getDb();
       const recordingId = input.meta.id;
       const blobId = input.mediaBlob ? generateId("blob") : null;
-      const thumbnailBlobId = input.mediaBlob && isVideoBlob(input.mediaBlob) ? generateId("thumbnail") : null;
+      const shouldGenerateThumbnail =
+        replayThumbnailGenerator !== null || (input.mediaBlob !== null && isVideoBlob(input.mediaBlob));
       const eventsSha256 = await sha256Hex(canonicalStringify(input.events));
       const snapshotsSha256 = await sha256Hex(canonicalStringify(input.snapshots));
       // Materialize the blob to ArrayBuffer BEFORE opening the transaction so
@@ -205,8 +214,25 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           blobs.put(payload, blobId);
         }
         await awaitTransaction(tx);
-        if (thumbnailBlobId && input.mediaBlob) {
-          void generateAndPersistThumbnail(getDb, recordingId, thumbnailBlobId, input.mediaBlob, thumbnailGenerator);
+        if (shouldGenerateThumbnail) {
+          const pkg: RecordingPackageV1 = {
+            schemaVersion: RECORDING_SCHEMA_VERSION,
+            manifest: stored.manifest,
+            meta: stored.meta,
+            events: stored.events,
+            snapshots: stored.snapshots,
+            media: stored.media,
+            indexes: stored.indexes,
+          };
+          void generateAndPersistThumbnail(
+            getDb,
+            recordingId,
+            generateId("thumbnail"),
+            input.mediaBlob,
+            pkg,
+            thumbnailGenerator,
+            replayThumbnailGenerator,
+          );
         }
         return { ok: true, recordingId };
       } catch (err) {
@@ -494,10 +520,12 @@ async function generateAndPersistThumbnail(
   getDb: () => Promise<IDBDatabase>,
   recordingId: string,
   thumbnailBlobId: string,
-  mediaBlob: Blob,
+  mediaBlob: Blob | null,
+  pkg: RecordingPackageV1,
   thumbnailGenerator: ThumbnailGenerator,
+  replayThumbnailGenerator: ReplayThumbnailGenerator | null,
 ): Promise<void> {
-  const thumbnailPayload = await prepareThumbnailPayload(mediaBlob, thumbnailGenerator);
+  const thumbnailPayload = await prepareThumbnailPayload(mediaBlob, pkg, thumbnailGenerator, replayThumbnailGenerator);
   if (!thumbnailPayload) return;
   try {
     const db = await getDb();
@@ -508,11 +536,19 @@ async function generateAndPersistThumbnail(
 }
 
 async function prepareThumbnailPayload(
-  mediaBlob: Blob,
+  mediaBlob: Blob | null,
+  pkg: RecordingPackageV1,
   thumbnailGenerator: ThumbnailGenerator,
+  replayThumbnailGenerator: ReplayThumbnailGenerator | null,
 ): Promise<StoredBlob | null> {
   try {
-    const thumbnail = await thumbnailGenerator(mediaBlob, DEFAULT_VIDEO_THUMBNAIL_OPTIONS);
+    const replayThumbnail = replayThumbnailGenerator
+      ? await replayThumbnailGenerator(pkg, DEFAULT_VIDEO_THUMBNAIL_OPTIONS).catch(() => null)
+      : null;
+    const thumbnail = replayThumbnail ??
+      (mediaBlob && isVideoBlob(mediaBlob)
+        ? await thumbnailGenerator(mediaBlob, DEFAULT_VIDEO_THUMBNAIL_OPTIONS)
+        : null);
     if (!thumbnail || thumbnail.size === 0) return null;
     const buffer = await thumbnail.arrayBuffer();
     return {

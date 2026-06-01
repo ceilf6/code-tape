@@ -33,6 +33,7 @@ import type {
   ReplaySchedulerState,
   ReplayStableState,
 } from "@/shared/recording-schema";
+import { buildFinalReplayStateFromPackage } from "@/shared/recording-schema";
 import { createCloudPackageLoader } from "./cloudPackageLoader";
 
 const INITIAL_SCHEDULER_STATE: ReplaySchedulerState = {
@@ -142,6 +143,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
   const [schedulerState, setSchedulerState] =
     useState<ReplaySchedulerState>(INITIAL_SCHEDULER_STATE);
   const [stableState, setStableState] = useState<ReplayStableState>(INITIAL_STABLE_STATE);
+  const [posterState, setPosterState] = useState<ReplayStableState | null>(null);
   const [overlayState, setOverlayState] = useState<ReplayOverlayState>(EMPTY_OVERLAY_STATE);
   const [pkg, setPkg] = useState<RecordingPackageV1 | null>(null);
   const [mediaBlob, setMediaBlob] = useState<Blob | null>(null);
@@ -191,6 +193,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
       clock: createTimelineClock(),
       tickStrategy: defaultTickStrategy(),
       onTick: (state, transientEvents = []) => {
+        setPosterState(null);
         setStableState(state);
         setOverlayState((current) => overlayStateFromEvents(current, transientEvents));
         scheduleOverlayCleanup(transientEvents, setOverlayState, pointerTimerRef, shortcutTimerRef);
@@ -218,6 +221,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
   }, []);
   const playReplay = useCallback(() => {
     const timelineTimeMs = schedulerState.status === "ended" ? 0 : schedulerState.timelineTimeMs;
+    setPosterState(null);
     playRecordedMedia(timelineTimeMs);
     scheduler.play();
   }, [playRecordedMedia, scheduler, schedulerState.status, schedulerState.timelineTimeMs]);
@@ -225,6 +229,10 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
     pauseRecordedMedia();
     scheduler.pause();
   }, [pauseRecordedMedia, scheduler]);
+  const seekReplay = useCallback(async (targetMs: number) => {
+    setPosterState(null);
+    await scheduler.seek(targetMs);
+  }, [scheduler]);
   const setDisplayOption = useCallback(
     (key: keyof ReplayDisplayOptions, value: boolean) => {
       setDisplayOptions((current) => ({ ...current, [key]: value }));
@@ -266,6 +274,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
     setPkg(null);
     setMediaBlob(null);
     setStableState(INITIAL_STABLE_STATE);
+    setPosterState(null);
     setOverlayState(EMPTY_OVERLAY_STATE);
     clearOverlayTimers();
     recordedMediaVideoRef.current?.pause();
@@ -290,7 +299,11 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
       );
       await scheduler.load(result.package);
       if (cancelled) return;
-      if (initialSeekTimeMs !== null) await scheduler.seek(initialSeekTimeMs);
+      if (initialSeekTimeMs !== null) {
+        await scheduler.seek(initialSeekTimeMs);
+      } else {
+        setPosterState(buildFinalReplayStateFromPackage(result.package));
+      }
     })();
     return () => {
       cancelled = true;
@@ -315,19 +328,21 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
     );
   }
 
+  const visibleStableState = posterState ?? stableState;
+
   const replayStage = (
     <div className="relative h-full min-h-0">
       <CodeEditor
-        language={stableState.editor.language}
-        initialValue={stableState.editor.code}
-        value={stableState.editor.code}
-        fontSize={stableState.editor.fontSize}
-        theme={stableState.editor.theme}
+        language={visibleStableState.editor.language}
+        initialValue={visibleStableState.editor.code}
+        value={visibleStableState.editor.code}
+        fontSize={visibleStableState.editor.fontSize}
+        theme={visibleStableState.editor.theme}
         readOnly
-        cursor={stableState.editor.cursor}
-        selection={stableState.editor.selection}
-        scrollTop={stableState.editor.scrollTop}
-        scrollLeft={stableState.editor.scrollLeft}
+        cursor={visibleStableState.editor.cursor}
+        selection={visibleStableState.editor.selection}
+        scrollTop={visibleStableState.editor.scrollTop}
+        scrollLeft={visibleStableState.editor.scrollLeft}
       />
       <ReplayVisualOverlays
         state={overlayState}
@@ -338,7 +353,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
         videoRef={recordedMediaVideoRef}
         media={currentMedia}
         mediaBlob={mediaBlob}
-        mediaState={stableState.media}
+        mediaState={visibleStableState.media}
         schedulerState={schedulerState}
         volume={volume}
         muted={muted}
@@ -406,12 +421,12 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
               left={
                 <PreviewPane
                   runtime={runtime}
-                  previewHtml={stableState.runtime.previewHtml}
-                  theme={stableState.editor.theme}
+                  previewHtml={visibleStableState.runtime.previewHtml}
+                  theme={visibleStableState.editor.theme}
                   className="min-h-0 flex-1"
                 />
               }
-              right={<RuntimeOutputPanel runtime={stableState.runtime} />}
+              right={<RuntimeOutputPanel runtime={visibleStableState.runtime} />}
             />
           }
         />
@@ -427,11 +442,11 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
           hasAudio={Boolean(pkg?.media?.hasAudio)}
           durationMs={pkg?.meta.durationMs ?? 0}
           currentTimeMs={schedulerState.timelineTimeMs}
-          onSeek={(target) => scheduler.seek(target)}
+          onSeek={seekReplay}
           postProcessorContext={{
-            language: stableState.editor.language,
-            code: stableState.editor.code,
-            runtimeOutput: replayRuntimeOutputText(stableState.runtime),
+            language: visibleStableState.editor.language,
+            code: visibleStableState.editor.code,
+            runtimeOutput: replayRuntimeOutputText(visibleStableState.runtime),
             glossary: DEFAULT_SUBTITLE_GLOSSARY,
           }}
         />
@@ -445,7 +460,7 @@ export function ReplayPage({ source = "local" }: ReplayPageProps) {
             ? pauseReplay()
             : playReplay()
         }
-        onSeek={(target) => scheduler.seek(target)}
+        onSeek={seekReplay}
         onRate={(rate) => scheduler.setRate(rate)}
         volume={volume}
         muted={muted}

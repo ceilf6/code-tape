@@ -12,6 +12,14 @@ import type {
   SaveDraftInput,
 } from "@/shared/recording-schema";
 
+const { replayThumbnailMock } = vi.hoisted(() => ({
+  replayThumbnailMock: vi.fn(async (): Promise<Blob | null> => null),
+}));
+
+vi.mock("../replayThumbnail", () => ({
+  createReplayThumbnail: replayThumbnailMock,
+}));
+
 function makeMeta(id = "rec-1"): RecordingMeta {
   return {
     id,
@@ -119,6 +127,8 @@ function uniqueDbName() {
 }
 
 beforeEach(() => {
+  replayThumbnailMock.mockReset();
+  replayThumbnailMock.mockResolvedValue(null);
   /* fake-indexeddb auto-wipes; nothing to do, each test uses a unique db name */
 });
 
@@ -215,6 +225,84 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(thumbnail).toBeInstanceOf(Blob);
     expect(thumbnail?.type).toBe("image/webp");
     expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("thumbnail");
+  });
+
+  it("generates a replay thumbnail when no media blob is stored", async () => {
+    replayThumbnailMock.mockResolvedValueOnce(new Blob(["replay-thumbnail"], { type: "image/webp" }));
+    const store = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-replay-thumbnail-only");
+    input.mediaBlob = null;
+
+    const saved = await store.saveDraft(input);
+    if (!saved.ok) throw new Error(saved.message);
+    await store.commit("rec-replay-thumbnail-only");
+
+    const item = await waitForListedRecordingWithThumbnail(store, "rec-replay-thumbnail-only");
+    expect(replayThumbnailMock).toHaveBeenCalled();
+    expect(item?.thumbnailBlobId).toMatch(/^thumbnail-/);
+    const thumbnail = await store.loadThumbnail(item!.thumbnailBlobId!);
+    expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("replay-thumbnail");
+  });
+
+  it("does not expose a thumbnail id when replay thumbnail generation returns null without media fallback", async () => {
+    replayThumbnailMock.mockResolvedValueOnce(null);
+    const dbName = uniqueDbName();
+    const store = createRecordingStore({ databaseName: dbName });
+    const input = makeInput("rec-replay-thumbnail-null");
+    input.mediaBlob = null;
+
+    const saved = await store.saveDraft(input);
+    if (!saved.ok) throw new Error(saved.message);
+    await store.commit("rec-replay-thumbnail-null");
+
+    await waitForCondition(() => replayThumbnailMock.mock.calls.length > 0);
+    const raw = await waitForRawRecording(dbName, "rec-replay-thumbnail-null");
+    expect(raw?.thumbnailBlobId).toBeNull();
+    const list = await store.list();
+    expect(list[0].thumbnailBlobId).toBeNull();
+  });
+
+  it("falls back to video thumbnail generation when replay thumbnail rendering rejects", async () => {
+    replayThumbnailMock.mockRejectedValueOnce(new Error("canvas failed"));
+    const thumbnailBlob = new Blob(["video-fallback"], { type: "image/webp" });
+    const thumbnailGenerator = vi.fn(async () => thumbnailBlob);
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      thumbnailGenerator,
+    });
+    const input = makeInput("rec-replay-thumbnail-rejects");
+    input.mediaBlob = new Blob(["video"], { type: "video/webm" });
+
+    const saved = await store.saveDraft(input);
+    if (!saved.ok) throw new Error(saved.message);
+    await store.commit("rec-replay-thumbnail-rejects");
+
+    const item = await waitForListedRecordingWithThumbnail(store, "rec-replay-thumbnail-rejects");
+    expect(thumbnailGenerator).toHaveBeenCalledWith(
+      input.mediaBlob,
+      expect.objectContaining({ width: 320, height: 180, mimeType: "image/webp" }),
+    );
+    const thumbnail = await store.loadThumbnail(item!.thumbnailBlobId!);
+    expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("video-fallback");
+  });
+
+  it("does not expose a thumbnail id for non-video media when replay thumbnails are disabled", async () => {
+    const thumbnailGenerator = vi.fn(async () => new Blob(["thumbnail"], { type: "image/webp" }));
+    const store = createRecordingStore({
+      databaseName: uniqueDbName(),
+      replayThumbnailGenerator: null,
+      thumbnailGenerator,
+    });
+    const input = makeInput("rec-replay-thumbnail-disabled-audio");
+    input.mediaBlob = new Blob(["audio"], { type: "audio/webm" });
+
+    const saved = await store.saveDraft(input);
+    if (!saved.ok) throw new Error(saved.message);
+    await store.commit("rec-replay-thumbnail-disabled-audio");
+
+    const list = await store.list();
+    expect(list[0].thumbnailBlobId).toBeNull();
+    expect(thumbnailGenerator).not.toHaveBeenCalled();
   });
 
   it("returns after writing the draft before optional video thumbnail generation settles", async () => {
@@ -503,6 +591,15 @@ async function waitForListedRecordingWithThumbnail(
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   return lastValue;
+}
+
+async function waitForCondition(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 250;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(predicate()).toBe(true);
 }
 
 async function readRawRecording(dbName: string, id: string): Promise<{ manifest: { status: string }; thumbnailBlobId: string | null } | undefined> {

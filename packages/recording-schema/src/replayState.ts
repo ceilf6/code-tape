@@ -16,6 +16,14 @@ export function buildInitialReplayStateFromPackage(pkg: RecordingPackageV1): Rep
   return buildInitialReplayState(pkg.meta);
 }
 
+export function buildFinalReplayStateFromPackage(pkg: RecordingPackageV1): ReplayStableState {
+  return pkg.events
+    .filter((event) => STABLE_EVENT_TYPES.has(event.type))
+    .slice()
+    .sort((left, right) => left.timestampMs - right.timestampMs || left.seq - right.seq)
+    .reduce(replayReducer, buildInitialReplayStateFromPackage(pkg));
+}
+
 export function buildInitialReplayStateFromRecordStart(
   payload: RecordStartPayload,
 ): ReplayStableState {
