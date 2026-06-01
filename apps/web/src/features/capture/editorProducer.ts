@@ -53,6 +53,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   let pasteSignalPending = false;
   let formatSignalPending = false;
   let formatSignalToken = 0;
+  let suppressEditorChangeDepth = 0;
   let lastContentHash: string | null = null;
   let version = 0;
   let pausedState: ReplayStableState | null = null;
@@ -62,6 +63,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   let disposed = false;
 
   const isListening = () => active && !paused && !stopped && !disposed;
+  const isCapturingEditorChanges = () => isListening() && suppressEditorChangeDepth === 0;
 
   const clearContentTimers = () => {
     if (debounceTimer) clearTimeout(debounceTimer);
@@ -136,7 +138,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   };
 
   const emitSelection = (editor: MonacoEditor.IStandaloneCodeEditor) => {
-    if (!isListening()) return;
+    if (!isCapturingEditorChanges()) return;
     bus.emit({
       type: "selection-change",
       source: "editor",
@@ -150,7 +152,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
 
   const emitScroll = () => {
     scrollTimer = null;
-    if (!pendingScroll || !isListening()) {
+    if (!pendingScroll || !isCapturingEditorChanges()) {
       pendingScroll = null;
       return;
     }
@@ -164,8 +166,15 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
     });
   };
 
+  const emitPendingScroll = () => {
+    if (!pendingScroll) return;
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = null;
+    emitScroll();
+  };
+
   const scheduleScroll = (editor: MonacoEditor.IStandaloneCodeEditor) => {
-    if (!isListening()) return;
+    if (!isCapturingEditorChanges()) return;
     pendingScroll = {
       scrollTop: editor.getScrollTop(),
       scrollLeft: editor.getScrollLeft(),
@@ -178,6 +187,12 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
     event: ContentChangedEvent,
   ) => {
     if (!isListening()) return;
+    if (suppressEditorChangeDepth > 0) {
+      pendingContent = null;
+      clearContentTimers();
+      lastContentHash = hashContent(getEditorValue(editor));
+      return;
+    }
     const changeReason = formatSignalPending
       ? "format"
       : pasteSignalPending
@@ -203,7 +218,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   };
 
   const handlePasteSignal = () => {
-    if (!isListening()) return;
+    if (!isCapturingEditorChanges()) return;
     if (pendingContent) {
       pendingContent = { ...pendingContent, changeReason: "paste" };
       emitContent("paste");
@@ -216,7 +231,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
   };
 
   const handleFormatSignal = () => {
-    if (!isListening()) return () => {};
+    if (!isCapturingEditorChanges()) return () => {};
     const token = formatSignalToken + 1;
     formatSignalToken = token;
     formatSignalPending = true;
@@ -355,12 +370,24 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
       disposeEditorListeners();
       stopRebindPolling();
     },
-    flushPending() {
+    flushPending(reason = "run") {
       if (!isListening()) return;
-      emitContent("run");
+      emitContent(reason);
+      emitPendingScroll();
     },
     markNextChangeAsFormat() {
       return handleFormatSignal();
+    },
+    runWithoutCapturingChanges(callback) {
+      clearScrollTimer();
+      suppressEditorChangeDepth += 1;
+      try {
+        callback();
+      } finally {
+        suppressEditorChangeDepth -= 1;
+        pasteSignalPending = false;
+        formatSignalPending = false;
+      }
     },
     async takeSnapshot(): Promise<RecordingSnapshot | null> {
       syncEditor();
@@ -379,6 +406,7 @@ export const createEditorProducer: CreateEditorProducer = (deps): EditorProducer
       const from = readLanguage();
       if (from === next) return;
       emitContent("snapshot");
+      emitPendingScroll();
       const model = currentEditor.getModel();
       if (model) {
         deps.setModelLanguage?.(model, next);

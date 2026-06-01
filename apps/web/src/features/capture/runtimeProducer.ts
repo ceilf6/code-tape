@@ -1,5 +1,6 @@
 import type {
   CreateRuntimeProducer,
+  RuntimeProducerRunInput,
   RuntimeProducerHandle,
   RuntimeProducerRunResult,
 } from "./types";
@@ -33,6 +34,43 @@ function buildRenderDocument(language: "html" | "css", source: string): string {
     "</main>",
     "</body>",
   ].join("");
+}
+
+function hasWebDocuments(input: RuntimeProducerRunInput): boolean {
+  return Boolean(input.documents);
+}
+
+function scriptSafeJson(value: string): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003C")
+    .replace(/>/g, "\\u003E")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function composeWebDocumentScript(input: RuntimeProducerRunInput): {
+  language: "javascript" | "typescript";
+  source: string;
+} {
+  const documents = input.documents ?? {};
+  const activeScriptLanguage = input.activeScriptLanguage ?? (
+    input.language === "typescript" ? "typescript" : "javascript"
+  );
+  const html = documents.html ?? (input.language === "html" ? input.source : "");
+  const css = documents.css ?? (input.language === "css" ? input.source : "");
+  const scriptSource = documents[activeScriptLanguage] ?? (
+    input.language === activeScriptLanguage ? input.source : ""
+  );
+  const source = [
+    `document.body.innerHTML = ${scriptSafeJson(html)};`,
+    "const __codeTapeStyle = document.getElementById('code-tape-user-style') ?? document.createElement('style');",
+    "__codeTapeStyle.id = 'code-tape-user-style';",
+    `__codeTapeStyle.textContent = ${scriptSafeJson(css)};`,
+    "if (!__codeTapeStyle.parentElement) document.head.appendChild(__codeTapeStyle);",
+    scriptSource,
+  ].join("\n");
+  return { language: activeScriptLanguage, source };
 }
 
 export const createRuntimeProducer: CreateRuntimeProducer = (deps): RuntimeProducerHandle => {
@@ -135,8 +173,10 @@ export const createRuntimeProducer: CreateRuntimeProducer = (deps): RuntimeProdu
           },
         });
 
-        // HTML/CSS：渲染到只读（no-script）sandbox，不走 JS 编译/执行链路。
-        if (input.language === "html" || input.language === "css") {
+        // Legacy single-document HTML/CSS: render to a read-only sandbox.
+        // Multi-document web runs go through the script path so JS/TS can operate
+        // on the composed HTML/CSS document in the same iframe.
+        if (!hasWebDocuments(input) && (input.language === "html" || input.language === "css")) {
           let previewHtml: string;
           try {
             previewHtml = await runtime.renderDocument(buildRenderDocument(input.language, input.source));
@@ -158,9 +198,12 @@ export const createRuntimeProducer: CreateRuntimeProducer = (deps): RuntimeProdu
           };
         }
 
+        const compileInput = hasWebDocuments(input)
+          ? composeWebDocumentScript(input)
+          : { language: input.language as "javascript" | "typescript", source: input.source };
         let compiled: CompileResult;
         try {
-          compiled = await compiler.compile(input.source, input.language);
+          compiled = await compiler.compile(compileInput.source, compileInput.language);
         } catch (err) {
           return emitCompileError(runId, { ok: false, phase: "transpile", ...errorInfo(err) });
         }

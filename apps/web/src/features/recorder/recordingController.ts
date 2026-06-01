@@ -182,6 +182,8 @@ export function createRecordingController(options: RecordingControllerOptions): 
               ownerId: null,
               creatorInfo: null,
               initialLanguage: startPayload.initialLanguage,
+              initialActiveScriptLanguage: startPayload.initialActiveScriptLanguage,
+              initialDocuments: startPayload.initialDocuments,
               initialFontSize: startPayload.initialFontSize,
               initialTheme: startPayload.initialTheme,
               mediaCapability: startPayload.mediaCapability,

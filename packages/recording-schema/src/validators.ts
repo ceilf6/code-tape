@@ -121,6 +121,12 @@ function validateMeta(value: unknown, errors: SchemaValidationIssue[]): void {
       "initialLanguage must be one of javascript|typescript|python|html|css",
     );
   }
+  if ("initialActiveScriptLanguage" in value && typeof value.initialActiveScriptLanguage !== "undefined") {
+    expectOneOf(value.initialActiveScriptLanguage, ["javascript", "typescript"], "meta.initialActiveScriptLanguage", errors);
+  }
+  if ("initialDocuments" in value && typeof value.initialDocuments !== "undefined") {
+    validateEditorDocuments(value.initialDocuments, "meta.initialDocuments", errors);
+  }
   expectNumber(value.initialFontSize, "meta.initialFontSize", errors);
   if (value.initialTheme !== "light" && value.initialTheme !== "dark") {
     pushIssue(errors, "meta.initialTheme", "initialTheme must be light or dark");
@@ -168,6 +174,12 @@ function validateEventPayload(
   switch (type) {
     case "record-start":
       expectLanguage(payload.initialLanguage, `${path}.initialLanguage`, errors);
+      if ("initialActiveScriptLanguage" in payload && typeof payload.initialActiveScriptLanguage !== "undefined") {
+        expectOneOf(payload.initialActiveScriptLanguage, ["javascript", "typescript"], `${path}.initialActiveScriptLanguage`, errors);
+      }
+      if ("initialDocuments" in payload && typeof payload.initialDocuments !== "undefined") {
+        validateEditorDocuments(payload.initialDocuments, `${path}.initialDocuments`, errors);
+      }
       expectTheme(payload.initialTheme, `${path}.initialTheme`, errors);
       expectNumber(payload.initialFontSize, `${path}.initialFontSize`, errors);
       expectNullableString(payload.selectedAudioDeviceId, `${path}.selectedAudioDeviceId`, errors);
@@ -297,6 +309,48 @@ function expectLiteral<T extends string | number>(value: unknown, expected: T, p
 
 function expectOneOf<T extends string | number>(value: unknown, allowed: readonly T[], path: string, errors: SchemaValidationIssue[]): void {
   if (!allowed.includes(value as T)) pushIssue(errors, path, `expected one of ${allowed.join("|")}`);
+}
+
+function validateEditorDocuments(value: unknown, path: string, errors: SchemaValidationIssue[]): void {
+  if (!isPlainObject(value)) {
+    pushIssue(errors, path, "initialDocuments must be an object");
+    return;
+  }
+  for (const language of LANGUAGES) {
+    const document = value[language];
+    const documentPath = `${path}.${language}`;
+    if (!isPlainObject(document)) {
+      pushIssue(errors, documentPath, "document must be an object");
+      continue;
+    }
+    expectString(document.code, `${documentPath}.code`, errors);
+    validateEditorCursor(document.cursor, `${documentPath}.cursor`, errors);
+    validateEditorSelection(document.selection, `${documentPath}.selection`, errors);
+    expectNumber(document.scrollTop, `${documentPath}.scrollTop`, errors);
+    expectNumber(document.scrollLeft, `${documentPath}.scrollLeft`, errors);
+  }
+}
+
+function validateEditorCursor(value: unknown, path: string, errors: SchemaValidationIssue[]): void {
+  if (value === null) return;
+  if (!isPlainObject(value)) {
+    pushIssue(errors, path, "expected object or null");
+    return;
+  }
+  expectNumber(value.lineNumber, `${path}.lineNumber`, errors);
+  expectNumber(value.column, `${path}.column`, errors);
+}
+
+function validateEditorSelection(value: unknown, path: string, errors: SchemaValidationIssue[]): void {
+  if (value === null) return;
+  if (!isPlainObject(value)) {
+    pushIssue(errors, path, "expected object or null");
+    return;
+  }
+  expectNumber(value.startLineNumber, `${path}.startLineNumber`, errors);
+  expectNumber(value.startColumn, `${path}.startColumn`, errors);
+  expectNumber(value.endLineNumber, `${path}.endLineNumber`, errors);
+  expectNumber(value.endColumn, `${path}.endColumn`, errors);
 }
 
 function validateSnapshot(value: unknown, index: number, errors: SchemaValidationIssue[]): void {

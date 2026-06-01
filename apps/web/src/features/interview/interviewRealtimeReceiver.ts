@@ -324,7 +324,13 @@ function isSelection(value: unknown): value is ReplayStableState["editor"]["sele
 }
 
 function isRecordingLanguage(value: unknown): value is ReplayStableState["editor"]["language"] {
-  return value === "javascript" || value === "typescript" || value === "python";
+  return (
+    value === "javascript"
+    || value === "typescript"
+    || value === "python"
+    || value === "html"
+    || value === "css"
+  );
 }
 
 function isRecordingTheme(value: unknown): value is ReplayStableState["editor"]["theme"] {

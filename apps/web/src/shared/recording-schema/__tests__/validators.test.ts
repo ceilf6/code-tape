@@ -69,6 +69,52 @@ describe("validateRecordingPackageV1", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("rejects malformed initial editor document view state", () => {
+    const pkg = makePackage();
+    const initialDocuments = makeInitialDocuments();
+    initialDocuments.javascript.cursor = {} as never;
+    initialDocuments.html.selection = {
+      startLineNumber: "1",
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    } as never;
+    pkg.meta.initialDocuments = initialDocuments;
+    pkg.events = [
+      {
+        id: "e-1",
+        seq: 1,
+        timestampMs: 0,
+        source: "recorder",
+        track: "main",
+        type: "record-start",
+        payload: {
+          initialLanguage: "javascript",
+          initialDocuments,
+          initialTheme: "dark",
+          initialFontSize: 14,
+          selectedAudioDeviceId: null,
+          selectedCameraDeviceId: null,
+          mediaCapability: pkg.meta.mediaCapability,
+        },
+      },
+    ];
+
+    const result = validateRecordingPackageV1(pkg);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((error) => error.path)).toEqual(
+        expect.arrayContaining([
+          "meta.initialDocuments.javascript.cursor.lineNumber",
+          "meta.initialDocuments.html.selection.startLineNumber",
+          "events[0].payload.initialDocuments.javascript.cursor.lineNumber",
+          "events[0].payload.initialDocuments.html.selection.startLineNumber",
+        ]),
+      );
+    }
+  });
+
   it("rejects non-object inputs", () => {
     const result = validateRecordingPackageV1("not a package");
     expect(result.ok).toBe(false);
@@ -240,6 +286,20 @@ function mockContentChangeEvent(seq: number): RecordingEvent {
       flushedBy: "debounce",
     },
   };
+}
+
+function makeInitialDocuments(): NonNullable<RecordingPackageV1["meta"]["initialDocuments"]> {
+  const languages = ["javascript", "typescript", "python", "html", "css"] as const;
+  return languages.reduce((documents, language) => {
+    documents[language] = {
+      code: "",
+      cursor: null,
+      selection: null,
+      scrollTop: 0,
+      scrollLeft: 0,
+    };
+    return documents;
+  }, {} as NonNullable<RecordingPackageV1["meta"]["initialDocuments"]>);
 }
 
 describe("migrateRecordingPackage", () => {

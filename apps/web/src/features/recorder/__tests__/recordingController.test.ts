@@ -6,6 +6,8 @@ import { createRecordingController } from "../recordingController";
 import type {
   EventProducer,
   PackageBuildInput,
+  RecordingEditorDocuments,
+  RecordingLanguage,
   RecordingPackageV1,
   RecordingRepository,
   RecordStartPayload,
@@ -67,6 +69,23 @@ function makeStartPayload(): RecordStartPayload {
       selectedCameraDeviceId: null,
     },
   };
+}
+
+function makeDocuments(
+  overrides: Partial<Record<RecordingLanguage, Partial<RecordingEditorDocuments[RecordingLanguage]>>> = {},
+): RecordingEditorDocuments {
+  const languages: RecordingLanguage[] = ["javascript", "typescript", "python", "html", "css"];
+  return languages.reduce((documents, language) => {
+    documents[language] = {
+      code: "",
+      cursor: null,
+      selection: null,
+      scrollTop: 0,
+      scrollLeft: 0,
+      ...overrides[language],
+    };
+    return documents;
+  }, {} as RecordingEditorDocuments);
 }
 
 function setup(
@@ -159,6 +178,41 @@ describe("createRecordingController", () => {
     await controller.stop("user");
     expect(repository.drafts.length).toBe(1);
     expect(repository.commits.length).toBe(1);
+  });
+
+  it("persists initial editor documents from the start payload into package metadata and snapshots", async () => {
+    const { controller, repository } = setup();
+    const initialDocuments = makeDocuments({
+      javascript: { code: "console.log('prepared');" },
+      html: { code: "<main>prepared</main>", scrollTop: 64 },
+      css: { code: "main { color: red; }" },
+    });
+
+    await controller.start({
+      ...makeStartPayload(),
+      initialLanguage: "html",
+      initialDocuments,
+      initialActiveScriptLanguage: "javascript",
+    } as RecordStartPayload);
+    const pkg = await controller.stop("user");
+
+    expect(pkg.meta).toMatchObject({
+      initialLanguage: "html",
+      initialActiveScriptLanguage: "javascript",
+      initialDocuments: {
+        javascript: expect.objectContaining({ code: "console.log('prepared');" }),
+        html: expect.objectContaining({ code: "<main>prepared</main>", scrollTop: 64 }),
+        css: expect.objectContaining({ code: "main { color: red; }" }),
+      },
+    });
+    expect(repository.drafts[0].snapshots[0].state.editor).toMatchObject({
+      code: "<main>prepared</main>",
+      language: "html",
+      documents: {
+        javascript: expect.objectContaining({ code: "console.log('prepared');" }),
+        css: expect.objectContaining({ code: "main { color: red; }" }),
+      },
+    });
   });
 
   it("saves recorder-side snapshots that include runtime and media state", async () => {

@@ -6,6 +6,7 @@ test("primary slash comments the current editor line", async ({ page }) => {
   await openRecorder(page);
 
   await page.keyboard.type("const commented = true;");
+  await expect(editorLines(page)).toContainText(/const[\s\u00a0]+commented[\s\u00a0]*=[\s\u00a0]*true;/);
   await page.keyboard.press(`${PRIMARY_MODIFIER}+/`);
 
   await expect(editorLines(page)).toContainText(/\/\/[\s\u00a0]*const[\s\u00a0]+commented[\s\u00a0]*=[\s\u00a0]*true;/);

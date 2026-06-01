@@ -306,6 +306,42 @@ describe("createEditorProducer", () => {
     });
   });
 
+  it("does not emit editor events while running a programmatic restore", () => {
+    const env = setup();
+    const mounted = editor("before");
+    env.setEditor(mounted);
+
+    const producer = env.producer as typeof env.producer & {
+      runWithoutCapturingChanges(callback: () => void): void;
+    };
+    producer.runWithoutCapturingChanges(() => {
+      mounted.changeContent("restored", { changes: [{ text: "restored", rangeLength: 6 }] });
+      mounted.changeSelection({ lineNumber: 1, column: 5 }, {
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: 5,
+      });
+      mounted.changeScroll(120, 8);
+    });
+    vi.advanceTimersByTime(1_000);
+
+    expect(env.bus.drain()).toEqual([]);
+
+    mounted.changeContent("restored!", { changes: [{ text: "!" }] });
+    vi.advanceTimersByTime(300);
+
+    expect(env.bus.drain()).toEqual([
+      expect.objectContaining({
+        type: "content-change",
+        payload: expect.objectContaining({
+          code: "restored!",
+          changeReason: "input",
+        }),
+      }),
+    ]);
+  });
+
   it("flushes paste, undo, redo, pause, stop, and snapshot boundaries immediately", async () => {
     const env = setup();
     const mounted = editor("old");
@@ -552,6 +588,47 @@ describe("createEditorProducer", () => {
     env.producer.dispose();
     second.changeContent("disposed", { changes: [{ text: "disposed" }] });
     vi.advanceTimersByTime(300);
+    expect(env.bus.drain()).toEqual([]);
+  });
+
+  it("uses a caller-supplied reason when flushing pending content", () => {
+    const env = setup();
+    const mounted = editor();
+    env.setEditor(mounted);
+
+    mounted.changeContent("pending before language switch", { changes: [{ text: "pending before language switch" }] });
+    mounted.changeScroll(80, 2);
+    env.producer.flushPending("snapshot");
+
+    expect(env.bus.drain()).toEqual([
+      expect.objectContaining({
+        type: "content-change",
+        payload: expect.objectContaining({
+          code: "pending before language switch",
+          flushedBy: "snapshot",
+        }),
+      }),
+      expect.objectContaining({
+        type: "editor-scroll",
+        payload: { scrollTop: 80, scrollLeft: 2 },
+      }),
+    ]);
+  });
+
+  it("cancels queued scroll before running a programmatic restore", () => {
+    const env = setup();
+    const mounted = editor();
+    env.setEditor(mounted);
+
+    mounted.changeScroll(120, 8);
+    env.producer.runWithoutCapturingChanges(() => {
+      mounted.changeContent("restored", { changes: [{ text: "restored" }] });
+      mounted.changeScroll(4, 1);
+    });
+    vi.advanceTimersByTime(1_000);
+
+    expect(env.bus.drain()).toEqual([]);
+    env.producer.flushPending("snapshot");
     expect(env.bus.drain()).toEqual([]);
   });
 });

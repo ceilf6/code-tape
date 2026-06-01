@@ -133,6 +133,56 @@ describe("createRuntimeProducer", () => {
     expect(result.status).toBe("complete");
   });
 
+  it("combines stored HTML and CSS with the active JavaScript document for iframe runs", async () => {
+    const { compile, producer } = setup();
+
+    await producer.trigger({
+      language: "javascript",
+      source: "console.log(1);",
+      documents: {
+        html: '<div id="app">hi</div>',
+        css: "#app { color: red; }",
+        javascript: "console.log(1);",
+        typescript: "console.log('ts');",
+        python: "print('py')",
+      },
+      activeScriptLanguage: "javascript",
+    } as never);
+
+    const compiledSource = compile.mock.calls[0]?.[0] as string;
+    expect(compiledSource).toContain("document.body.innerHTML =");
+    expect(compiledSource).toContain('\\u003Cdiv id=\\"app\\"\\u003Ehi\\u003C/div\\u003E');
+    expect(compiledSource).toContain("#app { color: red; }");
+    expect(compiledSource).toContain("console.log(1);");
+    expect(compiledSource).not.toContain("console.log('ts');");
+    expect(compiledSource).not.toContain("print('py')");
+  });
+
+  it("escapes HTML script-data boundaries when composing web documents", async () => {
+    const { compile, producer } = setup();
+
+    await producer.trigger({
+      language: "javascript",
+      source: "console.log('ok');",
+      documents: {
+        html: "<div></script><!--\u2028</div>",
+        css: 'body::before { content: "</style></script>\u2029"; }',
+        javascript: "console.log('ok');",
+      },
+      activeScriptLanguage: "javascript",
+    } as never);
+
+    const compiledSource = compile.mock.calls[0]?.[0] as string;
+    expect(compiledSource).not.toMatch(/<\/script/i);
+    expect(compiledSource).not.toContain("<!--");
+    expect(compiledSource).not.toContain("\u2028");
+    expect(compiledSource).not.toContain("\u2029");
+    expect(compiledSource).toContain("\\u003C/script");
+    expect(compiledSource).toContain("\\u003C!--");
+    expect(compiledSource).toContain("\\u2028");
+    expect(compiledSource).toContain("\\u2029");
+  });
+
   it("emits run-error if HTML render throws", async () => {
     const { bus, producer } = setup({
       renderDocument: async () => {

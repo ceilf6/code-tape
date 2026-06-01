@@ -679,6 +679,17 @@ test('technical plan owns P1 plus WebRTC interview architecture and jitter recov
   assert.match(technicalPlan, /远端媒体保存扩展属于完整方案，需要产品确认后再实现/u);
 });
 
+test('technical plan keeps web language documents mapped to the iframe runtime', () => {
+  const technicalPlan = readFileSync('docs/技术方案.md', 'utf8');
+
+  assert.match(technicalPlan, /`javascript`、`typescript`、`html`、`css`、`python` 各自保留最后一次编辑内容/u);
+  assert.match(technicalPlan, /`html` 文档映射到 iframe `body`/u);
+  assert.match(technicalPlan, /`css` 文档映射到 `style`/u);
+  assert.match(technicalPlan, /最近选择过的 `javascript` 或 `typescript` 文档作为脚本执行/u);
+  assert.match(technicalPlan, /JS 和 TS 都有内容，只执行最近选择过的脚本语言/u);
+  assert.match(technicalPlan, /Python 只参与编辑、录制和回放，不进入 iframe 执行/u);
+});
+
 test('repository text does not reference the standalone cloud plan path', () => {
   const trackedFiles = execFileSync('git', ['ls-files'], {
     encoding: 'utf8',

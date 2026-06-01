@@ -16,7 +16,23 @@ export type RecordingSchemaVersion = typeof RECORDING_SCHEMA_VERSION;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RecordingLanguage = "javascript" | "typescript" | "python" | "html" | "css";
+export type RecordingScriptLanguage = "javascript" | "typescript";
 export type RecordingTheme = "light" | "dark";
+export type EditorCursor = { lineNumber: number; column: number } | null;
+export type EditorSelection = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+} | null;
+export type RecordingDocumentState = {
+  code: string;
+  cursor: EditorCursor;
+  selection: EditorSelection;
+  scrollTop: number;
+  scrollLeft: number;
+};
+export type RecordingEditorDocuments = Record<RecordingLanguage, RecordingDocumentState>;
 
 export type MediaCapability = {
   audio: "available" | "denied" | "not-found" | "busy" | "unsupported";
@@ -34,6 +50,8 @@ export type RecordingMeta = {
   ownerId: string | null;
   creatorInfo: { displayName: string; source: "local" | "account" } | null;
   initialLanguage: RecordingLanguage;
+  initialActiveScriptLanguage?: RecordingScriptLanguage;
+  initialDocuments?: RecordingEditorDocuments;
   initialFontSize: number;
   initialTheme: RecordingTheme;
   mediaCapability: MediaCapability;
@@ -118,6 +136,8 @@ export type BaseRecordingEvent<
 
 export type RecordStartPayload = {
   initialLanguage: RecordingLanguage;
+  initialActiveScriptLanguage?: RecordingScriptLanguage;
+  initialDocuments?: RecordingEditorDocuments;
   initialTheme: RecordingTheme;
   initialFontSize: number;
   selectedAudioDeviceId: string | null;
@@ -146,13 +166,8 @@ export type ContentChangePayload = {
 export type LanguageChangePayload = { from: RecordingLanguage; to: RecordingLanguage };
 
 export type SelectionChangePayload = {
-  cursor: { lineNumber: number; column: number } | null;
-  selection: {
-    startLineNumber: number;
-    startColumn: number;
-    endLineNumber: number;
-    endColumn: number;
-  } | null;
+  cursor: EditorCursor;
+  selection: EditorSelection;
 };
 
 export type EditorScrollPayload = { scrollTop: number; scrollLeft: number };
@@ -241,13 +256,10 @@ export type ReplayStableState = {
   editor: {
     code: string;
     language: RecordingLanguage;
-    cursor: { lineNumber: number; column: number } | null;
-    selection: {
-      startLineNumber: number;
-      startColumn: number;
-      endLineNumber: number;
-      endColumn: number;
-    } | null;
+    activeScriptLanguage?: RecordingScriptLanguage;
+    documents?: RecordingEditorDocuments;
+    cursor: EditorCursor;
+    selection: EditorSelection;
     scrollTop: number;
     scrollLeft: number;
     fontSize: number;

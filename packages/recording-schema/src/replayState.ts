@@ -2,15 +2,89 @@ import type {
   RecordingEvent,
   RecordingPackageV1,
   RecordStartPayload,
+  RecordingDocumentState,
+  RecordingEditorDocuments,
+  RecordingLanguage,
+  RecordingScriptLanguage,
   ReplayReducer,
   ReplayStableState,
 } from "./types.js";
 
 type InitialReplayStateInput = {
   initialLanguage: ReplayStableState["editor"]["language"];
+  initialActiveScriptLanguage?: RecordingScriptLanguage;
+  initialDocuments?: RecordingEditorDocuments;
   initialFontSize: number;
   initialTheme: ReplayStableState["editor"]["theme"];
 };
+
+const RECORDING_LANGUAGES: readonly RecordingLanguage[] = [
+  "javascript",
+  "typescript",
+  "python",
+  "html",
+  "css",
+];
+
+function isScriptLanguage(language: RecordingLanguage): language is RecordingScriptLanguage {
+  return language === "javascript" || language === "typescript";
+}
+
+function emptyDocumentState(): RecordingDocumentState {
+  return {
+    code: "",
+    cursor: null,
+    selection: null,
+    scrollTop: 0,
+    scrollLeft: 0,
+  };
+}
+
+function buildEmptyDocuments(): RecordingEditorDocuments {
+  return RECORDING_LANGUAGES.reduce((documents, language) => {
+    documents[language] = emptyDocumentState();
+    return documents;
+  }, {} as RecordingEditorDocuments);
+}
+
+function cloneDocumentState(document: RecordingDocumentState): RecordingDocumentState {
+  return {
+    code: document.code,
+    cursor: document.cursor ? { ...document.cursor } : null,
+    selection: document.selection ? { ...document.selection } : null,
+    scrollTop: document.scrollTop,
+    scrollLeft: document.scrollLeft,
+  };
+}
+
+function buildInitialDocuments(documents?: RecordingEditorDocuments): RecordingEditorDocuments {
+  const empty = buildEmptyDocuments();
+  if (!documents) return empty;
+  return RECORDING_LANGUAGES.reduce((nextDocuments, language) => {
+    nextDocuments[language] = documents[language]
+      ? cloneDocumentState(documents[language])
+      : emptyDocumentState();
+    return nextDocuments;
+  }, {} as RecordingEditorDocuments);
+}
+
+function ensureDocuments(editor: ReplayStableState["editor"]): RecordingEditorDocuments {
+  if (editor.documents) return editor.documents;
+  return {
+    ...buildEmptyDocuments(),
+    [editor.language]: {
+      code: editor.code,
+      cursor: editor.cursor,
+      selection: editor.selection,
+      scrollTop: editor.scrollTop,
+      scrollLeft: editor.scrollLeft,
+    },
+  };
+}
+
+function activeScriptLanguageFor(language: RecordingLanguage): RecordingScriptLanguage {
+  return isScriptLanguage(language) ? language : "javascript";
+}
 
 export function buildInitialReplayStateFromPackage(pkg: RecordingPackageV1): ReplayStableState {
   return buildInitialReplayState(pkg.meta);
@@ -50,38 +124,93 @@ export const replayReducer: ReplayReducer = (
   event: RecordingEvent,
 ): ReplayStableState => {
   switch (event.type) {
-    case "content-change":
-      return {
-        ...state,
-        editor: {
-          ...state.editor,
+    case "content-change": {
+      const documents = ensureDocuments(state.editor);
+      const language = event.payload.language;
+      const currentDocument = documents[language] ?? emptyDocumentState();
+      const nextDocuments = {
+        ...documents,
+        [language]: {
+          ...currentDocument,
           code: event.payload.code,
-          language: event.payload.language,
         },
       };
-    case "language-change":
-      return {
-        ...state,
-        editor: { ...state.editor, language: event.payload.to },
-      };
-    case "selection-change":
       return {
         ...state,
         editor: {
           ...state.editor,
+          documents: nextDocuments,
+          code: event.payload.code,
+          language,
+          activeScriptLanguage: isScriptLanguage(language)
+            ? language
+            : state.editor.activeScriptLanguage ?? activeScriptLanguageFor(state.editor.language),
+        },
+      };
+    }
+    case "language-change": {
+      const documents = ensureDocuments(state.editor);
+      const nextLanguage = event.payload.to;
+      const nextDocument = documents[nextLanguage] ?? emptyDocumentState();
+      return {
+        ...state,
+        editor: {
+          ...state.editor,
+          documents,
+          language: nextLanguage,
+          code: nextDocument.code,
+          cursor: nextDocument.cursor,
+          selection: nextDocument.selection,
+          scrollTop: nextDocument.scrollTop,
+          scrollLeft: nextDocument.scrollLeft,
+          activeScriptLanguage: isScriptLanguage(nextLanguage)
+            ? nextLanguage
+            : state.editor.activeScriptLanguage ?? activeScriptLanguageFor(state.editor.language),
+        },
+      };
+    }
+    case "selection-change": {
+      const documents = ensureDocuments(state.editor);
+      const currentDocument = documents[state.editor.language] ?? emptyDocumentState();
+      const nextDocuments = {
+        ...documents,
+        [state.editor.language]: {
+          ...currentDocument,
           cursor: event.payload.cursor,
           selection: event.payload.selection,
         },
       };
-    case "editor-scroll":
       return {
         ...state,
         editor: {
           ...state.editor,
+          documents: nextDocuments,
+          cursor: event.payload.cursor,
+          selection: event.payload.selection,
+        },
+      };
+    }
+    case "editor-scroll": {
+      const documents = ensureDocuments(state.editor);
+      const currentDocument = documents[state.editor.language] ?? emptyDocumentState();
+      const nextDocuments = {
+        ...documents,
+        [state.editor.language]: {
+          ...currentDocument,
           scrollTop: event.payload.scrollTop,
           scrollLeft: event.payload.scrollLeft,
         },
       };
+      return {
+        ...state,
+        editor: {
+          ...state.editor,
+          documents: nextDocuments,
+          scrollTop: event.payload.scrollTop,
+          scrollLeft: event.payload.scrollLeft,
+        },
+      };
+    }
     case "media-toggle":
       return {
         ...state,
@@ -158,14 +287,18 @@ export const STABLE_EVENT_TYPES = new Set<RecordingEvent["type"]>([
 ]);
 
 function buildInitialReplayState(input: InitialReplayStateInput): ReplayStableState {
+  const documents = buildInitialDocuments(input.initialDocuments);
+  const initialDocument = documents[input.initialLanguage] ?? emptyDocumentState();
   return {
     editor: {
-      code: "",
+      code: initialDocument.code,
       language: input.initialLanguage,
-      cursor: null,
-      selection: null,
-      scrollTop: 0,
-      scrollLeft: 0,
+      activeScriptLanguage: input.initialActiveScriptLanguage ?? activeScriptLanguageFor(input.initialLanguage),
+      documents,
+      cursor: initialDocument.cursor,
+      selection: initialDocument.selection,
+      scrollTop: initialDocument.scrollTop,
+      scrollLeft: initialDocument.scrollLeft,
       fontSize: input.initialFontSize,
       theme: input.initialTheme,
     },

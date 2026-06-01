@@ -34,10 +34,13 @@ import type {
   OpenStreamResult,
   RecordingControllerState,
   RecordingControllerStatus,
+  RecordingDocumentState,
+  RecordingEditorDocuments,
   RecordingLanguage,
   PackageBuildInput,
   RecordStartPayload,
   RunStartPayload,
+  RecordingScriptLanguage,
 } from "@/shared/recording-schema";
 
 const INITIAL_CONTROLLER_STATE: RecordingControllerState = {
@@ -66,6 +69,13 @@ const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20] as const;
 const AUTO_RUN_IDLE_MS = 2_000;
 const IDLE_CLEANUP_GRACE_MS = 50;
 const LIVE_DURATION_REFRESH_MS = 1000;
+const RECORDING_LANGUAGES: readonly RecordingLanguage[] = [
+  "javascript",
+  "typescript",
+  "python",
+  "html",
+  "css",
+];
 
 type DeviceOptions = {
   audio: DeviceInfo[];
@@ -81,6 +91,18 @@ type RecorderRuntimeState = {
   stderr: string[];
   errorMessage: string | null;
 };
+type EditorStateReader = {
+  getValue(): string;
+  setValue?(value: string): void;
+  getPosition?(): RecordingDocumentState["cursor"];
+  setPosition?(cursor: NonNullable<RecordingDocumentState["cursor"]>): void;
+  getSelection?(): RecordingDocumentState["selection"];
+  setSelection?(selection: NonNullable<RecordingDocumentState["selection"]>): void;
+  getScrollTop?(): number;
+  setScrollTop?(scrollTop: number): void;
+  getScrollLeft?(): number;
+  setScrollLeft?(scrollLeft: number): void;
+};
 
 /**
  * RecorderPage — wires the recording core (clock + bus + producers + builder
@@ -94,6 +116,8 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   const navigate = useNavigate();
   const theme = useTheme();
   const editorRef = useRef<CodeEditorHandle | null>(null);
+  const editorDocumentsRef = useRef<RecordingEditorDocuments>(createEmptyEditorDocuments());
+  const activeScriptLanguageRef = useRef<RecordingScriptLanguage>("javascript");
   const mediaRecorderRef = useRef<ReturnType<typeof createMediaRecorderWrapper> | null>(null);
   const mountedRef = useRef(true);
   const startInFlightRef = useRef(false);
@@ -136,6 +160,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
       getCurrentLanguage: () => currentEditorLanguage,
       setModelLanguage: (_model, language) => {
         currentEditorLanguage = language;
+        if (isScriptLanguage(language)) activeScriptLanguageRef.current = language;
         editorRef.current?.setModelLanguage(language);
       },
     });
@@ -210,6 +235,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
       },
       setCurrentEditorLanguage: (language: RecordingLanguage) => {
         currentEditorLanguage = language;
+        if (isScriptLanguage(language)) activeScriptLanguageRef.current = language;
         editorRef.current?.setModelLanguage(language);
       },
       getCurrentEditorLanguage: () => currentEditorLanguage,
@@ -455,9 +481,12 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
       setMicrophoneEnabled(hasAudioTrack);
       setCameraEnabled(hasCameraTrack);
       stack.setCurrentMediaCapability(media.capability);
+      captureCurrentEditorDocument();
 
       const payload: RecordStartPayload = {
         initialLanguage: stack.getCurrentEditorLanguage(),
+        initialActiveScriptLanguage: activeScriptLanguageRef.current,
+        initialDocuments: cloneEditorDocuments(),
         initialFontSize: editorFontSize,
         initialTheme: theme.resolved,
         selectedAudioDeviceId: media.capability.selectedAudioDeviceId,
@@ -563,6 +592,61 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     autoRunTimerRef.current = null;
   };
 
+  const captureCurrentEditorDocument = (
+    language: RecordingLanguage = stack.getCurrentEditorLanguage(),
+  ): RecordingDocumentState => {
+    const current = editorDocumentsRef.current[language];
+    const editor = editorRef.current?.getEditor() as EditorStateReader | null;
+    const next: RecordingDocumentState = editor
+      ? {
+          code: editor.getValue(),
+          cursor: editor.getPosition?.() ?? current.cursor,
+          selection: editor.getSelection?.() ?? current.selection,
+          scrollTop: editor.getScrollTop?.() ?? current.scrollTop,
+          scrollLeft: editor.getScrollLeft?.() ?? current.scrollLeft,
+        }
+      : current;
+    editorDocumentsRef.current = {
+      ...editorDocumentsRef.current,
+      [language]: next,
+    };
+    return next;
+  };
+
+  const editorDocumentsAsSources = (): Record<RecordingLanguage, string> => {
+    return RECORDING_LANGUAGES.reduce((documents, language) => {
+      documents[language] = editorDocumentsRef.current[language].code;
+      return documents;
+    }, {} as Record<RecordingLanguage, string>);
+  };
+
+  const cloneEditorDocuments = (): RecordingEditorDocuments => {
+    return RECORDING_LANGUAGES.reduce((documents, language) => {
+      const document = editorDocumentsRef.current[language];
+      documents[language] = {
+        code: document.code,
+        cursor: document.cursor ? { ...document.cursor } : null,
+        selection: document.selection ? { ...document.selection } : null,
+        scrollTop: document.scrollTop,
+        scrollLeft: document.scrollLeft,
+      };
+      return documents;
+    }, {} as RecordingEditorDocuments);
+  };
+
+  const restoreEditorDocument = (editor: EditorStateReader, document: RecordingDocumentState) => {
+    if (editor.getValue() !== document.code) {
+      editor.setValue?.(document.code);
+    }
+    if (document.selection) {
+      editor.setSelection?.(document.selection);
+    } else if (document.cursor) {
+      editor.setPosition?.(document.cursor);
+    }
+    editor.setScrollTop?.(document.scrollTop);
+    editor.setScrollLeft?.(document.scrollLeft);
+  };
+
   const isRuntimeRunLocked = () => {
     const status = stack.controller.state.status;
     return status === "paused" || status === "requestingPermission" || status === "stopping" || status === "processing";
@@ -576,12 +660,15 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     if (runtimeLanguage === null) return;
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
+    const activeDocument = captureCurrentEditorDocument();
     stack.editorProducer.flushPending();
     setRuntimeState({ status: "running", stdout: [], stderr: [], errorMessage: null });
     try {
       const result = await stack.runtimeProducer.trigger({
         language: runtimeLanguage,
-        source: editor.getValue(),
+        source: activeDocument.code,
+        documents: editorDocumentsAsSources(),
+        activeScriptLanguage: activeScriptLanguageRef.current,
       });
       if (result.status === "complete") {
         setRuntimeState({
@@ -626,11 +713,32 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
   };
 
   const handleLanguageChange = (next: RecordingLanguage) => {
-    setEditorLanguage(next);
-    stack.setCurrentEditorLanguage(next);
-    if (stack.controller.state.status === "recording") {
-      stack.editorProducer.setLanguage(next);
+    captureCurrentEditorDocument();
+    const nextDocument = editorDocumentsRef.current[next];
+    const isRecording = stack.controller.state.status === "recording";
+    if (isRecording) {
+      stack.editorProducer.flushPending("snapshot");
     }
+    setEditorLanguage(next);
+    if (isRecording) {
+      stack.editorProducer.setLanguage(next);
+    } else {
+      stack.setCurrentEditorLanguage(next);
+    }
+    const editor = editorRef.current?.getEditor() as EditorStateReader | null;
+    if (editor) {
+      if (isRecording) {
+        stack.editorProducer.runWithoutCapturingChanges(() => {
+          restoreEditorDocument(editor, nextDocument);
+        });
+      } else {
+        restoreEditorDocument(editor, nextDocument);
+      }
+    }
+  };
+  const handleEditorChange = () => {
+    captureCurrentEditorDocument();
+    scheduleAutoRun();
   };
   const displayControllerState = useMemo(
     () => ({ ...controllerState, durationMs: displayDurationMs }),
@@ -700,7 +808,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
               theme={theme.resolved}
               minHeight="compact"
               readOnly={controllerState.status === "paused"}
-              onChange={scheduleAutoRun}
+              onChange={handleEditorChange}
               onCommand={(command) => {
                 if (command === "run") void handleRun();
               }}
@@ -902,6 +1010,27 @@ function eventOnlyMedia(warnings: OpenStreamResult["warnings"] = []): OpenStream
     warnings,
     capability: INITIAL_CONTROLLER_STATE.mediaCapability,
   };
+}
+
+function isScriptLanguage(language: RecordingLanguage): language is RecordingScriptLanguage {
+  return language === "javascript" || language === "typescript";
+}
+
+function createEmptyEditorDocument(): RecordingDocumentState {
+  return {
+    code: "",
+    cursor: null,
+    selection: null,
+    scrollTop: 0,
+    scrollLeft: 0,
+  };
+}
+
+function createEmptyEditorDocuments(): RecordingEditorDocuments {
+  return RECORDING_LANGUAGES.reduce((documents, language) => {
+    documents[language] = createEmptyEditorDocument();
+    return documents;
+  }, {} as RecordingEditorDocuments);
 }
 
 function formatPermissionNotice(audio: PermissionStatus, camera: PermissionStatus): string {

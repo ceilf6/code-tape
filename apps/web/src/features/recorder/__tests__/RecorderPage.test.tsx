@@ -24,8 +24,37 @@ import type * as ReactRouterDom from "react-router-dom";
 const recorderPageMock = vi.hoisted(() => {
   const editorModel = {};
   const editorValue = { current: "" };
+  const editorPosition = { current: { lineNumber: 1, column: 1 } };
+  const editorSelection = {
+    current: {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    },
+  };
+  const editorScroll = { top: 0, left: 0 };
   const editor = {
     getValue: vi.fn(() => editorValue.current),
+    setValue: vi.fn((next: string) => {
+      editorValue.current = next;
+    }),
+    getPosition: vi.fn(() => editorPosition.current),
+    setPosition: vi.fn((next: typeof editorPosition.current) => {
+      editorPosition.current = next;
+    }),
+    getSelection: vi.fn(() => editorSelection.current),
+    setSelection: vi.fn((next: typeof editorSelection.current) => {
+      editorSelection.current = next;
+    }),
+    getScrollTop: vi.fn(() => editorScroll.top),
+    setScrollTop: vi.fn((next: number) => {
+      editorScroll.top = next;
+    }),
+    getScrollLeft: vi.fn(() => editorScroll.left),
+    setScrollLeft: vi.fn((next: number) => {
+      editorScroll.left = next;
+    }),
     getModel: vi.fn(() => editorModel),
   };
   const audioTrack = { kind: "audio" } as MediaStreamTrack;
@@ -44,6 +73,7 @@ const recorderPageMock = vi.hoisted(() => {
   }));
   const flushPending = vi.fn();
   const markNextChangeAsFormat = vi.fn(() => vi.fn());
+  const runWithoutCapturingChanges = vi.fn((callback: () => void) => callback());
   const editorProducer = {
     start: vi.fn(),
     pause: vi.fn(),
@@ -52,6 +82,7 @@ const recorderPageMock = vi.hoisted(() => {
     dispose: vi.fn(),
     flushPending,
     markNextChangeAsFormat,
+    runWithoutCapturingChanges,
     takeSnapshot: vi.fn(async () => null),
     setLanguage: vi.fn((next: RecordingLanguage) => {
       editorProducerDeps?.setModelLanguage?.(editorModel as never, next);
@@ -166,6 +197,7 @@ const recorderPageMock = vi.hoisted(() => {
     navigate,
     trigger,
     flushPending,
+    runWithoutCapturingChanges,
     editorProducer,
     mediaProducer,
     pointerProducer,
@@ -198,12 +230,31 @@ const recorderPageMock = vi.hoisted(() => {
     },
     reset() {
       editorValue.current = "";
+      editorPosition.current = { lineNumber: 1, column: 1 };
+      editorSelection.current = {
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: 1,
+      };
+      editorScroll.top = 0;
+      editorScroll.left = 0;
       editor.getValue.mockClear();
+      editor.setValue.mockClear();
+      editor.getPosition.mockClear();
+      editor.setPosition.mockClear();
+      editor.getSelection.mockClear();
+      editor.setSelection.mockClear();
+      editor.getScrollTop.mockClear();
+      editor.setScrollTop.mockClear();
+      editor.getScrollLeft.mockClear();
+      editor.setScrollLeft.mockClear();
       editor.getModel.mockClear();
       setModelLanguage.mockClear();
       navigate.mockClear();
       trigger.mockClear();
       flushPending.mockClear();
+      runWithoutCapturingChanges.mockClear();
       getTracks.mockClear();
       getAudioTracks.mockClear();
       getVideoTracks.mockClear();
@@ -416,14 +467,130 @@ describe("RecorderPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "运行代码" }));
 
     await waitFor(() =>
-      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith(expect.objectContaining({
+        activeScriptLanguage: "typescript",
         language: "typescript",
         source: "const value: number = 1;",
-      }),
+      })),
     );
     expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
     expect(recorderPageMock.flushPending.mock.invocationCallOrder[0]).toBeLessThan(
       recorderPageMock.trigger.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("restores the last document content when switching back to a language", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    const languageSelect = await screen.findByRole("combobox", { name: "语言" });
+
+    recorderPageMock.editorValue.current = "console.log(1);";
+    act(() => {
+      recorderPageMock.codeEditorProps?.onChange?.();
+    });
+    fireEvent.change(languageSelect, { target: { value: "html" } });
+
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "html" })),
+    );
+    expect(recorderPageMock.editor.setValue).toHaveBeenLastCalledWith("");
+
+    recorderPageMock.editorValue.current = "<div>hi</div>";
+    act(() => {
+      recorderPageMock.codeEditorProps?.onChange?.();
+    });
+    fireEvent.change(languageSelect, { target: { value: "javascript" } });
+
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "javascript" })),
+    );
+    expect(recorderPageMock.editor.setValue).toHaveBeenLastCalledWith("console.log(1);");
+  });
+
+  it("restores the last document view state when switching back to a language", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    const languageSelect = await screen.findByRole("combobox", { name: "语言" });
+
+    recorderPageMock.editorValue.current = "console.log(1);\nconsole.log(2);";
+    recorderPageMock.editor.setPosition({ lineNumber: 2, column: 5 });
+    recorderPageMock.editor.setSelection({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 15,
+    });
+    recorderPageMock.editor.setScrollTop(128);
+    recorderPageMock.editor.setScrollLeft(24);
+    act(() => {
+      recorderPageMock.codeEditorProps?.onChange?.();
+    });
+
+    fireEvent.change(languageSelect, { target: { value: "html" } });
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "html" })),
+    );
+
+    recorderPageMock.editorValue.current = "<main>\n  <div>hi</div>\n</main>";
+    recorderPageMock.editor.setPosition({ lineNumber: 3, column: 7 });
+    recorderPageMock.editor.setSelection({
+      startLineNumber: 2,
+      startColumn: 3,
+      endLineNumber: 2,
+      endColumn: 15,
+    });
+    recorderPageMock.editor.setScrollTop(256);
+    recorderPageMock.editor.setScrollLeft(8);
+    act(() => {
+      recorderPageMock.codeEditorProps?.onChange?.();
+    });
+
+    fireEvent.change(languageSelect, { target: { value: "javascript" } });
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "javascript" })),
+    );
+
+    expect(recorderPageMock.editor.setSelection).toHaveBeenLastCalledWith({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 15,
+    });
+    expect(recorderPageMock.editor.setScrollTop).toHaveBeenLastCalledWith(128);
+    expect(recorderPageMock.editor.setScrollLeft).toHaveBeenLastCalledWith(24);
+  });
+
+  it("switches the recording producer before restoring a language document", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+    const languageSelect = await screen.findByRole("combobox", { name: "语言" });
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    await waitFor(() => expect(recorderPageMock.editorProducer.start).toHaveBeenCalledTimes(1));
+
+    recorderPageMock.editorValue.current = "console.log(1);";
+    act(() => {
+      recorderPageMock.codeEditorProps?.onChange?.();
+    });
+
+    fireEvent.change(languageSelect, { target: { value: "html" } });
+
+    await waitFor(() =>
+      expect(recorderPageMock.codeEditorProps).toEqual(expect.objectContaining({ language: "html" })),
+    );
+    expect(recorderPageMock.flushPending).toHaveBeenCalledWith("snapshot");
+    expect(recorderPageMock.flushPending.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(recorderPageMock.editorProducer.setLanguage).mock.invocationCallOrder[0],
+    );
+    expect(recorderPageMock.editorProducer.setLanguage).toHaveBeenCalledWith("html");
+    expect(vi.mocked(recorderPageMock.editorProducer.setLanguage).mock.invocationCallOrder[0]).toBeLessThan(
+      recorderPageMock.editor.setValue.mock.invocationCallOrder[0],
+    );
+    expect(recorderPageMock.runWithoutCapturingChanges).toHaveBeenCalledTimes(1);
+    expect(recorderPageMock.runWithoutCapturingChanges.mock.invocationCallOrder[0]).toBeLessThan(
+      recorderPageMock.editor.setValue.mock.invocationCallOrder[0],
     );
   });
 
@@ -477,10 +644,10 @@ describe("RecorderPage", () => {
     });
 
     await waitFor(() =>
-      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith(expect.objectContaining({
         language: "javascript",
         source: "console.log('shortcut-run');",
-      }),
+      })),
     );
     expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
   });
@@ -526,10 +693,10 @@ describe("RecorderPage", () => {
         await flushAsyncWork();
       });
 
-      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith(expect.objectContaining({
         language: "javascript",
         source: "console.log('second-auto-run');",
-      });
+      }));
       expect(recorderPageMock.flushPending).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -559,10 +726,10 @@ describe("RecorderPage", () => {
       });
 
       expect(recorderPageMock.trigger).toHaveBeenCalledTimes(1);
-      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith(expect.objectContaining({
         language: "javascript",
         source: "console.log('manual-run');",
-      });
+      }));
     } finally {
       vi.useRealTimers();
     }
@@ -632,10 +799,10 @@ describe("RecorderPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "运行代码" }));
 
     await waitFor(() =>
-      expect(recorderPageMock.trigger).toHaveBeenCalledWith({
+      expect(recorderPageMock.trigger).toHaveBeenCalledWith(expect.objectContaining({
         language: "javascript",
         source: "console.log('strict-mode-ready');",
-      }),
+      })),
     );
   });
 

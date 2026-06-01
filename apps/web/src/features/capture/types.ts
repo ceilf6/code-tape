@@ -11,12 +11,14 @@
  */
 import type { editor as MonacoEditor } from "monaco-editor";
 import type {
+  ContentChangePayload,
   EventBus,
   EventProducer,
   MediaCapability,
   MediaDevicesController,
   RecordingClock,
   RecordingLanguage,
+  RecordingScriptLanguage,
   RecordingSnapshot,
 } from "@/shared/recording-schema";
 import type { IframeRunResult, IframeRuntime, PreviewCompiler } from "@/shared/recording-schema";
@@ -43,10 +45,12 @@ export type EditorProducerDeps = ProducerCommonDeps & {
 };
 
 export type EditorProducerHandle = EventProducer & {
-  /** Force-flush any pending content-change before the controller stops or pauses. */
-  flushPending(): void;
+  /** Force-flush any pending content-change at an explicit recorder boundary. */
+  flushPending(reason?: ContentChangePayload["flushedBy"]): void;
   /** Mark the next Monaco content-change as a format operation. Returns a cancel callback. */
   markNextChangeAsFormat(): () => void;
+  /** Run a programmatic editor update without recording content, selection, or scroll events. */
+  runWithoutCapturingChanges(callback: () => void): void;
   /** Take a stable-state snapshot of the editor for packageBuilder / resume-baseline. */
   takeSnapshot(): Promise<RecordingSnapshot | null>;
   /** Imperatively change the language (also emits the language-change event). */
@@ -128,16 +132,20 @@ export type RuntimeProducerRunResult =
       previewHtml: null;
     };
 
+export type RuntimeProducerRunInput = {
+  language: "javascript" | "typescript" | "html" | "css";
+  source: string;
+  documents?: Partial<Record<RecordingLanguage, string>>;
+  activeScriptLanguage?: RecordingScriptLanguage;
+};
+
 export type RuntimeProducerHandle = EventProducer & {
   /**
    * Compile + execute the user's source. Emits `run-start`, then exactly one of
    * `run-output` / `run-error` on completion. Returns the underlying iframe
    * result so the page UI can render console output during the run.
    */
-  trigger(input: {
-    language: "javascript" | "typescript" | "html" | "css";
-    source: string;
-  }): Promise<RuntimeProducerRunResult>;
+  trigger(input: RuntimeProducerRunInput): Promise<RuntimeProducerRunResult>;
 };
 
 export type CreateRuntimeProducer = (deps: RuntimeProducerDeps) => RuntimeProducerHandle;
