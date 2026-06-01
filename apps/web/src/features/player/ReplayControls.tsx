@@ -25,6 +25,7 @@ export type ReplayControlsProps = {
 };
 
 const PLAYBACK_RATES: ReplayPlaybackRate[] = [2, 1.5, 1, 0.5];
+const SEEK_PROGRESS_SETTLE_THRESHOLD_MS = 100;
 
 export function ReplayControls({
   state,
@@ -51,6 +52,8 @@ export function ReplayControls({
   const baseProgressPercent = safeDuration > 0 ? (baseCurrentTime / safeDuration) * 100 : 0;
   const currentProgressPercent = pendingProgressPercent ?? baseProgressPercent;
   const currentTime = (currentProgressPercent / 100) * safeDuration;
+  const pendingProgressTime =
+    pendingProgressPercent === null ? null : (pendingProgressPercent / 100) * safeDuration;
   const displayedVolume = muted ? 0 : volume;
   const timelineDisabled =
     safeDuration === 0 ||
@@ -74,12 +77,20 @@ export function ReplayControls({
     }
     if (
       progressInteraction === "committed" &&
-      Math.abs(baseProgressPercent - pendingProgressPercent) <= 0.1
+      pendingProgressTime !== null &&
+      Math.abs(baseCurrentTime - pendingProgressTime) <= SEEK_PROGRESS_SETTLE_THRESHOLD_MS
     ) {
       setPendingProgressPercent(null);
       setProgressInteraction("idle");
     }
-  }, [baseProgressPercent, pendingProgressPercent, progressInteraction, safeDuration, state.status]);
+  }, [
+    baseCurrentTime,
+    pendingProgressPercent,
+    pendingProgressTime,
+    progressInteraction,
+    safeDuration,
+    state.status,
+  ]);
 
   const openRatePopover = () => {
     if (rateCloseTimeoutRef.current) clearTimeout(rateCloseTimeoutRef.current);
