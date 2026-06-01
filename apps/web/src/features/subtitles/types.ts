@@ -9,7 +9,7 @@ export type SubtitleTrack = {
   recordingId: string;
   generatedAt: string;
   model: string;
-  source: "huggingface-local" | "backend-job";
+  source: "huggingface-local" | "external-asr" | "backend-job";
   language?: string;
   segments: SubtitleSegment[];
 };
@@ -73,12 +73,19 @@ export type SubtitleTranscriberInput = {
   mediaBlob: Blob;
   durationMs: number;
   signal?: AbortSignal;
+  onStatus?: (status: SubtitleTranscriptionStatus) => void;
 };
 
 export type SubtitleTranscriber = {
   warmUp?(): Promise<void>;
   transcribe(input: SubtitleTranscriberInput): Promise<SubtitleTrackDraft>;
+  dispose?(): void;
 };
+
+export type SubtitleTranscriptionStatus =
+  | "loading-local-model"
+  | "requesting-external-asr"
+  | "transcribing";
 
 export type SubtitleStore = {
   load(recordingId: string): Promise<SubtitleTrack | null>;

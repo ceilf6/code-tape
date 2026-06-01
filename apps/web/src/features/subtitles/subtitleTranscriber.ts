@@ -70,9 +70,10 @@ export function createHuggingFaceSubtitleTranscriber(
   let pipelinePromise: Promise<AsrPipeline> | null = null;
   const getPipeline = () => {
     if (!pipelinePromise) {
-      pipelinePromise = (options.pipelineFactory
-        ? options.pipelineFactory("automatic-speech-recognition", model, pipelineOptions)
-        : loadDefaultPipeline("automatic-speech-recognition", model, pipelineOptions)
+      pipelinePromise = (
+        options.pipelineFactory
+          ? options.pipelineFactory("automatic-speech-recognition", model, pipelineOptions)
+          : loadDefaultPipeline("automatic-speech-recognition", model, pipelineOptions)
       ).catch((error: unknown) => {
         pipelinePromise = null;
         throw error;
@@ -85,10 +86,12 @@ export function createHuggingFaceSubtitleTranscriber(
     async warmUp() {
       await getPipeline();
     },
-    async transcribe({ mediaBlob, durationMs, signal }) {
+    async transcribe({ mediaBlob, durationMs, signal, onStatus }) {
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+      onStatus?.("loading-local-model");
       const pipeline = await getPipeline();
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+      onStatus?.("transcribing");
       const url = URL.createObjectURL(mediaBlob);
       try {
         const result = await pipeline(url, TRANSCRIPTION_OPTIONS);
@@ -110,9 +113,15 @@ async function loadDefaultPipeline(
   model: string,
   options: AsrPipelineOptions,
 ): Promise<AsrPipeline> {
-  return loadTransformersPipeline<AsrPipeline>(task, model, options, {}, {
-    vendored: model === DEFAULT_TRANSCRIPTION_MODEL,
-  });
+  return loadTransformersPipeline<AsrPipeline>(
+    task,
+    model,
+    options,
+    {},
+    {
+      vendored: model === DEFAULT_TRANSCRIPTION_MODEL,
+    },
+  );
 }
 
 function segmentFromChunk(

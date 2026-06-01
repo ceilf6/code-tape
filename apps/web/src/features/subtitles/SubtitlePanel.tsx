@@ -1,12 +1,16 @@
 import { Captions, Loader2, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { SubtitleAsrConfigButton } from "./SubtitleAsrConfigButton";
 import { SubtitleChapterList } from "./SubtitleChapterList";
 import { SubtitleLlmConfigButton } from "./SubtitleLlmConfigButton";
 import { applySubtitleCorrection } from "./subtitleCorrection";
+import { createExternalAsrSubtitleTranscriber } from "./externalAsrSubtitleTranscriber";
 import { createExternalLlmSubtitlePostProcessor } from "./externalLlmSubtitlePostProcessor";
 import { createFallbackSubtitlePostProcessor } from "./fallbackSubtitlePostProcessor";
+import { createFallbackSubtitleTranscriber } from "./fallbackSubtitleTranscriber";
 import { resolveEffectivePostProcessTimeoutMs } from "./subtitlePostProcessTimeout";
 import { isExternalLlmConfigured, loadExternalLlmConfig } from "./subtitleLlmConfig";
+import { isExternalAsrConfigured, loadExternalAsrConfig } from "./subtitleAsrConfig";
 import { resolveSubtitlePostProcessorModel } from "./subtitlePostProcessorConfig";
 import { createWorkerBackedHuggingFaceSubtitlePostProcessor } from "./subtitlePostProcessorWorkerClient";
 import { createSubtitleStore } from "./subtitleStore";
@@ -22,6 +26,7 @@ import type {
   SubtitleStore,
   SubtitleTrack,
   SubtitleTranscriber,
+  SubtitleTranscriptionStatus,
 } from "./types";
 import { cn } from "@/shared/ui/utils/cn";
 
@@ -42,6 +47,8 @@ export type SubtitlePanelProps = {
 };
 
 type GenerationStatus = "idle" | "loading" | "generating" | "post-processing" | "ready" | "error";
+
+type AsrRuntimeStatus = "idle" | "warming" | "warm" | "warm-error" | SubtitleTranscriptionStatus;
 
 type PostProcessorWarmUpState = {
   recordingId: string;
@@ -64,9 +71,25 @@ export function SubtitlePanel({
   postProcessTimeoutMs = DEFAULT_SUBTITLE_POSTPROCESS_TIMEOUT_MS,
 }: SubtitlePanelProps) {
   const store = useMemo(() => injectedStore ?? createSubtitleStore(), [injectedStore]);
-  const transcriber = useMemo(
-    () => injectedTranscriber ?? createHuggingFaceSubtitleTranscriber(),
-    [injectedTranscriber],
+  const [asrConfigVersion, setAsrConfigVersion] = useState(0);
+  const transcriber = useMemo(() => {
+    if (injectedTranscriber) return injectedTranscriber;
+    const localTranscriber = createHuggingFaceSubtitleTranscriber();
+    const externalConfig = loadExternalAsrConfig();
+    if (!isExternalAsrConfigured(externalConfig)) return localTranscriber;
+    const externalTranscriber = createExternalAsrSubtitleTranscriber({ config: externalConfig });
+    return createFallbackSubtitleTranscriber(externalTranscriber, localTranscriber, {
+      onFallback: () =>
+        console.warn("[code-tape] external subtitle ASR failed; falling back to local model"),
+    });
+    // asrConfigVersion bumps when the user saves/clears the external ASR config.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [injectedTranscriber, asrConfigVersion]);
+  const externalAsrConfigured = useMemo(
+    () => isExternalAsrConfigured(loadExternalAsrConfig()),
+    // Recompute when the user saves/clears the config (version bump).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [asrConfigVersion],
   );
   const [llmConfigVersion, setLlmConfigVersion] = useState(0);
   const postProcessor = useMemo(
@@ -101,12 +124,13 @@ export function SubtitlePanel({
   const [chapters, setChapters] = useState<SubtitleChapter[]>([]);
   const [warnings, setWarnings] = useState<SubtitleCorrectionWarning[]>([]);
   const [status, setStatus] = useState<GenerationStatus>("idle");
+  const [asrStatus, setAsrStatus] = useState<AsrRuntimeStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const activeSegment = findActiveSegment(track?.segments ?? [], currentTimeMs);
   const activeSegmentRef = useRef<HTMLButtonElement | null>(null);
   const requestVersionRef = useRef(0);
   const generationAbortRef = useRef<AbortController | null>(null);
-  const warmUpRequestRef = useRef<{ recordingId: string; mediaBlob: Blob } | null>(null);
+  const warmUpTranscriberRef = useRef<SubtitleTranscriber | null>(null);
   const postProcessorWarmUpRef = useRef<PostProcessorWarmUpState | null>(null);
 
   useEffect(() => {
@@ -162,17 +186,19 @@ export function SubtitlePanel({
   }, [activeSegment?.id]);
 
   useEffect(() => {
-    if (!recordingId || !mediaBlob || !hasAudio || !transcriber.warmUp) {
-      warmUpRequestRef.current = null;
-      return;
-    }
-    const lastWarmUpRequest = warmUpRequestRef.current;
-    if (lastWarmUpRequest?.recordingId === recordingId && lastWarmUpRequest.mediaBlob === mediaBlob) {
-      return;
-    }
-    warmUpRequestRef.current = { recordingId, mediaBlob };
-    void transcriber.warmUp().catch(() => undefined);
-  }, [hasAudio, mediaBlob, recordingId, transcriber]);
+    if (!transcriber.warmUp) return;
+    if (warmUpTranscriberRef.current === transcriber) return;
+    warmUpTranscriberRef.current = transcriber;
+    setAsrStatus("warming");
+    void transcriber
+      .warmUp()
+      .then(() => {
+        if (warmUpTranscriberRef.current === transcriber) setAsrStatus("warm");
+      })
+      .catch(() => {
+        if (warmUpTranscriberRef.current === transcriber) setAsrStatus("warm-error");
+      });
+  }, [transcriber]);
 
   useEffect(() => {
     if (
@@ -206,7 +232,8 @@ export function SubtitlePanel({
     warmUpState.cancel = scheduleIdleWarmUp(() => {
       if (cancelled) return;
       warmUpState.status = "running";
-      void postProcessor.warmUp?.()
+      void postProcessor
+        .warmUp?.()
         .catch(() => undefined)
         .finally(() => {
           if (postProcessorWarmUpRef.current === warmUpState) {
@@ -222,20 +249,20 @@ export function SubtitlePanel({
 
   const canGenerate = Boolean(
     recordingId &&
-      mediaBlob &&
-      hasAudio &&
-      status !== "loading" &&
-      status !== "generating" &&
-      status !== "post-processing",
+    mediaBlob &&
+    hasAudio &&
+    status !== "loading" &&
+    status !== "generating" &&
+    status !== "post-processing",
   );
   const canPostProcess = Boolean(
     recordingId &&
-      track &&
-      track.segments.length > 0 &&
-      postProcessor &&
-      status !== "loading" &&
-      status !== "generating" &&
-      status !== "post-processing",
+    track &&
+    track.segments.length > 0 &&
+    postProcessor &&
+    status !== "loading" &&
+    status !== "generating" &&
+    status !== "post-processing",
   );
   const shouldGenerateBeforePostProcess = Boolean(postProcessor && canGenerate);
   const primaryActionLabel = shouldGenerateBeforePostProcess
@@ -265,12 +292,17 @@ export function SubtitlePanel({
         }),
         {
           abortController,
-          timeoutMs: resolveEffectivePostProcessTimeoutMs(postProcessTimeoutMs, externalLlmConfigured),
+          timeoutMs: resolveEffectivePostProcessTimeoutMs(
+            postProcessTimeoutMs,
+            externalLlmConfigured,
+          ),
         },
       );
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       const result = applySubtitleCorrection(baseTrack, correction, { durationMs });
-      const hasInvalidCorrection = result.warnings.some((warning) => warning.code === "invalid-correction");
+      const hasInvalidCorrection = result.warnings.some(
+        (warning) => warning.code === "invalid-correction",
+      );
       if (hasInvalidCorrection) {
         setWarnings(result.warnings);
         setStatus("ready");
@@ -284,7 +316,11 @@ export function SubtitlePanel({
       setStatus("ready");
     } catch (err) {
       if (isPostProcessTimeoutError(err)) {
-        if (requestVersionRef.current !== requestVersion || generationAbortRef.current !== abortController) return;
+        if (
+          requestVersionRef.current !== requestVersion ||
+          generationAbortRef.current !== abortController
+        )
+          return;
         setError(formatSubtitleError(err));
         setStatus("error");
         return;
@@ -308,10 +344,12 @@ export function SubtitlePanel({
     setError(null);
     setWarnings([]);
     try {
+      setAsrStatus("transcribing");
       const draft = await transcriber.transcribe({
         mediaBlob,
         durationMs,
         signal: abortController.signal,
+        onStatus: setAsrStatus,
       });
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       const nextTrack: SubtitleTrack = {
@@ -323,6 +361,7 @@ export function SubtitlePanel({
       if (!isCurrentGeneration(requestVersionRef, requestVersion, abortController)) return;
       setTrack(nextTrack);
       setChapters([]);
+      setAsrStatus("warm");
       if (postProcessor) {
         await postProcessTrack(nextTrack, requestVersion, abortController);
         return;
@@ -331,6 +370,7 @@ export function SubtitlePanel({
     } catch (err) {
       if (abortController.signal.aborted || requestVersionRef.current !== requestVersion) return;
       if (requestStaleTransformersImportRecovery(err)) return;
+      setAsrStatus("warm-error");
       setError(formatSubtitleError(err));
       setStatus("error");
     } finally {
@@ -366,12 +406,10 @@ export function SubtitlePanel({
     }
     void generateSubtitles();
   };
+  const statusMessage = formatAsrStatusMessage(status, asrStatus);
 
   return (
-    <section
-      aria-label="字幕"
-      className="shrink-0 border-t border-border bg-background px-3 py-2"
-    >
+    <section aria-label="字幕" className="shrink-0 border-t border-border bg-background px-3 py-2">
       <div className="mb-2 flex min-h-9 flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
           <Captions aria-hidden size={17} className="shrink-0 text-primary" />
@@ -384,6 +422,10 @@ export function SubtitlePanel({
           <SubtitleLlmConfigButton
             configured={externalLlmConfigured}
             onConfigChange={() => setLlmConfigVersion((version) => version + 1)}
+          />
+          <SubtitleAsrConfigButton
+            configured={externalAsrConfigured}
+            onConfigChange={() => setAsrConfigVersion((version) => version + 1)}
           />
           <button
             type="button"
@@ -411,15 +453,12 @@ export function SubtitlePanel({
           {warnings[0]?.message}
         </p>
       ) : null}
+      {statusMessage ? <p className="mb-2 text-xs text-muted">{statusMessage}</p> : null}
       {!hasAudio ? (
         <p className="text-xs text-muted">无音频轨道</p>
       ) : track && track.segments.length > 0 ? (
         <>
-          <SubtitleChapterList
-            chapters={chapters}
-            currentTimeMs={currentTimeMs}
-            onSeek={onSeek}
-          />
+          <SubtitleChapterList chapters={chapters} currentTimeMs={currentTimeMs} onSeek={onSeek} />
           <div className="flex max-h-32 min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
             {track.segments.map((segment) => {
               const isActive = activeSegment?.id === segment.id;
@@ -438,21 +477,17 @@ export function SubtitlePanel({
                     isActive ? "bg-surface-raised text-foreground" : "text-muted",
                   )}
                 >
-                  <span className="font-mono tabular-nums">{formatSubtitleTime(segment.startMs)}</span>
+                  <span className="font-mono tabular-nums">
+                    {formatSubtitleTime(segment.startMs)}
+                  </span>
                   <span className="text-foreground">{segment.text}</span>
                 </button>
               );
             })}
           </div>
         </>
-      ) : (
-        <p className="text-xs text-muted">
-          {status === "generating"
-            ? "正在生成字幕..."
-            : status === "post-processing"
-              ? "正在纠错并生成章节..."
-              : "暂无字幕"}
-        </p>
+      ) : status === "generating" || status === "post-processing" ? null : (
+        <p className="text-xs text-muted">暂无字幕</p>
       )}
     </section>
   );
@@ -492,6 +527,22 @@ function formatSubtitleTime(ms: number): string {
 
 function formatSubtitleError(error: unknown): string {
   return error instanceof Error ? error.message : "字幕生成失败";
+}
+
+function formatAsrStatusMessage(
+  generationStatus: GenerationStatus,
+  asrStatus: AsrRuntimeStatus,
+): string | null {
+  if (generationStatus === "post-processing") return "ASR 完成，正在纠错并生成章节...";
+  if (generationStatus === "generating") {
+    if (asrStatus === "loading-local-model") return "正在加载本地 ASR 模型...";
+    if (asrStatus === "requesting-external-asr") return "正在请求外部 ASR...";
+    if (asrStatus === "transcribing") return "正在识别音频...";
+    return "正在生成字幕...";
+  }
+  if (asrStatus === "warming") return "正在加载本地 ASR 模型...";
+  if (asrStatus === "warm-error") return "本地 ASR 模型预热失败，点击生成时会重试。";
+  return null;
 }
 
 class PostProcessTimeoutError extends Error {
