@@ -435,7 +435,7 @@ export function RecordingLibraryPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {items.map((item) => (
-                <tr key={item.id} className="align-top">
+                <tr key={item.id} className="align-middle">
                   <td className="px-4 py-3">
                     <RecordingThumbnail
                       title={item.title}

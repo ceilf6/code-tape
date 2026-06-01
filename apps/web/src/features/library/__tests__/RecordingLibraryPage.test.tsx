@@ -184,10 +184,12 @@ describe("RecordingLibraryPage", () => {
     renderPage();
     await waitForElementToBeRemoved(() => screen.queryByRole("status"));
 
-    expect(screen.getByRole("link", { name: BASE_TITLE })).toHaveAttribute(
+    const replayLink = screen.getByRole("link", { name: BASE_TITLE });
+    expect(replayLink).toHaveAttribute(
       "href",
       expect.stringContaining("/replay/rec-1"),
     );
+    expect(replayLink.closest("tr")).toHaveClass("align-middle");
     expect(screen.getByText(/TypeScript/)).toBeInTheDocument();
     expect(screen.getByText(/\u97f3\u9891/)).toBeInTheDocument();
     expect(screen.getByText(/\u65e0\u6444\u50cf\u5934/)).toBeInTheDocument();
