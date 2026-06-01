@@ -137,7 +137,7 @@ const recorderPageMock = vi.hoisted(() => {
         { deviceId: "cam-2", label: "Studio Camera", kind: "videoinput" as const },
       ],
     })),
-    requestPermission: vi.fn(),
+    requestPermission: vi.fn<MediaDevicesController["requestPermission"]>(async () => "granted"),
     openStream: vi.fn<MediaDevicesController["openStream"]>(async (request) => ({
       stream: request.audioDeviceId === null && request.cameraDeviceId === null ? null : stream,
       warnings: [],
@@ -292,6 +292,7 @@ const recorderPageMock = vi.hoisted(() => {
       shortcutProducer.dispose.mockClear();
       devices.enumerate.mockClear();
       devices.requestPermission.mockClear();
+      devices.requestPermission.mockResolvedValue("granted");
       devices.openStream.mockClear();
       devices.setTrackEnabled.mockClear();
       devices.release.mockClear();
@@ -798,6 +799,19 @@ describe("RecorderPage", () => {
     await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
   });
 
+  it("places the media permission action before media device choices", async () => {
+    const { RecorderPage } = await import("../RecorderPage");
+
+    render(<RecorderPage />);
+
+    const permissionButton = screen.getByRole("button", { name: "申请设备权限" });
+    const microphoneSelect = await screen.findByRole("combobox", { name: "麦克风设备" });
+
+    expect(
+      permissionButton.compareDocumentPosition(microphoneSelect) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps producers reusable after StrictMode idle cleanup", async () => {
     const { RecorderPage } = await import("../RecorderPage");
     recorderPageMock.editorValue.current = "console.log('strict-mode-ready');";
@@ -866,16 +880,28 @@ describe("RecorderPage", () => {
   });
 
   it("opens the selected media stream and starts media recording before controller start", async () => {
+    recorderPageMock.devices.requestPermission.mockResolvedValue("granted");
     const { RecorderPage } = await import("../RecorderPage");
 
     render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
+    recorderPageMock.devices.enumerate.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
+    await waitFor(() => expect(recorderPageMock.devices.requestPermission).toHaveBeenCalledWith("audio"));
+    expect(recorderPageMock.devices.requestPermission).toHaveBeenCalledWith("camera");
+    await waitFor(() => expect(recorderPageMock.devices.enumerate).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(recorderPageMock.devices.openStream).toHaveBeenCalledWith({
         audioDeviceId: "mic-1",
         cameraDeviceId: "cam-1",
       }),
+    );
+    expect(recorderPageMock.devices.requestPermission.mock.invocationCallOrder[0]).toBeLessThan(
+      recorderPageMock.devices.enumerate.mock.invocationCallOrder[0],
+    );
+    expect(recorderPageMock.devices.enumerate.mock.invocationCallOrder[0]).toBeLessThan(
+      recorderPageMock.devices.openStream.mock.invocationCallOrder[0],
     );
     expect(recorderPageMock.mediaRecorder.start).toHaveBeenCalledWith(recorderPageMock.stream);
     expect(recorderPageMock.cameraPreviewProps?.stream).toBe(recorderPageMock.stream);
@@ -1377,12 +1403,16 @@ describe("RecorderPage", () => {
     expect(recorderPageMock.cameraPreviewProps?.stream).toBeNull();
   });
 
-  it("continues event-only recording when device enumeration fails", async () => {
+  it("continues event-only recording when startup device enumeration fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    recorderPageMock.devices.enumerate.mockRejectedValueOnce(new Error("blocked"));
+    recorderPageMock.devices.enumerate
+      .mockRejectedValueOnce(new Error("blocked"))
+      .mockRejectedValueOnce(new Error("still blocked"));
     const { RecorderPage } = await import("../RecorderPage");
 
     render(<RecorderPage />);
+    await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));
+    recorderPageMock.devices.release.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     await waitFor(() => expect(recorderPageMock.devices.release).toHaveBeenCalledTimes(1));

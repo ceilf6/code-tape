@@ -24,7 +24,7 @@ import {
   createRuntimeProducer,
   createShortcutProducer,
 } from "@/features/capture";
-import { IconButton, ResizableWorkspace, useTheme } from "@/shared/ui";
+import { ResizableWorkspace, useTheme } from "@/shared/ui";
 import type {
   CameraPositionPayload,
   DeviceInfo,
@@ -395,8 +395,7 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     cameraDeviceSelectionTouchedRef.current = true;
     setSelectedCameraDeviceId(deviceId);
   }, []);
-  const handleRequestMediaPermission = useCallback(async () => {
-    if (mediaPermissionRequesting || stack.controller.state.status !== "idle") return;
+  const requestMediaPermissionAndLoadDevices = useCallback(async (): Promise<DeviceList> => {
     setMediaPermissionRequesting(true);
     setMediaPermissionNotice("正在请求浏览器设备权限...");
     try {
@@ -404,16 +403,22 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
         stack.devices.requestPermission("audio"),
         stack.devices.requestPermission("camera"),
       ]);
-      await loadDevices({ force: true });
+      const available = await loadDevices({ force: true });
       setMediaPermissionNotice(formatPermissionNotice(audio, camera));
+      return available;
     } catch (err) {
       console.warn("[recorder-page] media permission request failed:", err);
-      await loadDevices({ force: true });
+      const available = await loadDevices({ force: true });
       setMediaPermissionNotice("设备权限申请失败，可选择无媒体录制。");
+      return available;
     } finally {
       if (mountedRef.current) setMediaPermissionRequesting(false);
     }
-  }, [loadDevices, mediaPermissionRequesting, stack.controller, stack.devices]);
+  }, [loadDevices, stack.devices]);
+  const handleRequestMediaPermission = useCallback(async () => {
+    if (mediaPermissionRequesting || stack.controller.state.status !== "idle") return;
+    await requestMediaPermissionAndLoadDevices();
+  }, [mediaPermissionRequesting, requestMediaPermissionAndLoadDevices, stack.controller]);
 
   const handleStart = async () => {
     if (startInFlightRef.current) return;
@@ -421,10 +426,11 @@ export function RecorderPage({ onEventBusReady }: RecorderPageProps = {}) {
     setPersistenceNotice(null);
     const startToken = (startTokenRef.current += 1);
     try {
-      const currentDeviceOptions = deviceOptionsRef.current;
-      const available = currentDeviceOptions.loaded
-        ? { audio: currentDeviceOptions.audio, camera: currentDeviceOptions.camera }
-        : await loadDevices();
+      const available = await requestMediaPermissionAndLoadDevices();
+      if (!isCurrentStart(startToken)) {
+        stack.devices.release();
+        return;
+      }
       const audioDeviceId = audioDeviceSelectionTouchedRef.current
         ? selectedAudioDeviceId
         : selectedAudioDeviceId ?? available.audio[0]?.deviceId ?? null;
@@ -914,6 +920,15 @@ function RecorderSetupToolbar({
       className="flex min-h-11 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-2"
       data-recorder-setup
     >
+      <button
+        type="button"
+        className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-primary/30 bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-[background-color,box-shadow] duration-150 ease-out-soft hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        disabled={disabled || permissionRequesting}
+        onClick={onRequestMediaPermission}
+      >
+        <ShieldCheck aria-hidden size={15} />
+        <span>申请设备权限</span>
+      </button>
       <LabeledSelect
         label="语言"
         value={language}
@@ -960,14 +975,6 @@ function RecorderSetupToolbar({
             label: device.label || "未命名摄像头",
           })),
         ]}
-      />
-      <IconButton
-        label="申请设备权限"
-        icon={<ShieldCheck size={15} />}
-        size="sm"
-        variant="subtle"
-        disabled={disabled || permissionRequesting}
-        onClick={onRequestMediaPermission}
       />
       {permissionNotice ? (
         <span role="status" aria-live="polite" className="text-xs text-muted">
