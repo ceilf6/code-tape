@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T09:10:49Z",
+  "updatedAt": "2026-06-01T09:55:10Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
         247,
-        269
+        269,
+        283
       ],
       "completedIssues": [
         11,
@@ -1573,6 +1574,19 @@
       "claimedAt": "2026-06-01T08:47:54Z",
       "closedAt": "2026-06-01T09:10:49Z",
       "mergedPr": 282
+    },
+    "283": {
+      "number": 283,
+      "title": "修复 ReplayPage 测试中的动态 RegExp Semgrep 告警",
+      "score": 1,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-01T09:55:10Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
