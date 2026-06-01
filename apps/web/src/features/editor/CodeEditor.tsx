@@ -493,7 +493,10 @@ function isPrimaryShortcut(event: Monaco.IKeyboardEvent, key: string): boolean {
 }
 
 function isFormatShortcut(event: Monaco.IKeyboardEvent): boolean {
-  return !event.metaKey && !event.ctrlKey && event.shiftKey && event.altKey && matchesKey(event, "f");
+  return (
+    isPrimaryShortcut(event, "s")
+    || (!event.metaKey && !event.ctrlKey && event.shiftKey && event.altKey && matchesKey(event, "f"))
+  );
 }
 
 function matchesKey(event: Monaco.IKeyboardEvent, key: string): boolean {

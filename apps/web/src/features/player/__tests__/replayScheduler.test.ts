@@ -63,7 +63,7 @@ function shortcut(seq: number, t: number): RecordingEvent {
     source: "shortcut",
     track: "ui",
     type: "shortcut",
-    payload: { keys: ["Cmd", "S"], label: "Save" },
+    payload: { keys: ["Cmd", "S"], label: "Format" },
   };
 }
 

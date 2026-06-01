@@ -61,7 +61,7 @@ describe("createShortcutProducer", () => {
     keydown(window, { key: "g", ctrlKey: true, timeStamp: 2400 });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
-      { keys: ["Cmd", "S"], label: "Save", command: "save" },
+      { keys: ["Cmd", "S"], label: "Format", command: "format" },
       { keys: ["Shift", "Alt", "F"], label: "Format", command: "format" },
       { keys: ["Ctrl", "/"], label: "Comment", command: "comment" },
       { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
@@ -142,7 +142,7 @@ describe("createShortcutProducer", () => {
     keydown(second, { key: "Enter", ctrlKey: true, timeStamp: 1800 });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
-      { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+      { keys: ["Ctrl", "S"], label: "Format", command: "format" },
       { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
     ]);
   });
@@ -158,8 +158,8 @@ describe("createShortcutProducer", () => {
     keydown(window, { key: "s", ctrlKey: true, timeStamp: 1200 });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
-      { keys: ["Ctrl", "S"], label: "Save", command: "save" },
-      { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+      { keys: ["Ctrl", "S"], label: "Format", command: "format" },
+      { keys: ["Ctrl", "S"], label: "Format", command: "format" },
     ]);
   });
 
@@ -179,7 +179,7 @@ describe("createShortcutProducer", () => {
       keydown(rootElement, { key: "s", ctrlKey: true, timeStamp: 600 });
 
       expect(bus.drain().map((event) => event.payload)).toEqual([
-        { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+        { keys: ["Ctrl", "S"], label: "Format", command: "format" },
       ]);
     } finally {
       vi.useRealTimers();
@@ -201,7 +201,7 @@ describe("createShortcutProducer", () => {
     keydown(first, { key: "z", ctrlKey: true, timeStamp: 1200 });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
-      { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+      { keys: ["Ctrl", "S"], label: "Format", command: "format" },
       { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
     ]);
   });
@@ -215,7 +215,7 @@ describe("createShortcutProducer", () => {
     keydown(frameWindow, { key: "s", ctrlKey: true });
 
     expect(bus.drain().map((event) => event.payload)).toEqual([
-      { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+      { keys: ["Ctrl", "S"], label: "Format", command: "format" },
     ]);
   });
 
@@ -239,7 +239,7 @@ describe("createShortcutProducer", () => {
       keydown(first, { key: "z", ctrlKey: true, timeStamp: 1200 });
 
       expect(bus.drain().map((event) => event.payload)).toEqual([
-        { keys: ["Ctrl", "S"], label: "Save", command: "save" },
+        { keys: ["Ctrl", "S"], label: "Format", command: "format" },
         { keys: ["Ctrl", "Enter"], label: "Run", command: "run" },
       ]);
     } finally {

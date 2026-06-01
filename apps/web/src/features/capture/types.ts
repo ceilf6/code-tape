@@ -77,7 +77,7 @@ export type CreatePointerProducer = (deps: PointerProducerDeps) => EventProducer
 export type ShortcutProducerDeps = ProducerCommonDeps & {
   /** Window/element to attach keydown listeners. Defaults to window in tests. */
   getRoot(): Window | HTMLElement | null;
-  /** Map raw event → friendly label + optional command (e.g. "Save", "Format"). */
+  /** Map raw event → friendly label + optional command (e.g. "Format"). */
   resolveLabel?(event: KeyboardEvent): { label: string; command?: string } | null;
 };
 

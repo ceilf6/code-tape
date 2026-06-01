@@ -483,12 +483,14 @@ describe("CodeEditor", () => {
     const editor = monacoMock.editors[0];
 
     const runEvent = pressEditorShortcut(editor, { key: "Enter", ctrlKey: true });
+    pressEditorShortcut(editor, { key: "s", metaKey: true });
     pressEditorShortcut(editor, { key: "f", shiftKey: true, altKey: true });
     pressEditorShortcut(editor, { key: "/", code: "Slash", metaKey: true });
     pressEditorShortcut(editor, { key: "g", metaKey: true });
 
     expect(onCommand).toHaveBeenCalledWith("run");
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+    expect(onCommand).toHaveBeenCalledWith("format");
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.commentLine", null);
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.gotoLine", null);
     expect(runEvent.preventDefault).toHaveBeenCalled();
@@ -517,6 +519,29 @@ describe("CodeEditor", () => {
     });
 
     expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+  });
+
+  it("formats from the primary format shortcut", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const onCommand = vi.fn();
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="function demo(){return 1;}"
+        fontSize={14}
+        theme="dark"
+        onCommand={onCommand}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    const event = pressEditorShortcut(editor, { key: "s", metaKey: true });
+
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+    expect(onCommand).toHaveBeenCalledWith("format");
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
   });
 
   it("uses a JS formatter fallback when Monaco format action leaves the document unchanged", async () => {

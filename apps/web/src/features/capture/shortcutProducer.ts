@@ -130,8 +130,8 @@ export const createShortcutProducer: CreateShortcutProducer = (deps) => {
 };
 
 const KNOWN_SHORTCUTS: Record<string, { label: string; command: string }> = {
-  "Cmd+S": { label: "Save", command: "save" },
-  "Ctrl+S": { label: "Save", command: "save" },
+  "Cmd+S": { label: "Format", command: "format" },
+  "Ctrl+S": { label: "Format", command: "format" },
   "Shift+Alt+F": { label: "Format", command: "format" },
   "Shift+Option+F": { label: "Format", command: "format" },
   "Cmd+/": { label: "Comment", command: "comment" },

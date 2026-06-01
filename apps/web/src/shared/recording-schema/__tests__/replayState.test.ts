@@ -357,6 +357,6 @@ function shortcutEvent(seq: number): RecordingEvent {
     source: "shortcut",
     track: "ui",
     type: "shortcut",
-    payload: { keys: ["Meta", "S"], label: "Save", command: "save" },
+    payload: { keys: ["Meta", "S"], label: "Format", command: "format" },
   };
 }

@@ -12,11 +12,11 @@ test("primary slash comments the current editor line", async ({ page }) => {
   await expect(editorLines(page)).toContainText(/\/\/[\s\u00a0]*const[\s\u00a0]+commented[\s\u00a0]*=[\s\u00a0]*true;/);
 });
 
-test("shift alt f formats the current editor document", async ({ page }) => {
+test("primary s formats the current editor document", async ({ page }) => {
   await openRecorder(page);
 
   await pasteIntoEditor(page, "function demo(){\n\t\treturn 1;\n}");
-  await page.keyboard.press("Shift+Alt+F");
+  await page.keyboard.press(`${PRIMARY_MODIFIER}+S`);
 
   await expect(editorLines(page)).toContainText("function demo() {");
   await expect(editorLines(page)).toContainText("return 1;");
