@@ -351,6 +351,9 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
       const stored = await readRecording(recordingId);
       if (!stored) throw new Error(`recording ${recordingId} not found`);
       const mediaBlob = stored.blobId ? await readBlob(stored.blobId) : null;
+      const thumbnailBlob = stored.thumbnailBlobId
+        ? await readStoredBlob(STORE_THUMBNAILS, stored.thumbnailBlobId)
+        : null;
       return buildRecordingZip(
         {
           schemaVersion: RECORDING_SCHEMA_VERSION,
@@ -362,6 +365,7 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
           indexes: stored.indexes,
         },
         mediaBlob,
+        thumbnailBlob,
       );
     },
 
@@ -396,6 +400,8 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
         const mediaBlob = mediaBuffer
           ? new Blob([mediaBuffer], { type: mediaFromJson?.mimeType ?? "application/octet-stream" })
           : null;
+        const thumbnailEntry = Object.keys(archive.files).find((n) => n.startsWith("thumbnail."));
+        const thumbnailBuffer = thumbnailEntry ? await archive.file(thumbnailEntry)!.async("arraybuffer") : null;
         const media = mediaFromJson ?? (mediaBlob && manifest.checksums.mediaSha256
             ? {
                 blobId: generateId("blob"),
@@ -430,7 +436,16 @@ export function createRecordingStore(options: RecordingStoreOptions = {}): Recor
         }
         const saved = await this.saveDraft({ meta, events, snapshots, indexes, mediaBlob });
         if (!saved.ok) return saved;
-        return this.commit(saved.recordingId);
+        const committed = await this.commit(saved.recordingId);
+        if (!committed.ok) return committed;
+        if (thumbnailBuffer) {
+          const db = await getDb();
+          await persistThumbnail(db, saved.recordingId, generateId("thumbnail"), {
+            dataBase64: arrayBufferToBase64(thumbnailBuffer),
+            mimeType: mimeTypeForArchiveEntry(thumbnailEntry),
+          });
+        }
+        return committed;
       } catch (err) {
         return { ok: false, reason: "unknown", message: (err as Error).message };
       }
@@ -562,6 +577,14 @@ async function prepareThumbnailPayload(
 
 function isVideoBlob(blob: Blob): boolean {
   return blob.type.toLowerCase().startsWith("video/");
+}
+
+function mimeTypeForArchiveEntry(entryName: string | undefined): string {
+  const lower = entryName?.toLowerCase() ?? "";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  return DEFAULT_VIDEO_THUMBNAIL_OPTIONS.mimeType;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

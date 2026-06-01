@@ -504,6 +504,30 @@ describe("createRecordingStore — two-phase commit", () => {
     expect(list[0].id).toBe("rec-export");
   });
 
+  it("exportZip then importZip preserves the stored thumbnail", async () => {
+    replayThumbnailMock.mockResolvedValueOnce(new Blob(["exported-thumbnail"], { type: "image/webp" }));
+    const source = createRecordingStore({ databaseName: uniqueDbName() });
+    const input = makeInput("rec-export-thumbnail");
+    input.mediaBlob = null;
+    await source.saveDraft(input);
+    await source.commit("rec-export-thumbnail");
+    const sourceItem = await waitForListedRecordingWithThumbnail(source, "rec-export-thumbnail");
+    expect(sourceItem?.thumbnailBlobId).toMatch(/^thumbnail-/);
+
+    const zipBlob = await source.exportZip("rec-export-thumbnail");
+    const sink = createRecordingStore({
+      databaseName: uniqueDbName(),
+      replayThumbnailGenerator: null,
+    });
+    const imported = await sink.importZip(zipBlob);
+
+    if (!imported.ok) throw new Error(imported.message);
+    const importedItem = await waitForListedRecordingWithThumbnail(sink, "rec-export-thumbnail");
+    expect(importedItem?.thumbnailBlobId).toBeTruthy();
+    const thumbnail = await sink.loadThumbnail(importedItem!.thumbnailBlobId!);
+    expect(new TextDecoder().decode(await thumbnail!.arrayBuffer())).toBe("exported-thumbnail");
+  });
+
   it("importZip generates a thumbnail for imported video media", async () => {
     const source = createRecordingStore({ databaseName: uniqueDbName() });
     const input = makeInput("rec-import-thumbnail");
