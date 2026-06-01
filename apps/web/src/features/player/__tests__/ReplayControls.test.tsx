@@ -145,7 +145,7 @@ describe("ReplayControls", () => {
   });
 
   it("renders activity density markers on the progress timeline", () => {
-    renderControls({
+    const { container } = renderControls({
       durationMs: 60_000,
       activityDensity: [
         { kind: "edit", startMs: 0, endMs: 10_000, count: 3, eventSeqs: [1, 2, 3] },
@@ -159,6 +159,7 @@ describe("ReplayControls", () => {
     expect(screen.getByLabelText("活动：运行 00:20-00:30")).toBeInTheDocument();
     expect(screen.getByLabelText("活动：错误 00:40-00:50")).toBeInTheDocument();
     expect(screen.getByLabelText("活动：静默 00:50-01:00")).toBeInTheDocument();
+    expect(container.querySelector("[data-replay-activity-markers]")).toHaveClass("bottom-0");
   });
 
   it("renders short full-duration silence markers", () => {
@@ -223,6 +224,8 @@ describe("ReplayControls", () => {
       fireEvent.mouseUp(progressSlider);
 
       expect(onSeek).toHaveBeenCalledWith(60_000);
+      expect(progressSlider).toHaveValue("50");
+      expect(screen.getByText("01:00")).toBeInTheDocument();
 
       await act(async () => {
         resolveSeek();
