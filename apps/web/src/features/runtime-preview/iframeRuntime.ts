@@ -1,3 +1,4 @@
+import DOMPurify, { type Config as DOMPurifyConfig } from "dompurify";
 import type {
   IframeRunInput,
   IframeRunResult,
@@ -27,6 +28,9 @@ const RUNTIME_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
 const REPLAY_PREVIEW_CSP =
   "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';";
+const PREVIEW_SANITIZE_CONFIG = {
+  WHOLE_DOCUMENT: true,
+} satisfies DOMPurifyConfig;
 
 export type RuntimePreviewTheme = "light" | "dark";
 
@@ -142,23 +146,13 @@ function limitString(value: string, maxLength: number): string {
 function sanitizePreviewHtml(previewHtml: string): SanitizedPreviewHtml {
   const cappedPreviewHtml = limitString(previewHtml, RUNTIME_PREVIEW_HTML_MAX_CHARS);
   if (typeof DOMParser === "undefined") {
-    return sanitizePreviewHtmlWithoutParser(cappedPreviewHtml);
+    throw new Error("IframeRuntime: DOMParser is required to sanitize preview HTML");
   }
-  const doc = new DOMParser().parseFromString(cappedPreviewHtml, "text/html");
-  doc.querySelectorAll("script").forEach((script) => script.remove());
+  const sanitizedHtml = DOMPurify.sanitize(cappedPreviewHtml, PREVIEW_SANITIZE_CONFIG);
+  const doc = new DOMParser().parseFromString(sanitizedHtml, "text/html");
   return {
-    headHtml: doc.head?.innerHTML ?? "",
-    bodyHtml: doc.body?.outerHTML ?? "<body></body>",
-  };
-}
-
-function sanitizePreviewHtmlWithoutParser(previewHtml: string): SanitizedPreviewHtml {
-  const withoutScripts = previewHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  const headMatch = withoutScripts.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
-  const bodyMatch = withoutScripts.match(/<body\b([^>]*)>([\s\S]*?)<\/body>/i);
-  return {
-    headHtml: headMatch?.[1] ?? "",
-    bodyHtml: bodyMatch ? `<body${bodyMatch[1]}>${bodyMatch[2]}</body>` : `<body>${withoutScripts}</body>`,
+    headHtml: limitString(doc.head?.innerHTML ?? "", RUNTIME_PREVIEW_HTML_MAX_CHARS),
+    bodyHtml: limitString(doc.body?.outerHTML ?? "<body></body>", RUNTIME_PREVIEW_HTML_MAX_CHARS),
   };
 }
 

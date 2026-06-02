@@ -404,6 +404,36 @@ describe("IframeRuntime sandbox lifecycle", () => {
     host.remove();
   });
 
+  it("removes inline event handlers from replay preview HTML", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.renderPreview('<body><button onclick="window.__clicked = true">Click</button></body>');
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain("<button>Click</button>");
+    expect(frame?.srcdoc).not.toMatch(/onclick/i);
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("removes javascript URLs from replay preview HTML", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    await runtime.renderPreview('<body><a href="javascript:alert(1)">link</a></body>');
+    const frame = host.querySelector("iframe");
+
+    expect(frame?.srcdoc).toContain(">link</a>");
+    expect(frame?.srcdoc).not.toMatch(/javascript:/i);
+    runtime.destroy();
+    host.remove();
+  });
+
   it("preserves non-script head content when sanitizing replay preview HTML", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -442,6 +472,23 @@ describe("IframeRuntime sandbox lifecycle", () => {
     expect(returned).toContain("<h1>hello</h1>");
     expect(returned).not.toMatch(/<script/i);
     expect(returned).not.toContain("window.x=1");
+    runtime.destroy();
+    host.remove();
+  });
+
+  it("returns persisted renderDocument markup without active HTML handlers or javascript URLs", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const runtime = createIframeRuntime();
+
+    await runtime.mount(host);
+    const returned = await runtime.renderDocument(
+      '<body><h1 onclick="window.__x = 1">hello</h1><a href="javascript:alert(1)">link</a></body>',
+    );
+
+    expect(returned).toContain("<h1>hello</h1>");
+    expect(returned).toContain(">link</a>");
+    expect(returned).not.toMatch(/onclick|javascript:/i);
     runtime.destroy();
     host.remove();
   });
