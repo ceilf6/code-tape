@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-01T10:21:25Z",
+  "updatedAt": "2026-06-02T02:26:59Z",
   "students": {
     "ceilf6": {
       "activeIssue": [
         202,
         239,
         247,
-        269
+        269,
+        292
       ],
       "completedIssues": [
         11,
@@ -1587,6 +1588,19 @@
       "claimedAt": "2026-06-01T09:55:10Z",
       "closedAt": "2026-06-01T10:21:25Z",
       "mergedPr": 284
+    },
+    "292": {
+      "number": 292,
+      "title": "[安全] 使用 DOMPurify 强化静态预览 HTML 清洗",
+      "score": 2,
+      "stack": [
+        "typescript"
+      ],
+      "status": "claimed",
+      "assignee": "ceilf6",
+      "claimedAt": "2026-06-02T02:26:59Z",
+      "closedAt": null,
+      "mergedPr": null
     }
   },
   "ledger": [
