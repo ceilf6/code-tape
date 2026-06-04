@@ -404,15 +404,25 @@ function registerNativeFormatShortcut(
   onBeforeFormatApply: () => (() => void) | void,
 ): () => void {
   const listener = (event: KeyboardEvent) => {
-    if (event.isComposing || event.repeat || !isNativePrimaryShortcut(event, "s")) return;
+    const target = event.target;
+    if (
+      event.isComposing
+      || event.repeat
+      || !isNodeTarget(target)
+      || !host.contains(target)
+      || !isNativePrimaryShortcut(event, "s")
+    ) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     if (isReadOnly()) return;
     void formatEditorDocument(editor, isReadOnly, onBeforeFormatApply);
     onCommand("format");
   };
-  host.addEventListener("keydown", listener, { capture: true });
-  return () => host.removeEventListener("keydown", listener, { capture: true });
+  const document = host.ownerDocument;
+  document.addEventListener("keydown", listener, { capture: true });
+  return () => document.removeEventListener("keydown", listener, { capture: true });
 }
 
 async function formatEditorDocument(
@@ -546,6 +556,10 @@ function matchesNativeKey(event: KeyboardEvent, key: string): boolean {
   const expected = key.toLowerCase();
   const expectedCode = `key${expected}`;
   return event.key.toLowerCase() === expected || event.code.toLowerCase() === expectedCode;
+}
+
+function isNodeTarget(target: EventTarget | null): target is Node {
+  return Boolean(target && typeof (target as Node).nodeType === "number");
 }
 
 function consumeShortcut(event: Monaco.IKeyboardEvent) {
