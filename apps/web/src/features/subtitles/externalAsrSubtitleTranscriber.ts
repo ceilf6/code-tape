@@ -48,7 +48,7 @@ export function createExternalAsrSubtitleTranscriber(
       const body = new FormData();
       body.append("file", uploadBlob, buildAudioFileName(uploadBlob));
       body.append("model", config.model);
-      body.append("response_format", "verbose_json");
+      body.append("response_format", resolveExternalAsrResponseFormat(config.model));
       if (config.language.trim()) body.append("language", config.language.trim());
 
       let response: Response;
@@ -183,6 +183,14 @@ function buildAudioFileName(blob: Blob): string {
   if (blob.type.includes("mpeg") || blob.type.includes("mp3")) return "recording.mp3";
   if (blob.type.includes("wav")) return "recording.wav";
   return "recording.webm";
+}
+
+function resolveExternalAsrResponseFormat(model: string): "json" | "verbose_json" {
+  const normalizedModel = model.trim().toLowerCase();
+  if (normalizedModel.includes("gpt-4o") && normalizedModel.includes("transcribe")) {
+    return "json";
+  }
+  return "verbose_json";
 }
 
 function isWebmBlob(blob: Blob): boolean {

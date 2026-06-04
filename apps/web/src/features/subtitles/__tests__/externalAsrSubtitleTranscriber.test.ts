@@ -58,6 +58,23 @@ describe("createExternalAsrSubtitleTranscriber", () => {
     expect(body.get("file")).toBeInstanceOf(File);
     expect(body.get("model")).toBe("gpt-4o-mini-transcribe");
     expect(body.get("language")).toBe("zh");
+    expect(body.get("response_format")).toBe("json");
+  });
+
+  it("keeps verbose JSON for Whisper-compatible ASR models", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => Response.json({ text: "plain transcript" }));
+    const transcriber = createExternalAsrSubtitleTranscriber({
+      config: { ...config, model: "whisper-1" },
+      fetchImpl,
+      prepareUploadBlob: async (blob) => blob,
+    });
+
+    await transcriber.transcribe({
+      mediaBlob: new Blob(["webm"], { type: "video/webm" }),
+      durationMs: 1_000,
+    });
+
+    const body = vi.mocked(fetchImpl).mock.calls[0]?.[1]?.body as FormData;
     expect(body.get("response_format")).toBe("verbose_json");
   });
 
