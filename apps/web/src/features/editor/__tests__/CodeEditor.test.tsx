@@ -191,6 +191,9 @@ const prettierMock = vi.hoisted(() => ({
     if (source === "function demo(){\n\t\treturn 1;\n}" && options.parser === "babel") {
       return "function demo() {\n  return 1;\n}\n";
     }
+    if (source === "function demo(){\n  return 1;\n  }" && options.parser === "babel") {
+      return "function demo() {\n  return 1;\n}\n";
+    }
     if (source === "const value:number=1;" && options.parser === "typescript") {
       return "const value: number = 1;\n";
     }
@@ -608,6 +611,37 @@ describe("CodeEditor", () => {
     expect(editor.pushUndoStop).toHaveBeenCalledTimes(2);
     expect(prettierMock.format).toHaveBeenCalledWith(
       "function demo(){\n\t\treturn 1;\n}",
+      expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
+    );
+  });
+
+  it("uses a JS formatter fallback when Monaco only partially formats the document", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue={"function demo(){\n\t\treturn 1;\n}"}
+        fontSize={14}
+        theme="dark"
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+    editor.getAction.mockReturnValueOnce({
+      run: vi.fn(async () => {
+        editor.executeEdits("monaco-format", [
+          {
+            text: "function demo(){\n  return 1;\n  }",
+          },
+        ]);
+      }),
+    });
+
+    pressEditorShortcut(editor, { key: "s", metaKey: true });
+
+    await waitFor(() => expect(editor.getValue()).toBe("function demo() {\n  return 1;\n}\n"));
+    expect(prettierMock.format).toHaveBeenCalledWith(
+      "function demo(){\n  return 1;\n  }",
       expect.objectContaining({ parser: "babel", tabWidth: 2, useTabs: false }),
     );
   });

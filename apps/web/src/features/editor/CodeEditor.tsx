@@ -430,7 +430,6 @@ async function formatEditorDocument(
   isReadOnly: () => boolean,
   onBeforeFormatApply: () => (() => void) | void,
 ) {
-  const originalValue = editor.getValue();
   const action = typeof editor.getAction === "function" ? editor.getAction(FORMAT_ACTION_ID) : null;
 
   try {
@@ -443,22 +442,23 @@ async function formatEditorDocument(
     console.warn("Monaco format action failed", error);
   }
 
-  if (isReadOnly() || editor.getValue() !== originalValue) return;
+  if (isReadOnly()) return;
 
   const model = editor.getModel();
   if (!model) return;
   const language = model.getLanguageId() as RecordingLanguage | undefined;
   if (!language || !isPrettierSupportedLanguage(language)) return;
+  const valueAfterMonacoFormat = editor.getValue();
 
   try {
     const formatter = await loadPrettierFormatter();
-    const formatted = await formatter.format(originalValue, language);
+    const formatted = await formatter.format(valueAfterMonacoFormat, language);
     const currentModel = editor.getModel();
     if (
       !formatted ||
-      formatted === originalValue ||
+      formatted === valueAfterMonacoFormat ||
       isReadOnly() ||
-      editor.getValue() !== originalValue ||
+      editor.getValue() !== valueAfterMonacoFormat ||
       currentModel !== model ||
       currentModel.getLanguageId() !== language
     ) {
