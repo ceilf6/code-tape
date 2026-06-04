@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createExternalAsrSubtitleTranscriber } from "../externalAsrSubtitleTranscriber";
+import {
+  createExternalAsrSubtitleTranscriber,
+  prepareExternalAsrUploadBlob,
+} from "../externalAsrSubtitleTranscriber";
 import type { ExternalAsrConfig } from "../subtitleAsrConfig";
 
 const config: ExternalAsrConfig = {
@@ -12,6 +15,7 @@ const config: ExternalAsrConfig = {
 
 describe("createExternalAsrSubtitleTranscriber", () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -26,7 +30,11 @@ describe("createExternalAsrSubtitleTranscriber", () => {
       }),
     );
     const mediaBlob = new Blob(["webm"], { type: "video/webm" });
-    const transcriber = createExternalAsrSubtitleTranscriber({ config, fetchImpl });
+    const transcriber = createExternalAsrSubtitleTranscriber({
+      config,
+      fetchImpl,
+      prepareUploadBlob: async (blob) => blob,
+    });
 
     await expect(transcriber.transcribe({ mediaBlob, durationMs: 4_000 })).resolves.toEqual({
       model: "gpt-4o-mini-transcribe",
@@ -58,6 +66,7 @@ describe("createExternalAsrSubtitleTranscriber", () => {
     const transcriber = createExternalAsrSubtitleTranscriber({
       config: { ...config, language: "" },
       fetchImpl,
+      prepareUploadBlob: async (blob) => blob,
     });
 
     await expect(
@@ -78,7 +87,11 @@ describe("createExternalAsrSubtitleTranscriber", () => {
     const fetchImpl: typeof fetch = vi.fn(
       async () => new Response("secret echo", { status: 401, statusText: "Unauthorized" }),
     );
-    const transcriber = createExternalAsrSubtitleTranscriber({ config, fetchImpl });
+    const transcriber = createExternalAsrSubtitleTranscriber({
+      config,
+      fetchImpl,
+      prepareUploadBlob: async (blob) => blob,
+    });
 
     await expect(
       transcriber.transcribe({
@@ -101,6 +114,7 @@ describe("createExternalAsrSubtitleTranscriber", () => {
     const transcriber = createExternalAsrSubtitleTranscriber({
       config,
       fetchImpl,
+      prepareUploadBlob: async (blob) => blob,
       requestTimeoutMs: 1_000,
     });
 
@@ -112,5 +126,63 @@ describe("createExternalAsrSubtitleTranscriber", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     await assertion;
+  });
+
+  it("uploads a prepared WAV blob when the recording is WebM", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => Response.json({ text: "wav transcript" }));
+    const wavBlob = new Blob(["wav"], { type: "audio/wav" });
+    const prepareUploadBlob = vi.fn(async () => wavBlob);
+    const transcriber = createExternalAsrSubtitleTranscriber({
+      config,
+      fetchImpl,
+      prepareUploadBlob,
+    });
+    const mediaBlob = new Blob(["webm"], { type: "video/webm" });
+
+    await transcriber.transcribe({ mediaBlob, durationMs: 1_000 });
+
+    expect(prepareUploadBlob).toHaveBeenCalledWith(mediaBlob, undefined);
+    const body = vi.mocked(fetchImpl).mock.calls[0]?.[1]?.body as FormData;
+    const file = body.get("file");
+    expect(file).toBeInstanceOf(File);
+    expect((file as File).name).toBe("recording.wav");
+    expect((file as File).type).toBe("audio/wav");
+  });
+});
+
+describe("prepareExternalAsrUploadBlob", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("transcodes WebM recordings to WAV before external upload", async () => {
+    class FakeAudioContext {
+      async decodeAudioData() {
+        return {
+          length: 2,
+          numberOfChannels: 1,
+          sampleRate: 48_000,
+          getChannelData: () => new Float32Array([0, 0.5]),
+        };
+      }
+
+      async close() {
+        return undefined;
+      }
+    }
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    const wavBlob = await prepareExternalAsrUploadBlob(
+      new Blob(["webm"], { type: "video/webm" }),
+    );
+
+    expect(wavBlob.type).toBe("audio/wav");
+    expect(wavBlob.size).toBe(48);
+  });
+
+  it("keeps non-WebM audio untouched", async () => {
+    const mp3Blob = new Blob(["mp3"], { type: "audio/mpeg" });
+
+    await expect(prepareExternalAsrUploadBlob(mp3Blob)).resolves.toBe(mp3Blob);
   });
 });

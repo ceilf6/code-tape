@@ -58,6 +58,7 @@ async function flushPromises() {
 const GENERATE_SUBTITLES_LABEL = "生成字幕";
 const GENERATE_AND_OPTIMIZE_LABEL = "生成字幕并优化";
 const OPTIMIZE_SUBTITLES_LABEL = "优化字幕和章节";
+const UPSTREAM_PROVIDER_ERROR = "上游模型供应商错误，请稍后重试或检查模型供应商配置。";
 
 describe("SubtitlePanel", () => {
   afterEach(() => {
@@ -400,9 +401,7 @@ describe("SubtitlePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
     await waitFor(() => expect(screen.getByText("use state hook")).toBeInTheDocument());
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"),
-    );
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
     expect(screen.getByText("use state hook")).toBeInTheDocument();
 
     const retryButton = screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL });
@@ -459,9 +458,7 @@ describe("SubtitlePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: GENERATE_AND_OPTIMIZE_LABEL }));
 
     await waitFor(() => expect(screen.getByText("new ASR subtitle")).toBeInTheDocument());
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("LLM JSON parse failed"),
-    );
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
     expect(screen.queryByRole("button", { name: /旧章节/ })).not.toBeInTheDocument();
     await expect(store.loadChapters("recording-1")).resolves.toEqual([]);
     await expect(store.load("recording-1")).resolves.toEqual(
@@ -583,7 +580,7 @@ describe("SubtitlePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("atomic write failed"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
     expect(screen.getByText("use state hook")).toBeInTheDocument();
     await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
     expect(store.saveWithChapters).toHaveBeenCalled();
@@ -638,11 +635,7 @@ describe("SubtitlePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: OPTIMIZE_SUBTITLES_LABEL }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "correction references unknown segment: missing-subtitle",
-      ),
-    );
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
     expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
     await expect(store.load("recording-1")).resolves.toEqual(originalTrack);
     await expect(store.loadChapters("recording-1")).resolves.toEqual(existingChapters);
@@ -724,7 +717,7 @@ describe("SubtitlePanel", () => {
       vi.useRealTimers();
     }
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("字幕纠错超时"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
     expect(processSignal?.aborted).toBe(true);
     expect(screen.getByText("use state hook")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /已有章节/ })).toBeInTheDocument();
@@ -844,7 +837,7 @@ describe("SubtitlePanel", () => {
 
     fireEvent.click(generateButton);
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("model unavailable"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(UPSTREAM_PROVIDER_ERROR));
   });
 
   it("keeps generation disabled until saved subtitles finish loading", async () => {

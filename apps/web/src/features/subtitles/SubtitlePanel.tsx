@@ -6,8 +6,6 @@ import { SubtitleLlmConfigButton } from "./SubtitleLlmConfigButton";
 import { applySubtitleCorrection } from "./subtitleCorrection";
 import { createExternalAsrSubtitleTranscriber } from "./externalAsrSubtitleTranscriber";
 import { createExternalLlmSubtitlePostProcessor } from "./externalLlmSubtitlePostProcessor";
-import { createFallbackSubtitlePostProcessor } from "./fallbackSubtitlePostProcessor";
-import { createFallbackSubtitleTranscriber } from "./fallbackSubtitleTranscriber";
 import { resolveEffectivePostProcessTimeoutMs } from "./subtitlePostProcessTimeout";
 import { isExternalLlmConfigured, loadExternalLlmConfig } from "./subtitleLlmConfig";
 import { isExternalAsrConfigured, loadExternalAsrConfig } from "./subtitleAsrConfig";
@@ -74,14 +72,11 @@ export function SubtitlePanel({
   const [asrConfigVersion, setAsrConfigVersion] = useState(0);
   const transcriber = useMemo(() => {
     if (injectedTranscriber) return injectedTranscriber;
-    const localTranscriber = createHuggingFaceSubtitleTranscriber();
     const externalConfig = loadExternalAsrConfig();
-    if (!isExternalAsrConfigured(externalConfig)) return localTranscriber;
-    const externalTranscriber = createExternalAsrSubtitleTranscriber({ config: externalConfig });
-    return createFallbackSubtitleTranscriber(externalTranscriber, localTranscriber, {
-      onFallback: () =>
-        console.warn("[code-tape] external subtitle ASR failed; falling back to local model"),
-    });
+    if (isExternalAsrConfigured(externalConfig)) {
+      return createExternalAsrSubtitleTranscriber({ config: externalConfig });
+    }
+    return createHuggingFaceSubtitleTranscriber();
     // asrConfigVersion bumps when the user saves/clears the external ASR config.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [injectedTranscriber, asrConfigVersion]);
@@ -95,18 +90,13 @@ export function SubtitlePanel({
   const postProcessor = useMemo(
     () => {
       if (injectedPostProcessor !== undefined) return injectedPostProcessor;
-      const localProcessor = createWorkerBackedHuggingFaceSubtitlePostProcessor({
+      const externalConfig = loadExternalLlmConfig();
+      if (isExternalLlmConfigured(externalConfig)) {
+        return createExternalLlmSubtitlePostProcessor({ config: externalConfig });
+      }
+      return createWorkerBackedHuggingFaceSubtitlePostProcessor({
         model: resolveSubtitlePostProcessorModel(),
         onMetric: logSubtitlePostProcessorMetric,
-      });
-      const externalConfig = loadExternalLlmConfig();
-      if (!isExternalLlmConfigured(externalConfig)) return localProcessor;
-      const externalProcessor = createExternalLlmSubtitlePostProcessor({ config: externalConfig });
-      return createFallbackSubtitlePostProcessor(externalProcessor, localProcessor, {
-        // Log only a sanitized category — never the raw error/response, which
-        // could echo the API key or subtitle/code context from a misconfigured endpoint.
-        onFallback: () =>
-          console.warn("[code-tape] external subtitle LLM failed; falling back to local model"),
       });
     },
     // llmConfigVersion bumps when the user saves/clears the external LLM config,
@@ -450,7 +440,7 @@ export function SubtitlePanel({
       ) : null}
       {warnings.length > 0 ? (
         <p role="alert" className="mb-2 text-xs text-warning">
-          {warnings[0]?.message}
+          {formatSubtitleWarning(warnings[0])}
         </p>
       ) : null}
       {statusMessage ? <p className="mb-2 text-xs text-muted">{statusMessage}</p> : null}
@@ -526,7 +516,13 @@ function formatSubtitleTime(ms: number): string {
 }
 
 function formatSubtitleError(error: unknown): string {
-  return error instanceof Error ? error.message : "字幕生成失败";
+  void error;
+  return "上游模型供应商错误，请稍后重试或检查模型供应商配置。";
+}
+
+function formatSubtitleWarning(warning: SubtitleCorrectionWarning | undefined): string {
+  void warning;
+  return "上游模型供应商错误，请稍后重试或检查模型供应商配置。";
 }
 
 function formatAsrStatusMessage(
@@ -541,7 +537,7 @@ function formatAsrStatusMessage(
     return "正在生成字幕...";
   }
   if (asrStatus === "warming") return "正在加载本地 ASR 模型...";
-  if (asrStatus === "warm-error") return "本地 ASR 模型预热失败，点击生成时会重试。";
+  if (asrStatus === "warm-error") return "上游模型供应商暂时不可用，点击生成时会重试。";
   return null;
 }
 

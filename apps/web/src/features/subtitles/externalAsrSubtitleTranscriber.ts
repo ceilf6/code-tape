@@ -27,6 +27,7 @@ type ExternalAsrSegment = {
 export type ExternalAsrSubtitleTranscriberOptions = {
   config: ExternalAsrConfig;
   fetchImpl?: typeof fetch;
+  prepareUploadBlob?: (mediaBlob: Blob, signal?: AbortSignal) => Promise<Blob>;
   requestTimeoutMs?: number;
 };
 
@@ -35,14 +36,17 @@ export function createExternalAsrSubtitleTranscriber(
 ): SubtitleTranscriber {
   const { config } = options;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const prepareUploadBlob = options.prepareUploadBlob ?? prepareExternalAsrUploadBlob;
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_EXTERNAL_ASR_REQUEST_TIMEOUT_MS;
 
   return {
     async transcribe({ mediaBlob, durationMs, signal, onStatus }): Promise<SubtitleTrackDraft> {
       if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       onStatus?.("requesting-external-asr");
+      const uploadBlob = await prepareUploadBlob(mediaBlob, signal);
+      if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
       const body = new FormData();
-      body.append("file", mediaBlob, buildAudioFileName(mediaBlob));
+      body.append("file", uploadBlob, buildAudioFileName(uploadBlob));
       body.append("model", config.model);
       body.append("response_format", "verbose_json");
       if (config.language.trim()) body.append("language", config.language.trim());
@@ -84,6 +88,22 @@ export function createExternalAsrSubtitleTranscriber(
       };
     },
   };
+}
+
+export async function prepareExternalAsrUploadBlob(
+  mediaBlob: Blob,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  if (!isWebmBlob(mediaBlob)) return mediaBlob;
+  if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+  try {
+    return await transcodeWebmToWav(mediaBlob, signal);
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new Error(
+      `上传外部 ASR 前转换 WebM 音频失败：${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 type ExternalAsrAttempt = {
@@ -163,6 +183,73 @@ function buildAudioFileName(blob: Blob): string {
   if (blob.type.includes("mpeg") || blob.type.includes("mp3")) return "recording.mp3";
   if (blob.type.includes("wav")) return "recording.wav";
   return "recording.webm";
+}
+
+function isWebmBlob(blob: Blob): boolean {
+  return blob.type.toLowerCase().includes("webm");
+}
+
+async function transcodeWebmToWav(mediaBlob: Blob, signal?: AbortSignal): Promise<Blob> {
+  const AudioContextCtor = getAudioContextConstructor();
+  if (!AudioContextCtor) throw new Error("当前浏览器不支持 Web Audio 解码");
+  const audioContext = new AudioContextCtor();
+  try {
+    const buffer = await mediaBlob.arrayBuffer();
+    if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+    const audioBuffer = await audioContext.decodeAudioData(buffer.slice(0));
+    if (signal?.aborted) throw new DOMException("字幕生成已取消", "AbortError");
+    return audioBufferToWavBlob(audioBuffer);
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
+
+function getAudioContextConstructor(): typeof AudioContext | null {
+  const maybeGlobal = globalThis as typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
+  return maybeGlobal.AudioContext ?? maybeGlobal.webkitAudioContext ?? null;
+}
+
+function audioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
+  const channelCount = audioBuffer.numberOfChannels;
+  const frameCount = audioBuffer.length;
+  const bytesPerSample = 2;
+  const dataSize = frameCount * channelCount * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, audioBuffer.sampleRate, true);
+  view.setUint32(28, audioBuffer.sampleRate * channelCount * bytesPerSample, true);
+  view.setUint16(32, channelCount * bytesPerSample, true);
+  view.setUint16(34, bytesPerSample * 8, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  const channels = Array.from({ length: channelCount }, (_value, channel) =>
+    audioBuffer.getChannelData(channel),
+  );
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const sample = Math.max(-1, Math.min(1, channels[channel]?.[frame] ?? 0));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function writeAscii(view: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
 }
 
 function joinUrl(baseURL: string, path: string): string {
