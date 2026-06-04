@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeEditorHandle } from "../CodeEditor";
@@ -542,6 +542,32 @@ describe("CodeEditor", () => {
     expect(onCommand).toHaveBeenCalledWith("format");
     expect(event.preventDefault).toHaveBeenCalled();
     expect(event.stopPropagation).toHaveBeenCalled();
+  });
+
+  it("captures primary format before the browser save-page shortcut", async () => {
+    const { CodeEditor } = await import("../CodeEditor");
+    const onCommand = vi.fn();
+    render(
+      <CodeEditor
+        language="javascript"
+        initialValue="function demo(){return 1;}"
+        fontSize={14}
+        theme="dark"
+        onCommand={onCommand}
+      />,
+    );
+    await waitFor(() => expect(monacoMock.editor.create).toHaveBeenCalledTimes(1));
+    const editor = monacoMock.editors[0];
+
+    const wasNotCancelled = fireEvent.keyDown(screen.getByLabelText("Code editor"), {
+      key: "s",
+      code: "KeyS",
+      metaKey: true,
+    });
+
+    expect(wasNotCancelled).toBe(false);
+    expect(editor.trigger).toHaveBeenCalledWith("keyboard", "editor.action.formatDocument", null);
+    expect(onCommand).toHaveBeenCalledWith("format");
   });
 
   it("uses a JS formatter fallback when Monaco format action leaves the document unchanged", async () => {

@@ -226,6 +226,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
 
   useEffect(() => {
     let cancelled = false;
+    let nativeFormatShortcutCleanup: (() => void) | null = null;
     const host = hostRef.current;
     if (!host) return undefined;
 
@@ -259,6 +260,13 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
           (command) => onCommandRef.current?.(command),
           () => onBeforeFormatApplyRef.current?.(),
         );
+        nativeFormatShortcutCleanup = registerNativeFormatShortcut(
+          host,
+          editor,
+          () => latestPropsRef.current.readOnly,
+          (command) => onCommandRef.current?.(command),
+          () => onBeforeFormatApplyRef.current?.(),
+        );
         applyControlledEditorState(editor, currentProps);
         pulseCollapsedSelection(editor, currentProps.selection, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
         onMountRef.current?.(editor);
@@ -275,6 +283,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function
       cancelled = true;
       const editor = editorRef.current;
       const model = modelRef.current;
+      nativeFormatShortcutCleanup?.();
       clearCollapsedSelectionPulse(editor, collapsedSelectionDecorationIdsRef, collapsedSelectionTimerRef);
       editorRef.current = null;
       modelRef.current = null;
@@ -387,6 +396,25 @@ function registerEditorCommands(
   });
 }
 
+function registerNativeFormatShortcut(
+  host: HTMLElement,
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  isReadOnly: () => boolean,
+  onCommand: (command: CodeEditorCommand) => void,
+  onBeforeFormatApply: () => (() => void) | void,
+): () => void {
+  const listener = (event: KeyboardEvent) => {
+    if (event.isComposing || event.repeat || !isNativePrimaryShortcut(event, "s")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (isReadOnly()) return;
+    void formatEditorDocument(editor, isReadOnly, onBeforeFormatApply);
+    onCommand("format");
+  };
+  host.addEventListener("keydown", listener, { capture: true });
+  return () => host.removeEventListener("keydown", listener, { capture: true });
+}
+
 async function formatEditorDocument(
   editor: Monaco.editor.IStandaloneCodeEditor,
   isReadOnly: () => boolean,
@@ -492,6 +520,10 @@ function isPrimaryShortcut(event: Monaco.IKeyboardEvent, key: string): boolean {
   return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && matchesKey(event, key);
 }
 
+function isNativePrimaryShortcut(event: KeyboardEvent, key: string): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && matchesNativeKey(event, key);
+}
+
 function isFormatShortcut(event: Monaco.IKeyboardEvent): boolean {
   return (
     isPrimaryShortcut(event, "s")
@@ -508,6 +540,12 @@ function matchesKey(event: Monaco.IKeyboardEvent, key: string): boolean {
     || event.code.toLowerCase() === expectedCode
     || event.browserEvent.code.toLowerCase() === expectedCode
   );
+}
+
+function matchesNativeKey(event: KeyboardEvent, key: string): boolean {
+  const expected = key.toLowerCase();
+  const expectedCode = `key${expected}`;
+  return event.key.toLowerCase() === expected || event.code.toLowerCase() === expectedCode;
 }
 
 function consumeShortcut(event: Monaco.IKeyboardEvent) {
